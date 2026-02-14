@@ -1,0 +1,17 @@
+{
+  "name": "@openclaw-plugins/graphiti",
+  "version": "0.1.0",
+  "description": "Graphiti temporal knowledge graph plugin for OpenClaw",
+  "type": "module",
+  "main": "index.ts",
+  "author": "Roberto Gongora",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RobertoGongora/openclaw-graphiti-plugin"
+  },
+  "keywords": ["openclaw", "plugin", "graphiti", "knowledge-graph", "memory"],
+  "engines": {
+    "node": ">=20"
+  }
+}

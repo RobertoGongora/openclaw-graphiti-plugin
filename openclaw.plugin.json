@@ -1,0 +1,48 @@
+{
+  "id": "graphiti",
+  "name": "Graphiti Knowledge Graph",
+  "description": "Temporal knowledge graph for persistent agent memory. Auto-recalls relevant facts before each conversation and captures knowledge after.",
+  "kind": "memory",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "url": {
+        "type": "string",
+        "default": "http://localhost:8100",
+        "description": "Graphiti server URL"
+      },
+      "groupId": {
+        "type": "string",
+        "default": "shiba-core",
+        "description": "Graph group ID for namespacing"
+      },
+      "autoRecall": {
+        "type": "boolean",
+        "default": true,
+        "description": "Inject relevant facts before each conversation turn"
+      },
+      "autoCapture": {
+        "type": "boolean",
+        "default": true,
+        "description": "Ingest conversation turns after each exchange"
+      },
+      "recallMaxFacts": {
+        "type": "number",
+        "default": 10,
+        "description": "Max facts to inject on auto-recall"
+      },
+      "captureRoles": {
+        "type": "array",
+        "items": { "type": "string" },
+        "default": ["user", "assistant"],
+        "description": "Message roles to capture"
+      },
+      "minPromptLength": {
+        "type": "number",
+        "default": 10,
+        "description": "Minimum prompt length to trigger auto-recall"
+      }
+    }
+  }
+}
