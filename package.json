@@ -10,8 +10,17 @@
     "type": "git",
     "url": "https://github.com/RobertoGongora/openclaw-graphiti-plugin"
   },
-  "keywords": ["openclaw", "plugin", "graphiti", "knowledge-graph", "memory"],
+  "keywords": [
+    "openclaw",
+    "plugin",
+    "graphiti",
+    "knowledge-graph",
+    "memory"
+  ],
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.48"
   }
 }

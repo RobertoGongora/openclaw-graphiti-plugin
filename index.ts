@@ -17,6 +17,7 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { Type } from "@sinclair/typebox";
 import { GraphitiClient } from "./client.js";
+import { appendFileSync } from "node:fs";
 
 interface PluginConfig {
   url?: string;
@@ -47,6 +48,42 @@ const graphitiPlugin = {
     const client = new GraphitiClient(url, groupId, api.logger);
 
     api.logger.info(`graphiti: plugin registered (url: ${url}, group: ${groupId})`);
+
+    // Debug: log registration to file
+    try {
+      appendFileSync("/tmp/graphiti-hook-debug.log",
+        `[${new Date().toISOString()}] PLUGIN REGISTER called | url: ${url} | group: ${groupId}\n`
+      );
+    } catch {}
+
+    // Debug: check what api exposes
+    try {
+      const apiKeys = Object.keys(api).join(", ");
+      appendFileSync("/tmp/graphiti-hook-debug.log",
+        `[${new Date().toISOString()}] API KEYS: ${apiKeys}\n`
+      );
+      // Try to find if there's an internal way to verify registration
+      appendFileSync("/tmp/graphiti-hook-debug.log",
+        `[${new Date().toISOString()}] api.on type: ${typeof (api as any).on}\n`
+      );
+    } catch {}
+
+    // Debug: try registerHook (old API) with name option
+    try {
+      (api as any).registerHook(["before_agent_start"], async (event: any) => {
+        appendFileSync("/tmp/graphiti-hook-debug.log",
+          `[${new Date().toISOString()}] OLD API before_agent_start FIRED\n`
+        );
+      }, { name: "graphiti-recall-test" });
+      appendFileSync("/tmp/graphiti-hook-debug.log",
+        `[${new Date().toISOString()}] registerHook (old API) call succeeded\n`
+      );
+    } catch (e) {
+      appendFileSync("/tmp/graphiti-hook-debug.log",
+        `[${new Date().toISOString()}] registerHook (old API) ERROR: ${String(e)}\n`
+      );
+    }
+
 
     // ========================================================================
     // Tools
@@ -178,7 +215,14 @@ const graphitiPlugin = {
 
     // Auto-recall: inject relevant facts before agent starts
     if (autoRecall) {
-      api.on("before_agent_start", async (event) => {
+      api.logger.info("graphiti: registering before_agent_start hook");
+      api.on("before_agent_start", async (event: any) => {
+        // Debug: write to file so we can verify the hook fires
+        
+        appendFileSync("/tmp/graphiti-hook-debug.log",
+          `[${new Date().toISOString()}] before_agent_start fired | prompt: ${event.prompt?.slice(0, 100) ?? "NONE"} | keys: ${Object.keys(event).join(",")}\n`
+        );
+        api.logger.info?.(`graphiti: before_agent_start fired, prompt length: ${event.prompt?.length ?? 0}`);
         if (!event.prompt || event.prompt.length < minPromptLength) {
           return;
         }
@@ -226,7 +270,15 @@ const graphitiPlugin = {
 
     // Auto-capture: ingest conversation after agent ends
     if (autoCapture) {
-      api.on("agent_end", async (event) => {
+      api.logger.info("graphiti: registering agent_end hook");
+      api.on("agent_end", async (event: any) => {
+        
+        appendFileSync("/tmp/graphiti-hook-debug.log",
+          `[${new Date().toISOString()}] agent_end fired | success: ${event.success} | messages: ${event.messages?.length ?? 0}\n`
+        );
+        // Debug: log filtering decisions
+        const _dbgLog = (msg: string) => { try { appendFileSync("/tmp/graphiti-hook-debug.log", `[${new Date().toISOString()}] agent_end: ${msg}\n`); } catch {} };
+        api.logger.info?.(`graphiti: agent_end fired, success: ${event.success}, messages: ${event.messages?.length ?? 0}`);
         if (!event.success || !event.messages || event.messages.length === 0) {
           return;
         }
@@ -265,18 +317,24 @@ const graphitiPlugin = {
             }
           }
 
-          if (texts.length === 0) return;
+          if (texts.length === 0) { _dbgLog(`SKIP: no texts extracted (roles: ${captureRoles})`); return; }
 
           // Skip very short exchanges (just acks, heartbeats)
           const totalContent = texts.map((t) => t.content).join(" ");
-          if (totalContent.length < 50) return;
+          if (totalContent.length < 50) { _dbgLog(`SKIP: too short (${totalContent.length} chars)`); return; }
 
           // Skip system-heavy content
           if (
             totalContent.includes("HEARTBEAT_OK") ||
-            totalContent.includes("Pre-compaction memory flush") ||
-            totalContent.includes("NO_REPLY")
+            totalContent.includes("Pre-compaction memory flush")
           ) {
+            _dbgLog("SKIP: system content (heartbeat/flush)");
+            return;
+          }
+          // Skip if the ONLY substantive content is NO_REPLY
+          const nonNoReply = totalContent.replace(/NO_REPLY/g, "").trim();
+          if (nonNoReply.length < 50) {
+            _dbgLog(`SKIP: only NO_REPLY content (remaining: ${nonNoReply.length} chars)`);
             return;
           }
 
@@ -298,10 +356,12 @@ const graphitiPlugin = {
             },
           ]);
 
+          _dbgLog(`INGESTED: ${recent.length} messages, ${episodeContent.length} chars`);
           api.logger.info?.(
             `graphiti: auto-captured ${recent.length} messages (${episodeContent.length} chars)`
           );
         } catch (err) {
+          _dbgLog(`ERROR: ${String(err)}`);
           api.logger.warn(`graphiti: capture failed: ${String(err)}`);
         }
       });
