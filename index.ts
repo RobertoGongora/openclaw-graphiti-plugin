@@ -324,10 +324,9 @@ const graphitiPlugin = {
 
           if (texts.length === 0) { _dbgLog(`SKIP: no texts extracted (roles: ${captureRoles})`); return; }
 
-          // Only capture the last few messages (the recent exchange), not full history
-          const recent = texts.slice(-10);
-          _dbgLog(`texts total: ${texts.length}, using last ${recent.length}`);
-          _dbgLog(`recent roles: ${recent.map(t => t.role).join(",")}, snippets: ${recent.map(t => t.content.slice(0, 60).replace(/\n/g, "\\n")).join(" | ")}`);
+          // Only capture the last exchange (user + assistant) — agent_end fires every turn
+          const recent = texts.slice(-2);
+          _dbgLog(`texts total: ${texts.length}, using last ${recent.length}, roles: ${recent.map(t => t.role).join(",")}`);
 
           const recentContent = recent.map((t) => t.content).join(" ");
           if (recentContent.length < 50) { _dbgLog(`SKIP: too short (${recentContent.length} chars)`); return; }
