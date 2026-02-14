@@ -17,7 +17,7 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { Type } from "@sinclair/typebox";
 import { GraphitiClient } from "./client.js";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 
 interface PluginConfig {
   url?: string;
@@ -186,17 +186,41 @@ const graphitiPlugin = {
     // This fires when OpenClaw compacts a long session, not on every turn.
     if (autoCapture) {
       api.on("after_compaction", async (event: any) => {
-        log(`COMPACTION: keys=${Object.keys(event).join(",")}, summary length=${event.summary?.length ?? 0}`);
+        log(`COMPACTION: keys=${Object.keys(event).join(",")}, sessionFile=${event.sessionFile ?? "none"}`);
 
-        const summary = event.summary;
-        if (!summary || typeof summary !== "string" || summary.length < 100) {
-          log("COMPACTION SKIP: no/short summary");
-          return;
-        }
+        // Read the compaction summary from the session file.
+        // After compaction, the first user message contains the summary.
+        const sessionFile = event.sessionFile;
+        if (!sessionFile) { log("COMPACTION SKIP: no sessionFile"); return; }
 
         try {
           const healthy = await client.healthy();
           if (!healthy) { log("COMPACTION SKIP: unhealthy"); return; }
+
+          // Read JSONL session file, find the compaction summary
+          // It's typically a user message containing "<summary>" or the compacted context
+          const lines = readFileSync(sessionFile, "utf-8").split("\n").filter(Boolean);
+          
+          // Look for the summary — it's usually the last user message after compaction
+          // which contains the compacted conversation context
+          let summary = "";
+          for (const line of lines.slice(-5)) {
+            try {
+              const entry = JSON.parse(line);
+              const msg = entry?.message ?? entry;
+              if (msg?.role === "user" && typeof msg?.content === "string" && msg.content.length > 200) {
+                // The compaction summary is the longest recent user message
+                if (msg.content.length > summary.length) {
+                  summary = msg.content;
+                }
+              }
+            } catch {}
+          }
+
+          if (summary.length < 100) {
+            log(`COMPACTION SKIP: no summary found in session file (checked ${lines.length} lines)`);
+            return;
+          }
 
           await client.ingest([{
             content: summary.slice(0, 12000),
