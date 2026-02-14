@@ -17,7 +17,7 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { Type } from "@sinclair/typebox";
 import { GraphitiClient } from "./client.js";
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync } from "node:fs";
 
 interface PluginConfig {
   url?: string;
@@ -185,54 +185,58 @@ const graphitiPlugin = {
     // Compaction summaries are distilled conversation context — perfect for extraction.
     // This fires when OpenClaw compacts a long session, not on every turn.
     if (autoCapture) {
-      api.on("after_compaction", async (event: any) => {
-        log(`COMPACTION: keys=${Object.keys(event).join(",")}, sessionFile=${event.sessionFile ?? "none"}`);
+      api.on("before_compaction", async (event: any) => {
+        log(`COMPACTION: keys=${Object.keys(event).join(",")}, messages=${event.messages?.length ?? 0}, messageCount=${event.messageCount}`);
 
-        // Read the compaction summary from the session file.
-        // After compaction, the first user message contains the summary.
-        const sessionFile = event.sessionFile;
-        if (!sessionFile) { log("COMPACTION SKIP: no sessionFile"); return; }
+        // Ingest the raw conversation BEFORE the agent compacts it.
+        // Graphiti runs its own entity extraction (gpt-5-nano) and should
+        // work from raw material, not pre-distilled summaries.
+        const messages = event.messages;
+        if (!messages || !Array.isArray(messages) || messages.length < 4) {
+          log("COMPACTION SKIP: too few messages");
+          return;
+        }
 
         try {
           const healthy = await client.healthy();
           if (!healthy) { log("COMPACTION SKIP: unhealthy"); return; }
 
-          // Read JSONL session file, find the compaction summary
-          // It's typically a user message containing "<summary>" or the compacted context
-          const lines = readFileSync(sessionFile, "utf-8").split("\n").filter(Boolean);
-          
-          // Look for the summary — it's usually the last user message after compaction
-          // which contains the compacted conversation context
-          let summary = "";
-          for (const line of lines.slice(-5)) {
-            try {
-              const entry = JSON.parse(line);
-              const msg = entry?.message ?? entry;
-              if (msg?.role === "user" && typeof msg?.content === "string" && msg.content.length > 200) {
-                // The compaction summary is the longest recent user message
-                if (msg.content.length > summary.length) {
-                  summary = msg.content;
+          // Extract user + assistant text
+          const texts: string[] = [];
+          for (const msg of messages) {
+            if (!msg || typeof msg !== "object") continue;
+            const msgObj = msg as Record<string, unknown>;
+            const role = msgObj.role as string;
+            if (role !== "user" && role !== "assistant") continue;
+
+            const content = msgObj.content;
+            if (typeof content === "string" && content.length > 20) {
+              texts.push(`${role}: ${content.slice(0, 2000)}`);
+            } else if (Array.isArray(content)) {
+              for (const block of content) {
+                if (block && typeof block === "object" && (block as any).type === "text" && typeof (block as any).text === "string") {
+                  const text = (block as any).text;
+                  if (text.length > 20) texts.push(`${role}: ${text.slice(0, 2000)}`);
                 }
               }
-            } catch {}
+            }
           }
 
-          if (summary.length < 100) {
-            log(`COMPACTION SKIP: no summary found in session file (checked ${lines.length} lines)`);
-            return;
-          }
+          if (texts.length < 2) { log(`COMPACTION SKIP: only ${texts.length} texts extracted`); return; }
+
+          const episode = texts.join("\n\n").slice(0, 12000);
 
           await client.ingest([{
-            content: summary.slice(0, 12000),
-            role_type: "system",
-            role: "shiba",
+            content: episode,
+            role_type: "user",
+            role: "conversation",
             name: `compaction-${Date.now()}`,
             timestamp: new Date().toISOString(),
-            source_description: "OpenClaw auto-capture: compaction summary",
+            source_description: "OpenClaw auto-capture: pre-compaction conversation",
           }]);
 
-          log(`COMPACTION INGESTED: ${summary.length} chars`);
-          api.logger.info?.(`graphiti: ingested compaction summary (${summary.length} chars)`);
+          log(`COMPACTION INGESTED: ${texts.length} messages, ${episode.length} chars`);
+          api.logger.info?.(`graphiti: ingested pre-compaction conversation (${texts.length} messages, ${episode.length} chars)`);
         } catch (err) {
           log(`COMPACTION ERROR: ${String(err)}`);
         }
