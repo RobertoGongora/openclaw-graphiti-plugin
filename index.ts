@@ -279,16 +279,21 @@ const graphitiPlugin = {
         // Debug: log filtering decisions
         const _dbgLog = (msg: string) => { try { appendFileSync("/tmp/graphiti-hook-debug.log", `[${new Date().toISOString()}] agent_end: ${msg}\n`); } catch {} };
         api.logger.info?.(`graphiti: agent_end fired, success: ${event.success}, messages: ${event.messages?.length ?? 0}`);
+        _dbgLog(`event keys: ${Object.keys(event).join(",")}, success: ${event.success}, messages type: ${typeof event.messages}, isArray: ${Array.isArray(event.messages)}, length: ${event.messages?.length ?? "N/A"}`);
         if (!event.success || !event.messages || event.messages.length === 0) {
+          _dbgLog("SKIP: no success or no messages");
           return;
         }
 
         try {
+          _dbgLog(`checking health...`);
           const healthy = await client.healthy();
           if (!healthy) {
+            _dbgLog("SKIP: unhealthy");
             api.logger.warn("graphiti: server unhealthy, skipping auto-capture");
             return;
           }
+          _dbgLog(`healthy, extracting texts...`);
 
           // Extract text from messages
           const texts: Array<{ role: string; content: string }> = [];
@@ -319,27 +324,27 @@ const graphitiPlugin = {
 
           if (texts.length === 0) { _dbgLog(`SKIP: no texts extracted (roles: ${captureRoles})`); return; }
 
-          // Skip very short exchanges (just acks, heartbeats)
-          const totalContent = texts.map((t) => t.content).join(" ");
-          if (totalContent.length < 50) { _dbgLog(`SKIP: too short (${totalContent.length} chars)`); return; }
+          // Only capture the last few messages (the recent exchange), not full history
+          const recent = texts.slice(-10);
+          _dbgLog(`texts total: ${texts.length}, using last ${recent.length}`);
 
-          // Skip system-heavy content
+          const recentContent = recent.map((t) => t.content).join(" ");
+          if (recentContent.length < 50) { _dbgLog(`SKIP: too short (${recentContent.length} chars)`); return; }
+
+          // Skip system-heavy content in recent messages only
           if (
-            totalContent.includes("HEARTBEAT_OK") ||
-            totalContent.includes("Pre-compaction memory flush")
+            recentContent.includes("HEARTBEAT_OK") ||
+            recentContent.includes("Pre-compaction memory flush")
           ) {
-            _dbgLog("SKIP: system content (heartbeat/flush)");
+            _dbgLog("SKIP: system content in recent messages");
             return;
           }
           // Skip if the ONLY substantive content is NO_REPLY
-          const nonNoReply = totalContent.replace(/NO_REPLY/g, "").trim();
+          const nonNoReply = recentContent.replace(/NO_REPLY/g, "").trim();
           if (nonNoReply.length < 50) {
             _dbgLog(`SKIP: only NO_REPLY content (remaining: ${nonNoReply.length} chars)`);
             return;
           }
-
-          // Build conversation episode — take last 10 messages max
-          const recent = texts.slice(-10);
           const episodeContent = recent
             .map((t) => `${t.role}: ${t.content.slice(0, 2000)}`)
             .join("\n\n");
