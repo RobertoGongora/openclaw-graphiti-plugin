@@ -327,16 +327,14 @@ const graphitiPlugin = {
           // Only capture the last few messages (the recent exchange), not full history
           const recent = texts.slice(-10);
           _dbgLog(`texts total: ${texts.length}, using last ${recent.length}`);
+          _dbgLog(`recent roles: ${recent.map(t => t.role).join(",")}, snippets: ${recent.map(t => t.content.slice(0, 60).replace(/\n/g, "\\n")).join(" | ")}`);
 
           const recentContent = recent.map((t) => t.content).join(" ");
           if (recentContent.length < 50) { _dbgLog(`SKIP: too short (${recentContent.length} chars)`); return; }
 
-          // Skip system-heavy content in recent messages only
-          if (
-            recentContent.includes("HEARTBEAT_OK") ||
-            recentContent.includes("Pre-compaction memory flush")
-          ) {
-            _dbgLog("SKIP: system content in recent messages");
+          // Skip pure heartbeat acks
+          if (recentContent.replace(/HEARTBEAT_OK/g, "").trim().length < 50) {
+            _dbgLog("SKIP: pure heartbeat content");
             return;
           }
           // Skip if the ONLY substantive content is NO_REPLY
