@@ -9,9 +9,9 @@
  * - graphiti_search: Semantic + graph search over extracted facts
  * - graphiti_ingest: Manual episode ingestion
  * - Auto-recall: Injects relevant facts before each conversation (via before_agent_start)
- * - Auto-capture: Ingests conversation turns after each exchange (via agent_end)
+ * - Auto-capture: Ingests compaction summaries (via after_compaction)
  * - CLI: `openclaw graphiti status|search|episodes`
- * - Slash command: /graphiti-status
+ * - Slash command: /graphiti
  */
 
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
@@ -25,9 +25,13 @@ interface PluginConfig {
   autoRecall?: boolean;
   autoCapture?: boolean;
   recallMaxFacts?: number;
-  captureRoles?: string[];
   minPromptLength?: number;
 }
+
+const LOG_FILE = "/tmp/graphiti-plugin.log";
+const log = (msg: string) => {
+  try { appendFileSync(LOG_FILE, `[${new Date().toISOString()}] ${msg}\n`); } catch {}
+};
 
 const graphitiPlugin = {
   id: "graphiti",
@@ -42,48 +46,12 @@ const graphitiPlugin = {
     const autoRecall = cfg.autoRecall !== false;
     const autoCapture = cfg.autoCapture !== false;
     const recallMaxFacts = cfg.recallMaxFacts ?? 10;
-    const captureRoles = cfg.captureRoles ?? ["user", "assistant"];
     const minPromptLength = cfg.minPromptLength ?? 10;
 
     const client = new GraphitiClient(url, groupId, api.logger);
 
     api.logger.info(`graphiti: plugin registered (url: ${url}, group: ${groupId})`);
-
-    // Debug: log registration to file
-    try {
-      appendFileSync("/tmp/graphiti-hook-debug.log",
-        `[${new Date().toISOString()}] PLUGIN REGISTER called | url: ${url} | group: ${groupId}\n`
-      );
-    } catch {}
-
-    // Debug: check what api exposes
-    try {
-      const apiKeys = Object.keys(api).join(", ");
-      appendFileSync("/tmp/graphiti-hook-debug.log",
-        `[${new Date().toISOString()}] API KEYS: ${apiKeys}\n`
-      );
-      // Try to find if there's an internal way to verify registration
-      appendFileSync("/tmp/graphiti-hook-debug.log",
-        `[${new Date().toISOString()}] api.on type: ${typeof (api as any).on}\n`
-      );
-    } catch {}
-
-    // Debug: try registerHook (old API) with name option
-    try {
-      (api as any).registerHook(["before_agent_start"], async (event: any) => {
-        appendFileSync("/tmp/graphiti-hook-debug.log",
-          `[${new Date().toISOString()}] OLD API before_agent_start FIRED\n`
-        );
-      }, { name: "graphiti-recall-test" });
-      appendFileSync("/tmp/graphiti-hook-debug.log",
-        `[${new Date().toISOString()}] registerHook (old API) call succeeded\n`
-      );
-    } catch (e) {
-      appendFileSync("/tmp/graphiti-hook-debug.log",
-        `[${new Date().toISOString()}] registerHook (old API) ERROR: ${String(e)}\n`
-      );
-    }
-
+    log(`REGISTER | url: ${url} | group: ${groupId}`);
 
     // ========================================================================
     // Tools
@@ -121,30 +89,15 @@ const graphitiPlugin = {
               .join("\n");
 
             return {
-              content: [
-                {
-                  type: "text",
-                  text: `Found ${facts.length} facts:\n\n${text}`,
-                },
-              ],
+              content: [{ type: "text", text: `Found ${facts.length} facts:\n\n${text}` }],
               details: {
                 count: facts.length,
-                facts: facts.map((f) => ({
-                  uuid: f.uuid,
-                  name: f.name,
-                  fact: f.fact,
-                  valid_at: f.valid_at,
-                })),
+                facts: facts.map((f) => ({ uuid: f.uuid, name: f.name, fact: f.fact, valid_at: f.valid_at })),
               },
             };
           } catch (err) {
             return {
-              content: [
-                {
-                  type: "text",
-                  text: `Graphiti search failed: ${err instanceof Error ? err.message : String(err)}`,
-                },
-              ],
+              content: [{ type: "text", text: `Graphiti search failed: ${err instanceof Error ? err.message : String(err)}` }],
             };
           }
         },
@@ -162,46 +115,30 @@ const graphitiPlugin = {
         parameters: Type.Object({
           content: Type.String({ description: "Content to ingest (rich natural language)" }),
           name: Type.Optional(Type.String({ description: "Episode name/label" })),
-          source: Type.Optional(
-            Type.String({ description: "Source description (default: manual)" })
-          ),
+          source: Type.Optional(Type.String({ description: "Source description (default: manual)" })),
         }),
         async execute(_toolCallId, params) {
           const { content, name, source = "manual" } = params as {
-            content: string;
-            name?: string;
-            source?: string;
+            content: string; name?: string; source?: string;
           };
 
           try {
-            const result = await client.ingest([
-              {
-                content,
-                role_type: "system",
-                role: "shiba",
-                name: name ?? `manual-${Date.now()}`,
-                timestamp: new Date().toISOString(),
-                source_description: `OpenClaw agent: ${source}`,
-              },
-            ]);
+            const result = await client.ingest([{
+              content,
+              role_type: "system",
+              role: "shiba",
+              name: name ?? `manual-${Date.now()}`,
+              timestamp: new Date().toISOString(),
+              source_description: `OpenClaw agent: ${source}`,
+            }]);
 
             return {
-              content: [
-                {
-                  type: "text",
-                  text: `Ingested into knowledge graph: "${content.slice(0, 100)}${content.length > 100 ? "..." : ""}"`,
-                },
-              ],
+              content: [{ type: "text", text: `Ingested into knowledge graph: "${content.slice(0, 100)}${content.length > 100 ? "..." : ""}"` }],
               details: result,
             };
           } catch (err) {
             return {
-              content: [
-                {
-                  type: "text",
-                  text: `Graphiti ingest failed: ${err instanceof Error ? err.message : String(err)}`,
-                },
-              ],
+              content: [{ type: "text", text: `Graphiti ingest failed: ${err instanceof Error ? err.message : String(err)}` }],
             };
           }
         },
@@ -215,156 +152,113 @@ const graphitiPlugin = {
 
     // Auto-recall: inject relevant facts before agent starts
     if (autoRecall) {
-      api.logger.info("graphiti: registering before_agent_start hook");
       api.on("before_agent_start", async (event: any) => {
-        // Debug: write to file so we can verify the hook fires
-        
-        appendFileSync("/tmp/graphiti-hook-debug.log",
-          `[${new Date().toISOString()}] before_agent_start fired | prompt: ${event.prompt?.slice(0, 100) ?? "NONE"} | keys: ${Object.keys(event).join(",")}\n`
-        );
-        api.logger.info?.(`graphiti: before_agent_start fired, prompt length: ${event.prompt?.length ?? 0}`);
-        if (!event.prompt || event.prompt.length < minPromptLength) {
-          return;
-        }
+        if (!event.prompt || event.prompt.length < minPromptLength) return;
 
-        // Skip heartbeat polls and system messages
+        // Skip system-only sessions
         if (
           event.prompt.includes("HEARTBEAT") ||
-          event.prompt.includes("Pre-compaction memory flush") ||
-          event.prompt.includes("GatewayRestart")
-        ) {
-          return;
-        }
+          event.prompt.includes("boot check")
+        ) return;
 
         try {
           const healthy = await client.healthy();
-          if (!healthy) {
-            api.logger.warn("graphiti: server unhealthy, skipping auto-recall");
-            return;
-          }
+          if (!healthy) return;
 
           const facts = await client.search(event.prompt, recallMaxFacts);
+          if (facts.length === 0) return;
 
-          if (facts.length === 0) {
-            return;
-          }
-
-          const context = facts
-            .map((f) => `- **${f.name}**: ${f.fact}`)
-            .join("\n");
-
-          api.logger.info?.(`graphiti: injecting ${facts.length} facts into context`);
+          const context = facts.map((f) => `- **${f.name}**: ${f.fact}`).join("\n");
+          log(`RECALL: ${facts.length} facts injected`);
 
           return {
             prependContext:
-              `<graphiti-context>\n` +
-              `Relevant knowledge graph facts (auto-recalled):\n` +
-              `${context}\n` +
-              `</graphiti-context>`,
+              `<graphiti-context>\nRelevant knowledge graph facts (auto-recalled):\n${context}\n</graphiti-context>`,
           };
         } catch (err) {
-          api.logger.warn(`graphiti: recall failed: ${String(err)}`);
+          log(`RECALL ERROR: ${String(err)}`);
         }
       });
     }
 
-    // Auto-capture: ingest conversation after agent ends
+    // Auto-capture: ingest compaction summaries into the knowledge graph
+    // Compaction summaries are distilled conversation context — perfect for extraction.
+    // This fires when OpenClaw compacts a long session, not on every turn.
     if (autoCapture) {
-      api.logger.info("graphiti: registering agent_end hook");
-      api.on("agent_end", async (event: any) => {
-        
-        appendFileSync("/tmp/graphiti-hook-debug.log",
-          `[${new Date().toISOString()}] agent_end fired | success: ${event.success} | messages: ${event.messages?.length ?? 0}\n`
-        );
-        // Debug: log filtering decisions
-        const _dbgLog = (msg: string) => { try { appendFileSync("/tmp/graphiti-hook-debug.log", `[${new Date().toISOString()}] agent_end: ${msg}\n`); } catch {} };
-        api.logger.info?.(`graphiti: agent_end fired, success: ${event.success}, messages: ${event.messages?.length ?? 0}`);
-        _dbgLog(`event keys: ${Object.keys(event).join(",")}, success: ${event.success}, messages type: ${typeof event.messages}, isArray: ${Array.isArray(event.messages)}, length: ${event.messages?.length ?? "N/A"}`);
-        if (!event.success || !event.messages || event.messages.length === 0) {
-          _dbgLog("SKIP: no success or no messages");
+      api.on("after_compaction", async (event: any) => {
+        log(`COMPACTION: keys=${Object.keys(event).join(",")}, summary length=${event.summary?.length ?? 0}`);
+
+        const summary = event.summary;
+        if (!summary || typeof summary !== "string" || summary.length < 100) {
+          log("COMPACTION SKIP: no/short summary");
           return;
         }
 
         try {
-          _dbgLog(`checking health...`);
           const healthy = await client.healthy();
-          if (!healthy) {
-            _dbgLog("SKIP: unhealthy");
-            api.logger.warn("graphiti: server unhealthy, skipping auto-capture");
-            return;
-          }
-          _dbgLog(`healthy, extracting texts...`);
+          if (!healthy) { log("COMPACTION SKIP: unhealthy"); return; }
 
-          // Extract text from messages
-          const texts: Array<{ role: string; content: string }> = [];
+          await client.ingest([{
+            content: summary.slice(0, 12000),
+            role_type: "system",
+            role: "shiba",
+            name: `compaction-${Date.now()}`,
+            timestamp: new Date().toISOString(),
+            source_description: "OpenClaw auto-capture: compaction summary",
+          }]);
+
+          log(`COMPACTION INGESTED: ${summary.length} chars`);
+          api.logger.info?.(`graphiti: ingested compaction summary (${summary.length} chars)`);
+        } catch (err) {
+          log(`COMPACTION ERROR: ${String(err)}`);
+        }
+      });
+
+      // Also capture on session reset (/new) — the before_reset hook includes messages
+      // that are about to be lost, so we can extract knowledge before they disappear
+      api.on("before_reset", async (event: any) => {
+        log(`RESET: keys=${Object.keys(event).join(",")}, messages=${event.messages?.length ?? 0}`);
+
+        // Only capture if there's meaningful content
+        if (!event.messages || event.messages.length < 4) {
+          log("RESET SKIP: too few messages");
+          return;
+        }
+
+        try {
+          const healthy = await client.healthy();
+          if (!healthy) return;
+
+          // Extract user+assistant text from the last messages
+          const texts: string[] = [];
           for (const msg of event.messages) {
             if (!msg || typeof msg !== "object") continue;
             const msgObj = msg as Record<string, unknown>;
             const role = msgObj.role as string;
-
-            if (!captureRoles.includes(role)) continue;
-
+            if (role !== "user" && role !== "assistant") continue;
             const content = msgObj.content;
-            if (typeof content === "string") {
-              texts.push({ role, content });
-            } else if (Array.isArray(content)) {
-              for (const block of content) {
-                if (
-                  block &&
-                  typeof block === "object" &&
-                  "type" in block &&
-                  (block as any).type === "text" &&
-                  typeof (block as any).text === "string"
-                ) {
-                  texts.push({ role, content: (block as any).text });
-                }
-              }
+            if (typeof content === "string" && content.length > 20) {
+              texts.push(`${role}: ${content.slice(0, 1000)}`);
             }
           }
 
-          if (texts.length === 0) { _dbgLog(`SKIP: no texts extracted (roles: ${captureRoles})`); return; }
+          if (texts.length < 2) { log("RESET SKIP: not enough text"); return; }
 
-          // Only capture the last exchange (user + assistant) — agent_end fires every turn
-          const recent = texts.slice(-2);
-          _dbgLog(`texts total: ${texts.length}, using last ${recent.length}, roles: ${recent.map(t => t.role).join(",")}`);
+          // Take a sample — last 20 exchanges max
+          const sample = texts.slice(-20).join("\n\n");
 
-          const recentContent = recent.map((t) => t.content).join(" ");
-          if (recentContent.length < 50) { _dbgLog(`SKIP: too short (${recentContent.length} chars)`); return; }
+          await client.ingest([{
+            content: sample.slice(0, 12000),
+            role_type: "user",
+            role: "conversation",
+            name: `session-reset-${Date.now()}`,
+            timestamp: new Date().toISOString(),
+            source_description: "OpenClaw auto-capture: session reset",
+          }]);
 
-          // Skip pure heartbeat acks
-          if (recentContent.replace(/HEARTBEAT_OK/g, "").trim().length < 50) {
-            _dbgLog("SKIP: pure heartbeat content");
-            return;
-          }
-          // Skip if the ONLY substantive content is NO_REPLY
-          const nonNoReply = recentContent.replace(/NO_REPLY/g, "").trim();
-          if (nonNoReply.length < 50) {
-            _dbgLog(`SKIP: only NO_REPLY content (remaining: ${nonNoReply.length} chars)`);
-            return;
-          }
-          const episodeContent = recent
-            .map((t) => `${t.role}: ${t.content.slice(0, 2000)}`)
-            .join("\n\n");
-
-          // Ingest as conversation episode
-          await client.ingest([
-            {
-              content: episodeContent.slice(0, 12000),
-              role_type: "user",
-              role: "conversation",
-              name: `conversation-${Date.now()}`,
-              timestamp: new Date().toISOString(),
-              source_description: "OpenClaw auto-capture: agent conversation",
-            },
-          ]);
-
-          _dbgLog(`INGESTED: ${recent.length} messages, ${episodeContent.length} chars`);
-          api.logger.info?.(
-            `graphiti: auto-captured ${recent.length} messages (${episodeContent.length} chars)`
-          );
+          log(`RESET INGESTED: ${texts.length} messages, ${sample.length} chars`);
         } catch (err) {
-          _dbgLog(`ERROR: ${String(err)}`);
-          api.logger.warn(`graphiti: capture failed: ${String(err)}`);
+          log(`RESET ERROR: ${String(err)}`);
         }
       });
     }
@@ -375,41 +269,24 @@ const graphitiPlugin = {
 
     api.registerCli(
       ({ program }) => {
-        const cmd = program
-          .command("graphiti")
-          .description("Graphiti knowledge graph commands");
+        const cmd = program.command("graphiti").description("Graphiti knowledge graph commands");
 
-        cmd
-          .command("status")
-          .description("Check Graphiti server health")
-          .action(async () => {
-            const ok = await client.healthy();
-            console.log(ok ? "✅ Graphiti is healthy" : "❌ Graphiti unreachable");
-            if (ok) {
-              console.log(`  URL: ${url}`);
-              console.log(`  Group: ${groupId}`);
-            }
-          });
+        cmd.command("status").description("Check Graphiti server health").action(async () => {
+          const ok = await client.healthy();
+          console.log(ok ? "✅ Graphiti is healthy" : "❌ Graphiti unreachable");
+          if (ok) { console.log(`  URL: ${url}`); console.log(`  Group: ${groupId}`); }
+        });
 
-        cmd
-          .command("search")
-          .description("Search the knowledge graph")
+        cmd.command("search").description("Search the knowledge graph")
           .argument("<query>", "Search query")
           .option("-n, --limit <n>", "Max results", "10")
           .action(async (query: string, opts: { limit: string }) => {
             const facts = await client.search(query, parseInt(opts.limit));
-            if (facts.length === 0) {
-              console.log("No facts found.");
-              return;
-            }
-            for (const f of facts) {
-              console.log(`• ${f.name}: ${f.fact}`);
-            }
+            if (facts.length === 0) { console.log("No facts found."); return; }
+            for (const f of facts) { console.log(`• ${f.name}: ${f.fact}`); }
           });
 
-        cmd
-          .command("episodes")
-          .description("List recent episodes")
+        cmd.command("episodes").description("List recent episodes")
           .option("-n, --limit <n>", "How many", "10")
           .action(async (opts: { limit: string }) => {
             const eps = await client.episodes(parseInt(opts.limit));
@@ -444,13 +321,9 @@ const graphitiPlugin = {
       id: "graphiti",
       async start() {
         const ok = await client.healthy();
-        api.logger.info(
-          `graphiti: service started (healthy: ${ok}, url: ${url}, group: ${groupId})`
-        );
+        api.logger.info(`graphiti: service started (healthy: ${ok}, url: ${url}, group: ${groupId})`);
       },
-      stop() {
-        api.logger.info("graphiti: service stopped");
-      },
+      stop() { api.logger.info("graphiti: service stopped"); },
     });
   },
 };
