@@ -14,7 +14,7 @@
       },
       "groupId": {
         "type": "string",
-        "default": "shiba-core",
+        "default": "core",
         "description": "Graph group ID for namespacing"
       },
       "autoRecall": {
@@ -47,7 +47,7 @@
     },
     "groupId": {
       "label": "Group ID",
-      "placeholder": "shiba-core",
+      "placeholder": "core",
       "help": "Graph namespace for this agent"
     },
     "autoRecall": {

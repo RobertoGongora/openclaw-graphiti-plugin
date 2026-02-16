@@ -65,7 +65,7 @@ Or in `~/.openclaw/settings.json`:
       "graphiti": {
         "config": {
           "url": "http://localhost:8100",
-          "groupId": "shiba-core"
+          "groupId": "core"
         }
       }
     }
