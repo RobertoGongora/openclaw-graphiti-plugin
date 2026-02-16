@@ -1,6 +1,6 @@
 {
   "name": "@openclaw-plugins/graphiti",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Graphiti temporal knowledge graph plugin for OpenClaw",
   "type": "module",
   "main": "index.ts",
@@ -20,7 +20,18 @@
   "engines": {
     "node": ">=20"
   },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
   "dependencies": {
     "@sinclair/typebox": "^0.34.48"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.1.26"
+  },
+  "devDependencies": {
+    "vitest": "^4.0.18"
   }
 }

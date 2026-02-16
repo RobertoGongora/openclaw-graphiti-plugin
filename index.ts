@@ -9,15 +9,15 @@
  * - graphiti_search: Semantic + graph search over extracted facts
  * - graphiti_ingest: Manual episode ingestion
  * - Auto-recall: Injects relevant facts before each conversation (via before_agent_start)
- * - Auto-capture: Ingests compaction summaries (via after_compaction)
+ * - Auto-capture: Ingests conversation content before compaction/reset
  * - CLI: `openclaw graphiti status|search|episodes`
+ * - CLI bridge: `openclaw memory status` (built-in file-based memory)
  * - Slash command: /graphiti
  */
 
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { Type } from "@sinclair/typebox";
 import { GraphitiClient } from "./client.js";
-import { appendFileSync } from "node:fs";
 
 interface PluginConfig {
   url?: string;
@@ -27,11 +27,6 @@ interface PluginConfig {
   recallMaxFacts?: number;
   minPromptLength?: number;
 }
-
-const LOG_FILE = "/tmp/graphiti-plugin.log";
-const log = (msg: string) => {
-  try { appendFileSync(LOG_FILE, `[${new Date().toISOString()}] ${msg}\n`); } catch {}
-};
 
 const graphitiPlugin = {
   id: "graphiti",
@@ -51,7 +46,6 @@ const graphitiPlugin = {
     const client = new GraphitiClient(url, groupId, api.logger);
 
     api.logger.info(`graphiti: plugin registered (url: ${url}, group: ${groupId})`);
-    log(`REGISTER | url: ${url} | group: ${groupId}`);
 
     // ========================================================================
     // Tools
@@ -169,14 +163,14 @@ const graphitiPlugin = {
           if (facts.length === 0) return;
 
           const context = facts.map((f) => `- **${f.name}**: ${f.fact}`).join("\n");
-          log(`RECALL: ${facts.length} facts injected`);
+          api.logger.info?.(`graphiti: recalled ${facts.length} facts for context injection`);
 
           return {
             prependContext:
               `<graphiti-context>\nRelevant knowledge graph facts (auto-recalled):\n${context}\n</graphiti-context>`,
           };
         } catch (err) {
-          log(`RECALL ERROR: ${String(err)}`);
+          api.logger.warn(`graphiti: recall failed: ${String(err)}`);
         }
       });
     }
@@ -186,20 +180,18 @@ const graphitiPlugin = {
     // This fires when OpenClaw compacts a long session, not on every turn.
     if (autoCapture) {
       api.on("before_compaction", async (event: any) => {
-        log(`COMPACTION: keys=${Object.keys(event).join(",")}, messages=${event.messages?.length ?? 0}, messageCount=${event.messageCount}`);
 
         // Ingest the raw conversation BEFORE the agent compacts it.
         // Graphiti runs its own entity extraction (gpt-5-nano) and should
         // work from raw material, not pre-distilled summaries.
         const messages = event.messages;
         if (!messages || !Array.isArray(messages) || messages.length < 4) {
-          log("COMPACTION SKIP: too few messages");
           return;
         }
 
         try {
           const healthy = await client.healthy();
-          if (!healthy) { log("COMPACTION SKIP: unhealthy"); return; }
+          if (!healthy) return;
 
           // Extract user + assistant text
           const texts: string[] = [];
@@ -222,7 +214,7 @@ const graphitiPlugin = {
             }
           }
 
-          if (texts.length < 2) { log(`COMPACTION SKIP: only ${texts.length} texts extracted`); return; }
+          if (texts.length < 2) return;
 
           const episode = texts.join("\n\n").slice(0, 12000);
 
@@ -235,21 +227,16 @@ const graphitiPlugin = {
             source_description: "OpenClaw auto-capture: pre-compaction conversation",
           }]);
 
-          log(`COMPACTION INGESTED: ${texts.length} messages, ${episode.length} chars`);
           api.logger.info?.(`graphiti: ingested pre-compaction conversation (${texts.length} messages, ${episode.length} chars)`);
         } catch (err) {
-          log(`COMPACTION ERROR: ${String(err)}`);
+          api.logger.warn(`graphiti: compaction capture failed: ${String(err)}`);
         }
       });
 
       // Also capture on session reset (/new) — the before_reset hook includes messages
       // that are about to be lost, so we can extract knowledge before they disappear
       api.on("before_reset", async (event: any) => {
-        log(`RESET: keys=${Object.keys(event).join(",")}, messages=${event.messages?.length ?? 0}`);
-
-        // Only capture if there's meaningful content
         if (!event.messages || event.messages.length < 4) {
-          log("RESET SKIP: too few messages");
           return;
         }
 
@@ -270,7 +257,7 @@ const graphitiPlugin = {
             }
           }
 
-          if (texts.length < 2) { log("RESET SKIP: not enough text"); return; }
+          if (texts.length < 2) return;
 
           // Take a sample — last 20 exchanges max
           const sample = texts.slice(-20).join("\n\n");
@@ -284,9 +271,9 @@ const graphitiPlugin = {
             source_description: "OpenClaw auto-capture: session reset",
           }]);
 
-          log(`RESET INGESTED: ${texts.length} messages, ${sample.length} chars`);
+          api.logger.info?.(`graphiti: ingested session-reset conversation (${texts.length} messages, ${sample.length} chars)`);
         } catch (err) {
-          log(`RESET ERROR: ${String(err)}`);
+          api.logger.warn(`graphiti: reset capture failed: ${String(err)}`);
         }
       });
     }
@@ -322,6 +309,16 @@ const graphitiPlugin = {
           });
       },
       { commands: ["graphiti"] },
+    );
+
+    // Bridge: expose built-in memory tools CLI so `openclaw memory status` works
+    // even when memory-core is disabled (Graphiti holds the memory slot).
+    // This reports on the file-based memory index (MEMORY.md etc.), not Graphiti.
+    api.registerCli(
+      ({ program }) => {
+        api.runtime.tools.registerMemoryCli(program);
+      },
+      { commands: ["memory"] },
     );
 
     // ========================================================================

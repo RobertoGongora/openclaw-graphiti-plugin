@@ -15,8 +15,11 @@ export interface GraphitiFact {
 export interface GraphitiMessage {
   content: string;
   role_type: "user" | "assistant" | "system";
-  role?: string;
+  /** Required — the server has no default and will return 422 if omitted. */
+  role: string;
+  /** Optional — defaults to empty string (`''`) server-side. */
   name?: string;
+  /** ISO-8601 timestamp. Optional — defaults to `utc_now()` server-side. */
   timestamp?: string;
   source_description?: string;
 }
@@ -78,6 +81,9 @@ export class GraphitiClient {
 
   /**
    * Ingest messages as episodes.
+   *
+   * Note: The server returns HTTP 202 (Accepted), not 200. This works
+   * because `res.ok` covers all 2xx status codes.
    */
   async ingest(messages: GraphitiMessage[]): Promise<{ success: boolean; message: string }> {
     return this.fetch("/messages", {
@@ -106,6 +112,8 @@ export class GraphitiClient {
 
   /**
    * Get recent episodes.
+   *
+   * Note: The server returns a bare JSON array, not a wrapped object.
    */
   async episodes(lastN = 10): Promise<any[]> {
     try {

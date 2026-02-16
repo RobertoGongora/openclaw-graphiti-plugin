@@ -5,9 +5,10 @@ Temporal knowledge graph plugin for [OpenClaw](https://github.com/openclaw/openc
 ## What it does
 
 - **Auto-recall**: Before each conversation turn, searches the knowledge graph for relevant facts based on the user's prompt and injects them into context
-- **Auto-capture**: After each conversation, ingests the exchange into the knowledge graph for entity/relationship extraction
+- **Auto-capture**: Before compaction or session reset, ingests the conversation into the knowledge graph for entity/relationship extraction
 - **Native tools**: `graphiti_search` and `graphiti_ingest` available as agent tools
 - **CLI**: `openclaw graphiti status|search|episodes`
+- **Memory CLI bridge**: `openclaw memory status|index|search` (built-in file-based memory)
 - **Slash command**: `/graphiti` for quick health check
 
 ## Requirements
@@ -28,31 +29,75 @@ git clone https://github.com/RobertoGongora/openclaw-graphiti-plugin.git
 openclaw config set plugins.load.paths '["/path/to/openclaw-graphiti-plugin"]'
 ```
 
-### Manual config
+### Auto-discovery
 
-Add to `~/.openclaw/openclaw.json`:
+Place the plugin in one of OpenClaw's extension directories:
+
+```bash
+# Global (all workspaces)
+ln -s /path/to/openclaw-graphiti-plugin ~/.openclaw/extensions/graphiti
+
+# Workspace-local
+ln -s /path/to/openclaw-graphiti-plugin .openclaw/extensions/graphiti
+```
+
+The plugin declares `openclaw.extensions` in `package.json`, so OpenClaw discovers it automatically.
+
+## Memory slot configuration
+
+This plugin declares `kind: "memory"`. OpenClaw's memory slot is **exclusive** -- only one memory plugin can be active at a time. When Graphiti is selected, `memory-core` (the default) is automatically disabled.
+
+### Select Graphiti as memory plugin
+
+```bash
+openclaw config set plugins.slots.memory graphiti
+```
+
+Or in `~/.openclaw/settings.json`:
 
 ```json
 {
   "plugins": {
-    "load": {
-      "paths": ["/path/to/openclaw-graphiti-plugin"]
+    "slots": {
+      "memory": "graphiti"
     },
     "entries": {
       "graphiti": {
-        "enabled": true,
         "config": {
           "url": "http://localhost:8100",
-          "groupId": "shiba-core",
-          "autoRecall": true,
-          "autoCapture": true,
-          "recallMaxFacts": 10,
-          "minPromptLength": 10
+          "groupId": "shiba-core"
         }
       }
     }
   }
 }
+```
+
+### Revert to default (memory-core)
+
+```bash
+openclaw config set plugins.slots.memory memory-core
+```
+
+### Disable all memory plugins
+
+```bash
+openclaw config set plugins.slots.memory none
+```
+
+## Status commands
+
+With Graphiti active:
+
+```bash
+# Overall status -- shows "Memory: enabled (plugin graphiti)"
+openclaw status
+
+# Graphiti server health
+openclaw graphiti status
+
+# Built-in file-based memory (MEMORY.md index) -- still works via bridge
+openclaw memory status
 ```
 
 ## Configuration
@@ -62,9 +107,8 @@ Add to `~/.openclaw/openclaw.json`:
 | `url` | string | `http://localhost:8100` | Graphiti server URL |
 | `groupId` | string | `shiba-core` | Graph namespace |
 | `autoRecall` | boolean | `true` | Inject relevant facts before each turn |
-| `autoCapture` | boolean | `true` | Ingest conversations after each turn |
+| `autoCapture` | boolean | `true` | Ingest conversations on compaction/reset |
 | `recallMaxFacts` | number | `10` | Max facts to inject on recall |
-| `captureRoles` | string[] | `["user", "assistant"]` | Message roles to capture |
 | `minPromptLength` | number | `10` | Min prompt length to trigger recall |
 
 ## How it works
@@ -72,21 +116,54 @@ Add to `~/.openclaw/openclaw.json`:
 ### Auto-recall flow
 ```
 User sends message
-  → before_agent_start fires
-  → Plugin searches Graphiti with user's prompt
-  → Top facts injected as <graphiti-context> block
-  → Agent sees relevant knowledge alongside the prompt
+  -> before_agent_start fires
+  -> Plugin searches Graphiti with user's prompt
+  -> Top facts injected as <graphiti-context> block
+  -> Agent sees relevant knowledge alongside the prompt
 ```
 
 ### Auto-capture flow
 ```
-Agent finishes response
-  → agent_end fires
-  → Plugin extracts conversation text
-  → Filters out heartbeats, system messages, short exchanges
-  → POSTs to Graphiti /messages endpoint
-  → Graphiti extracts entities + relationships async
+Session compacts or resets
+  -> before_compaction / before_reset fires
+  -> Plugin extracts user+assistant text
+  -> Filters out short exchanges (<4 messages)
+  -> POSTs to Graphiti /messages endpoint
+  -> Graphiti extracts entities + relationships async
 ```
+
+### Memory slot behavior
+```
+plugins.slots.memory = "graphiti"
+  -> memory-core: disabled (auto, slot exclusivity)
+  -> graphiti: enabled, selected
+  -> openclaw status: "Memory: enabled (plugin graphiti)"
+  -> openclaw memory status: works (bridge to built-in file memory)
+  -> openclaw graphiti status: works (knowledge graph health)
+```
+
+## Migrating from memory-core
+
+1. Install the Graphiti plugin (see Installation above)
+2. Deploy a Graphiti server (see Deploying Graphiti below)
+3. Set the memory slot:
+   ```bash
+   openclaw config set plugins.slots.memory graphiti
+   ```
+4. Configure the plugin:
+   ```bash
+   openclaw config set plugins.entries.graphiti.config.url http://localhost:8100
+   ```
+5. Verify:
+   ```bash
+   openclaw status          # Should show "Memory: enabled (plugin graphiti)"
+   openclaw graphiti status # Should show healthy
+   openclaw memory status   # Should still report file-based memory
+   ```
+
+Your existing `MEMORY.md` files and file-based memory index remain intact and
+accessible via `openclaw memory status`. Graphiti adds a knowledge graph layer
+on top without replacing the file system.
 
 ## Deploying Graphiti
 

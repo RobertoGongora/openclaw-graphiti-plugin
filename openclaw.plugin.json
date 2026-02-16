@@ -32,17 +32,41 @@
         "default": 10,
         "description": "Max facts to inject on auto-recall"
       },
-      "captureRoles": {
-        "type": "array",
-        "items": { "type": "string" },
-        "default": ["user", "assistant"],
-        "description": "Message roles to capture"
-      },
       "minPromptLength": {
         "type": "number",
         "default": 10,
         "description": "Minimum prompt length to trigger auto-recall"
       }
+    }
+  },
+  "uiHints": {
+    "url": {
+      "label": "Graphiti Server URL",
+      "placeholder": "http://localhost:8100",
+      "help": "URL of the Graphiti FastAPI server"
+    },
+    "groupId": {
+      "label": "Group ID",
+      "placeholder": "shiba-core",
+      "help": "Graph namespace for this agent"
+    },
+    "autoRecall": {
+      "label": "Auto-Recall",
+      "help": "Inject relevant facts before each conversation"
+    },
+    "autoCapture": {
+      "label": "Auto-Capture",
+      "help": "Ingest conversation content on compaction/reset"
+    },
+    "recallMaxFacts": {
+      "label": "Max Recall Facts",
+      "advanced": true,
+      "help": "Maximum number of facts to inject on auto-recall"
+    },
+    "minPromptLength": {
+      "label": "Min Prompt Length",
+      "advanced": true,
+      "help": "Minimum prompt length to trigger auto-recall"
     }
   }
 }
