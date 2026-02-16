@@ -285,6 +285,7 @@ const graphitiPlugin = {
     api.registerCli(
       ({ program }) => {
         const cmd = program.command("graphiti").description("Graphiti knowledge graph commands");
+        cmd.action(() => { cmd.outputHelp(); });
 
         cmd.command("status").description("Check Graphiti server health").action(async () => {
           const ok = await client.healthy();

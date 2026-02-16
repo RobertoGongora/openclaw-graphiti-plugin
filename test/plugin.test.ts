@@ -2,7 +2,7 @@
  * Plugin shape and registration tests.
  */
 
-import { describe, test, expect, beforeAll, afterAll } from "vitest";
+import { describe, test, expect, vi, beforeAll, afterAll } from "vitest";
 import {
   startMockServer,
   stopMockServer,
@@ -91,6 +91,48 @@ describe("registration", () => {
     plugin.register(api as any);
 
     expect(Object.keys(hooks)).toEqual(["before_agent_start"]);
+  });
+
+  test("graphiti CLI default action outputs help instead of erroring", async () => {
+    const { default: plugin } = await import("../index.js");
+    const { api, clis } = createMockApi();
+
+    plugin.register(api as any);
+
+    const graphitiCli = clis.find((c) =>
+      c.opts.commands.includes("graphiti"),
+    );
+    expect(graphitiCli).toBeDefined();
+
+    // Build a minimal mock Commander chain to capture the default action
+    let defaultAction: (() => void) | undefined;
+    const mockCmd = {
+      description: vi.fn().mockReturnThis(),
+      action: vi.fn((fn: () => void) => {
+        // First .action() call is the default handler on the parent command
+        if (!defaultAction) defaultAction = fn;
+        return mockCmd;
+      }),
+      command: vi.fn().mockReturnValue({
+        description: vi.fn().mockReturnThis(),
+        argument: vi.fn().mockReturnThis(),
+        option: vi.fn().mockReturnThis(),
+        action: vi.fn().mockReturnThis(),
+      }),
+      outputHelp: vi.fn(),
+    };
+    const mockProgram = {
+      command: vi.fn().mockReturnValue(mockCmd),
+    };
+
+    graphitiCli!.reg({ program: mockProgram });
+
+    // Default action should have been registered
+    expect(defaultAction).toBeInstanceOf(Function);
+
+    // Invoking it should call outputHelp (exit 0) rather than throwing or exiting 1
+    defaultAction!();
+    expect(mockCmd.outputHelp).toHaveBeenCalled();
   });
 
   test("registers memory CLI bridge via runtime", async () => {

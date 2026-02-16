@@ -22,7 +22,7 @@ First-class OpenClaw memory slot integration.
   renders labels, help text, and marks advanced fields.
 - **Peer dependency**: `openclaw >= 2026.1.26` declared so package managers can
   validate compatibility.
-- **Test suite**: 33 tests across 4 files (`test/plugin.test.ts`,
+- **Test suite**: 34 tests across 4 files (`test/plugin.test.ts`,
   `test/client.test.ts`, `test/tools.test.ts`, `test/hooks.test.ts`) using Vitest
   with a shared mock HTTP server (`test/helpers.ts`) matching the real Graphiti
   FastAPI contract. Covers plugin shape, registration, GraphitiClient, tool
@@ -37,6 +37,8 @@ First-class OpenClaw memory slot integration.
   Pydantic model has no default for this field and returns 422 if omitted.
 - `GraphitiClient.ingest()` documents that the server returns HTTP 202 (Accepted),
   not 200. `GraphitiClient.episodes()` documents the bare-array response format.
+- `openclaw graphiti` (no subcommand) now prints help and exits cleanly instead of
+  exiting with code 1.
 
 ### Removed
 
