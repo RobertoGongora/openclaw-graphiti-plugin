@@ -111,6 +111,18 @@ export class GraphitiClient {
   }
 
   /**
+   * Get episode count and most recent episode timestamp.
+   * Returns { count: 0, latestAt: null } on error or empty graph.
+   */
+  async episodeCount(): Promise<{ count: number; latestAt: string | null }> {
+    const eps = await this.episodes(10000);
+    return {
+      count: eps.length,
+      latestAt: eps.length > 0 ? (eps[0].created_at ?? null) : null,
+    };
+  }
+
+  /**
    * Get recent episodes.
    *
    * Note: The server returns a bare JSON array, not a wrapped object.

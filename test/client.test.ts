@@ -138,4 +138,18 @@ describe("GraphitiClient", () => {
     const eps = await client("http://127.0.0.1:1").episodes(10);
     expect(eps).toEqual([]);
   });
+
+  // -- episodeCount --
+
+  test("episodeCount() returns count and latest timestamp", async () => {
+    const stats = await client().episodeCount();
+    expect(stats.count).toBe(1);
+    expect(stats.latestAt).toBe("2024-01-15T10:30:00+00:00");
+  });
+
+  test("episodeCount() returns zeros when server is unreachable", async () => {
+    const stats = await client("http://127.0.0.1:1").episodeCount();
+    expect(stats.count).toBe(0);
+    expect(stats.latestAt).toBeNull();
+  });
 });

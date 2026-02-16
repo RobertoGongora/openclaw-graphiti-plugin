@@ -19,6 +19,19 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { Type } from "@sinclair/typebox";
 import { GraphitiClient } from "./client.js";
 
+function formatTimeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  if (diff < 0) return "just now";
+  const seconds = Math.floor(diff / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
 interface PluginConfig {
   url?: string;
   groupId?: string;
@@ -288,7 +301,17 @@ const graphitiPlugin = {
         cmd.command("status").description("Check Graphiti server health").action(async () => {
           const ok = await client.healthy();
           console.log(ok ? "✅ Graphiti is healthy" : "❌ Graphiti unreachable");
-          if (ok) { console.log(`  URL: ${url}`); console.log(`  Group: ${groupId}`); }
+          if (!ok) return;
+          console.log(`  URL: ${url}`);
+          console.log(`  Group: ${groupId}`);
+          const stats = await client.episodeCount();
+          if (stats.count > 0) {
+            const countLabel = stats.count >= 10000 ? "10000+" : String(stats.count);
+            console.log(`  Episodes: ${countLabel}`);
+          }
+          if (stats.latestAt) {
+            console.log(`  Last capture: ${formatTimeAgo(stats.latestAt)}`);
+          }
         });
 
         cmd.command("search").description("Search the knowledge graph")
