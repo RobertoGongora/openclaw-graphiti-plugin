@@ -24,6 +24,9 @@
     "client.ts",
     "openclaw.plugin.json"
   ],
+  "scripts": {
+    "test": "vitest run"
+  },
   "engines": {
     "node": ">=20"
   },
