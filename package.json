@@ -1,5 +1,5 @@
 {
-  "name": "openclaw-graphiti-plugin",
+  "name": "@robertogongora/graphiti",
   "version": "0.2.0",
   "description": "Graphiti temporal knowledge graph plugin for OpenClaw",
   "type": "module",
@@ -8,7 +8,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/RobertoGongora/openclaw-graphiti-plugin"
+    "url": "git+https://github.com/RobertoGongora/openclaw-graphiti-plugin.git"
   },
   "keywords": [
     "openclaw",
@@ -34,9 +34,6 @@
   },
   "dependencies": {
     "@sinclair/typebox": "^0.34.48"
-  },
-  "peerDependencies": {
-    "openclaw": ">=2026.1.26"
   },
   "devDependencies": {
     "vitest": "^4.0.18"

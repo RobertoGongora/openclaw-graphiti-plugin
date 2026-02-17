@@ -1,4 +1,4 @@
-# openclaw-graphiti-plugin
+# @robertogongora/graphiti
 
 Temporal knowledge graph plugin for [OpenClaw](https://github.com/openclaw/openclaw) using [Graphiti](https://github.com/getzep/graphiti) + Neo4j.
 
@@ -22,7 +22,7 @@ Temporal knowledge graph plugin for [OpenClaw](https://github.com/openclaw/openc
 ### From npm
 
 ```bash
-openclaw plugins install openclaw-graphiti-plugin
+openclaw plugins install @robertogongora/graphiti
 ```
 
 ### From local directory

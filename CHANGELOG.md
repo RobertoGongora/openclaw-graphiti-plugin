@@ -20,16 +20,15 @@ First-class OpenClaw memory slot integration.
 - **UI hints**: `uiHints` in manifest for all config properties (`url`, `groupId`,
   `autoRecall`, `autoCapture`, `recallMaxFacts`, `minPromptLength`). Settings UI now
   renders labels, help text, and marks advanced fields.
-- **Peer dependency**: `openclaw >= 2026.1.26` declared so package managers can
-  validate compatibility.
 - **Status stats**: `openclaw graphiti status` now shows episode count and last
   capture timestamp when the graph has data.
 - **Optional auth header**: New `apiKey` config field. When set, all HTTP requests
   to the Graphiti server include an `Authorization: Bearer <apiKey>` header. Useful
   for reverse proxy / API gateway scenarios. Marked `sensitive` in UI hints.
-- **npm publish ready**: Package renamed from `@openclaw-plugins/graphiti` to
-  `openclaw-graphiti-plugin` (unscoped, no npm org required). Added `files` array
-  to `package.json` for clean tarball. Install via `openclaw plugins install openclaw-graphiti-plugin`.
+- **npm publish ready**: Package renamed to `@robertogongora/graphiti`. The
+  unscoped part (`graphiti`) matches the manifest `id`, which is required by
+  OpenClaw's `plugins install` command. Added `files` array to `package.json`
+  for clean tarball. Install via `openclaw plugins install @robertogongora/graphiti`.
 - **Test suite**: 41 tests across 4 files (`test/plugin.test.ts`,
   `test/client.test.ts`, `test/tools.test.ts`, `test/hooks.test.ts`) using Vitest
   with a shared mock HTTP server (`test/helpers.ts`) matching the real Graphiti
