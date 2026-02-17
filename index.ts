@@ -53,9 +53,9 @@ const graphitiPlugin = {
     const cfg = (api.pluginConfig ?? {}) as PluginConfig;
     const url = cfg.url ?? "http://localhost:8100";
     const groupId = cfg.groupId ?? "core";
-    const autoRecall = cfg.autoRecall !== false;
+    const autoRecall = cfg.autoRecall === true;
     const autoCapture = cfg.autoCapture !== false;
-    const recallMaxFacts = cfg.recallMaxFacts ?? 10;
+    const recallMaxFacts = cfg.recallMaxFacts ?? 1;
     const minPromptLength = cfg.minPromptLength ?? 10;
     const apiKey = cfg.apiKey;
 

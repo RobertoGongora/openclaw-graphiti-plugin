@@ -1,6 +1,26 @@
 # Changelog
 
-## 0.2.0 (unreleased)
+## 0.2.1
+
+### Added
+
+- **Remote setup docs**: README now covers non-localhost deployments, including
+  custom URLs, external Neo4j instances, and authentication.
+- **Auth docs**: README documents the `apiKey` option with config examples for
+  reverse proxy and API gateway scenarios.
+- **Auto-recall docs**: New "Auto-recall vs on-demand search" section explains
+  the tradeoff and recommends on-demand `graphiti_search` as the default approach.
+
+### Changed
+
+- **`autoRecall` defaults to `false`** (was `true`): Auto-recall injected facts on
+  every turn regardless of relevance, adding token cost and context noise. The
+  recommended approach is now on-demand search via the `graphiti_search` tool. Set
+  `autoRecall: true` to opt back in.
+- **`recallMaxFacts` defaults to `1`** (was `10`): When auto-recall is enabled,
+  injecting fewer facts reduces noise. Increase as needed.
+
+## 0.2.0
 
 First-class OpenClaw memory slot integration.
 

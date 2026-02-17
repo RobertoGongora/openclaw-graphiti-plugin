@@ -111,12 +111,94 @@ openclaw memory status
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `url` | string | `http://localhost:8100` | Graphiti server URL |
+| `apiKey` | string | _(none)_ | Bearer token for authenticated Graphiti servers |
 | `groupId` | string | `core` | Graph namespace |
-| `autoRecall` | boolean | `true` | Inject relevant facts before each turn |
+| `autoRecall` | boolean | `false` | Inject relevant facts before each turn (opt-in) |
 | `autoCapture` | boolean | `true` | Ingest conversations on compaction/reset |
-| `recallMaxFacts` | number | `10` | Max facts to inject on recall |
+| `recallMaxFacts` | number | `1` | Max facts to inject on recall |
 | `minPromptLength` | number | `10` | Min prompt length to trigger recall |
-| `apiKey` | string | *(none)* | Optional Bearer token for reverse proxy auth |
+
+### Auto-recall vs on-demand search
+
+By default, `autoRecall` is **off**. The agent can still search the knowledge graph
+anytime using the `graphiti_search` tool — this is the recommended approach since it
+lets the agent decide when context is needed rather than injecting facts on every turn.
+
+If you enable `autoRecall`, the plugin searches the graph before each conversation turn
+and injects matching facts as a `<graphiti-context>` block. This can be useful for
+short sessions or when you want the agent to always have background context, but it
+adds latency and token cost to every message — and the results may not always be
+relevant to the current conversation.
+
+```bash
+# Enable auto-recall (opt-in)
+openclaw config set plugins.entries.graphiti.config.autoRecall true
+
+# Control how many facts get injected per turn (default: 1)
+openclaw config set plugins.entries.graphiti.config.recallMaxFacts 5
+```
+
+### Remote / non-localhost setup
+
+If your Graphiti server isn't on localhost (e.g., running on a different host, in
+Coolify, or behind a reverse proxy), update the URL:
+
+```bash
+openclaw config set plugins.entries.graphiti.config.url https://graphiti.example.com
+```
+
+Or in config JSON:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "graphiti": {
+        "config": {
+          "url": "https://graphiti.example.com",
+          "groupId": "my-agent"
+        }
+      }
+    }
+  }
+}
+```
+
+For the docker-compose, update Neo4j connection vars if using an external instance:
+
+```yaml
+NEO4J_URI: neo4j+s://your-neo4j-host:7687
+```
+
+### Authentication
+
+If your Graphiti server requires authentication (e.g., behind an API gateway or
+reverse proxy with bearer token auth), set the `apiKey` config option. The plugin
+sends it as a `Bearer` token in the `Authorization` header on all requests.
+
+```bash
+openclaw config set plugins.entries.graphiti.config.apiKey your-secret-token
+```
+
+Or in config JSON:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "graphiti": {
+        "config": {
+          "url": "https://graphiti.example.com",
+          "apiKey": "your-secret-token"
+        }
+      }
+    }
+  }
+}
+```
+
+When `apiKey` is not set, no `Authorization` header is sent (suitable for localhost
+or trusted-network deployments).
 
 ## How it works
 
