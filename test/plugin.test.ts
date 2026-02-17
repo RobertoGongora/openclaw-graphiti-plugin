@@ -45,14 +45,14 @@ describe("registration", () => {
       expect.arrayContaining(["graphiti_search", "graphiti_ingest"]),
     );
 
-    // 3 hooks: before_agent_start, before_compaction, before_reset
+    // 2 hooks by default (autoRecall=false): before_compaction, before_reset
     expect(Object.keys(hooks)).toEqual(
       expect.arrayContaining([
-        "before_agent_start",
         "before_compaction",
         "before_reset",
       ]),
     );
+    expect(Object.keys(hooks)).not.toContain("before_agent_start");
 
     // 2 CLI registrations: graphiti + memory (bridge)
     expect(clis).toHaveLength(2);

@@ -27,7 +27,7 @@ describe("hooks", () => {
   describe("before_agent_start", () => {
     test("injects facts as prependContext", async () => {
       const { default: plugin } = await import("../index.js");
-      const { api, hooks } = createMockApi();
+      const { api, hooks } = createMockApi({ autoRecall: true });
       plugin.register(api as any);
 
       const handler = hooks["before_agent_start"][0];
@@ -44,7 +44,7 @@ describe("hooks", () => {
 
     test("returns undefined for short prompts", async () => {
       const { default: plugin } = await import("../index.js");
-      const { api, hooks } = createMockApi({ minPromptLength: 20 });
+      const { api, hooks } = createMockApi({ autoRecall: true, minPromptLength: 20 });
       plugin.register(api as any);
 
       const handler = hooks["before_agent_start"][0];
@@ -55,7 +55,7 @@ describe("hooks", () => {
 
     test("returns undefined for HEARTBEAT", async () => {
       const { default: plugin } = await import("../index.js");
-      const { api, hooks } = createMockApi();
+      const { api, hooks } = createMockApi({ autoRecall: true });
       plugin.register(api as any);
 
       const handler = hooks["before_agent_start"][0];
@@ -68,7 +68,7 @@ describe("hooks", () => {
 
     test("returns undefined for boot check", async () => {
       const { default: plugin } = await import("../index.js");
-      const { api, hooks } = createMockApi();
+      const { api, hooks } = createMockApi({ autoRecall: true });
       plugin.register(api as any);
 
       const handler = hooks["before_agent_start"][0];
@@ -82,7 +82,7 @@ describe("hooks", () => {
     test("returns undefined when server is unhealthy", async () => {
       mockOverrides.healthy = false;
       const { default: plugin } = await import("../index.js");
-      const { api, hooks } = createMockApi();
+      const { api, hooks } = createMockApi({ autoRecall: true });
       plugin.register(api as any);
 
       const handler = hooks["before_agent_start"][0];
@@ -96,7 +96,7 @@ describe("hooks", () => {
     test("returns undefined when no facts found", async () => {
       mockOverrides.searchFacts = [];
       const { default: plugin } = await import("../index.js");
-      const { api, hooks } = createMockApi();
+      const { api, hooks } = createMockApi({ autoRecall: true });
       plugin.register(api as any);
 
       const handler = hooks["before_agent_start"][0];
