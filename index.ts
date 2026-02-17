@@ -39,6 +39,8 @@ interface PluginConfig {
   autoCapture?: boolean;
   recallMaxFacts?: number;
   minPromptLength?: number;
+  /** Optional API key sent as Bearer token for reverse proxy auth. */
+  apiKey?: string;
 }
 
 const graphitiPlugin = {
@@ -55,8 +57,9 @@ const graphitiPlugin = {
     const autoCapture = cfg.autoCapture !== false;
     const recallMaxFacts = cfg.recallMaxFacts ?? 10;
     const minPromptLength = cfg.minPromptLength ?? 10;
+    const apiKey = cfg.apiKey;
 
-    const client = new GraphitiClient(url, groupId, api.logger);
+    const client = new GraphitiClient(url, groupId, api.logger, apiKey);
 
     // ========================================================================
     // Tools

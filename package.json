@@ -1,5 +1,5 @@
 {
-  "name": "@openclaw-plugins/graphiti",
+  "name": "openclaw-graphiti-plugin",
   "version": "0.2.0",
   "description": "Graphiti temporal knowledge graph plugin for OpenClaw",
   "type": "module",
@@ -15,7 +15,14 @@
     "plugin",
     "graphiti",
     "knowledge-graph",
-    "memory"
+    "memory",
+    "neo4j",
+    "temporal"
+  ],
+  "files": [
+    "index.ts",
+    "client.ts",
+    "openclaw.plugin.json"
   ],
   "engines": {
     "node": ">=20"

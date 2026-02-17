@@ -24,7 +24,13 @@ First-class OpenClaw memory slot integration.
   validate compatibility.
 - **Status stats**: `openclaw graphiti status` now shows episode count and last
   capture timestamp when the graph has data.
-- **Test suite**: 36 tests across 4 files (`test/plugin.test.ts`,
+- **Optional auth header**: New `apiKey` config field. When set, all HTTP requests
+  to the Graphiti server include an `Authorization: Bearer <apiKey>` header. Useful
+  for reverse proxy / API gateway scenarios. Marked `sensitive` in UI hints.
+- **npm publish ready**: Package renamed from `@openclaw-plugins/graphiti` to
+  `openclaw-graphiti-plugin` (unscoped, no npm org required). Added `files` array
+  to `package.json` for clean tarball. Install via `openclaw plugins install openclaw-graphiti-plugin`.
+- **Test suite**: 41 tests across 4 files (`test/plugin.test.ts`,
   `test/client.test.ts`, `test/tools.test.ts`, `test/hooks.test.ts`) using Vitest
   with a shared mock HTTP server (`test/helpers.ts`) matching the real Graphiti
   FastAPI contract. Covers plugin shape, registration, GraphitiClient, tool

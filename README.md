@@ -19,7 +19,13 @@ Temporal knowledge graph plugin for [OpenClaw](https://github.com/openclaw/openc
 
 ## Installation
 
-### Link from local directory
+### From npm
+
+```bash
+openclaw plugins install openclaw-graphiti-plugin
+```
+
+### From local directory
 
 ```bash
 # Clone the repo
@@ -105,11 +111,12 @@ openclaw memory status
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `url` | string | `http://localhost:8100` | Graphiti server URL |
-| `groupId` | string | `shiba-core` | Graph namespace |
+| `groupId` | string | `core` | Graph namespace |
 | `autoRecall` | boolean | `true` | Inject relevant facts before each turn |
 | `autoCapture` | boolean | `true` | Ingest conversations on compaction/reset |
 | `recallMaxFacts` | number | `10` | Max facts to inject on recall |
 | `minPromptLength` | number | `10` | Min prompt length to trigger recall |
+| `apiKey` | string | *(none)* | Optional Bearer token for reverse proxy auth |
 
 ## How it works
 

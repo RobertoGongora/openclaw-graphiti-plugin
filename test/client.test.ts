@@ -14,6 +14,7 @@ import {
   getMockPort,
   mockOverrides,
   lastRequest,
+  lastHeaders,
 } from "./helpers.js";
 
 describe("GraphitiClient", () => {
@@ -151,5 +152,46 @@ describe("GraphitiClient", () => {
     const stats = await client("http://127.0.0.1:1").episodeCount();
     expect(stats.count).toBe(0);
     expect(stats.latestAt).toBeNull();
+  });
+
+  // -- apiKey auth header --
+
+  function clientWithKey(apiKey?: string) {
+    return new GraphitiClient(
+      `http://127.0.0.1:${getMockPort()}`,
+      "test-group",
+      undefined,
+      apiKey,
+    );
+  }
+
+  test("sends Authorization header on search when apiKey is set", async () => {
+    await clientWithKey("sk-test-123").search("test");
+    expect(lastHeaders["/search"]?.["authorization"]).toBe("Bearer sk-test-123");
+  });
+
+  test("sends Authorization header on healthcheck when apiKey is set", async () => {
+    await clientWithKey("sk-test-123").healthy();
+    expect(lastHeaders["/healthcheck"]?.["authorization"]).toBe("Bearer sk-test-123");
+  });
+
+  test("sends Authorization header on episodes when apiKey is set", async () => {
+    const c = clientWithKey("sk-test-123");
+    await c.episodes(5);
+    // episodes path includes the group_id
+    const epHeaders = lastHeaders[`/episodes/test-group`];
+    expect(epHeaders?.["authorization"]).toBe("Bearer sk-test-123");
+  });
+
+  test("sends Authorization header on ingest when apiKey is set", async () => {
+    await clientWithKey("sk-test-123").ingest([
+      { content: "test", role_type: "user", role: "user" },
+    ]);
+    expect(lastHeaders["/messages"]?.["authorization"]).toBe("Bearer sk-test-123");
+  });
+
+  test("does NOT send Authorization header when apiKey is omitted", async () => {
+    await clientWithKey().search("test");
+    expect(lastHeaders["/search"]?.["authorization"]).toBeUndefined();
   });
 });

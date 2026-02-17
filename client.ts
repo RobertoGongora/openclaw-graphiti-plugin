@@ -28,8 +28,16 @@ export class GraphitiClient {
   constructor(
     private url: string,
     private groupId: string,
-    private logger?: { info?: (...args: any[]) => void; warn: (...args: any[]) => void }
+    private logger?: { info?: (...args: any[]) => void; warn: (...args: any[]) => void },
+    private apiKey?: string,
   ) {}
+
+  /** Build headers, optionally including the Authorization bearer token. */
+  private headers(extra: Record<string, string> = {}): Record<string, string> {
+    const h: Record<string, string> = { ...extra };
+    if (this.apiKey) h["Authorization"] = `Bearer ${this.apiKey}`;
+    return h;
+  }
 
   private async fetch(path: string, body: unknown): Promise<any> {
     const controller = new AbortController();
@@ -38,7 +46,7 @@ export class GraphitiClient {
     try {
       const res = await fetch(`${this.url}${path}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: this.headers({ "Content-Type": "application/json" }),
         body: JSON.stringify(body),
         signal: controller.signal,
       });
@@ -100,7 +108,10 @@ export class GraphitiClient {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 5_000);
       try {
-        const res = await fetch(`${this.url}/healthcheck`, { signal: controller.signal });
+        const res = await fetch(`${this.url}/healthcheck`, {
+          headers: this.headers(),
+          signal: controller.signal,
+        });
         return res.ok;
       } finally {
         clearTimeout(timeout);
@@ -133,6 +144,7 @@ export class GraphitiClient {
       const timeout = setTimeout(() => controller.abort(), 10_000);
       try {
         const res = await fetch(`${this.url}/episodes/${this.groupId}?last_n=${lastN}`, {
+          headers: this.headers(),
           signal: controller.signal,
         });
         if (!res.ok) return [];

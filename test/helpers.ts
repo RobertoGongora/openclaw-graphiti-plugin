@@ -68,6 +68,8 @@ let port: number;
 
 export let mockOverrides: MockOverrides = {};
 export const lastRequest: Record<string, unknown> = {};
+/** Headers from the most recent request to each path (lowercase keys). */
+export const lastHeaders: Record<string, Record<string, string>> = {};
 
 export function getMockPort(): number {
   return port;
@@ -76,6 +78,7 @@ export function getMockPort(): number {
 export function resetMockState(): void {
   mockOverrides = {};
   for (const key of Object.keys(lastRequest)) delete lastRequest[key];
+  for (const key of Object.keys(lastHeaders)) delete lastHeaders[key];
 }
 
 function readBody(req: http.IncomingMessage): Promise<string> {
@@ -86,10 +89,21 @@ function readBody(req: http.IncomingMessage): Promise<string> {
   });
 }
 
+function captureHeaders(pathname: string, req: http.IncomingMessage): void {
+  const h: Record<string, string> = {};
+  for (const [key, val] of Object.entries(req.headers)) {
+    if (typeof val === "string") h[key] = val;
+  }
+  lastHeaders[pathname] = h;
+}
+
 export function startMockServer(): Promise<void> {
   return new Promise((resolve) => {
     server = http.createServer(async (req, res) => {
       const url = new URL(req.url ?? "/", "http://localhost");
+
+      // Capture headers for every request
+      captureHeaders(url.pathname, req);
 
       // GET /healthcheck
       if (req.method === "GET" && url.pathname === "/healthcheck") {

@@ -36,6 +36,10 @@
         "type": "number",
         "default": 10,
         "description": "Minimum prompt length to trigger auto-recall"
+      },
+      "apiKey": {
+        "type": "string",
+        "description": "Optional API key sent as Bearer token (for reverse proxy auth)"
       }
     }
   },
@@ -67,6 +71,12 @@
       "label": "Min Prompt Length",
       "advanced": true,
       "help": "Minimum prompt length to trigger auto-recall"
+    },
+    "apiKey": {
+      "label": "API Key",
+      "advanced": true,
+      "sensitive": true,
+      "help": "Optional Bearer token for Graphiti server auth (reverse proxy scenarios)"
     }
   }
 }
