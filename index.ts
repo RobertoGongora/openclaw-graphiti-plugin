@@ -47,7 +47,6 @@ const graphitiPlugin = {
   id: "graphiti",
   name: "Graphiti Knowledge Graph",
   description: "Temporal knowledge graph for persistent agent memory",
-  kind: "memory" as const,
 
   register(api: OpenClawPluginApi) {
     const cfg = (api.pluginConfig ?? {}) as PluginConfig;

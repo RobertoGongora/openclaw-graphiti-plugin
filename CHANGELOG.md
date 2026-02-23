@@ -1,3 +1,40 @@
+## 0.3.0
+
+### Breaking
+
+- **Removed `kind: "memory"` slot claim** from `openclaw.plugin.json` and `index.ts`.
+  Graphiti no longer occupies the exclusive `plugins.slots.memory` slot, so
+  `memory-core` (or any other memory plugin) can now run alongside it without being
+  auto-disabled.
+
+  **Migration:** If you were relying on Graphiti as your memory slot provider (i.e.
+  `plugins.slots.memory = "graphiti"`), you must now explicitly re-enable `memory-core`:
+
+  ```json
+  {
+    "plugins": {
+      "slots": { "memory": "memory-core" },
+      "entries": { "memory-core": { "enabled": true } }
+    }
+  }
+  ```
+
+  All Graphiti tools (`graphiti_search`, `graphiti_ingest`), hooks (`before_compaction`,
+  `before_reset`), and the CLI still function identically — only the slot claim is removed.
+
+### Changed
+
+- **Graphiti is now a complementary plugin, not a replacement memory backend.**
+  The recommended setup is `memory-core` as the slot owner (providing `memory_search`
+  and `memory_get` over workspace Markdown files) with Graphiti running alongside for
+  temporal knowledge graph queries via `graphiti_search`. Both operate independently
+  on different data sources: file-based notes vs. entity/relationship graph.
+
+- **Memory CLI bridge** (`openclaw memory status`) is retained for backwards
+  compatibility but is now a no-op redirect — `memory-core` handles the `memory`
+  CLI directly when it holds the slot.
+
+
 # Changelog
 
 ## 0.2.1

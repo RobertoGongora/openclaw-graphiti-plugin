@@ -1,6 +1,6 @@
 {
   "name": "@robertogongora/graphiti",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Graphiti temporal knowledge graph plugin for OpenClaw",
   "type": "module",
   "main": "index.ts",
