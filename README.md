@@ -4,18 +4,17 @@ Temporal knowledge graph plugin for [OpenClaw](https://github.com/openclaw/openc
 
 ## What it does
 
-- **Auto-recall**: Before each conversation turn, searches the knowledge graph for relevant facts based on the user's prompt and injects them into context
-- **Auto-capture**: Before compaction or session reset, ingests the conversation into the knowledge graph for entity/relationship extraction
-- **Native tools**: `graphiti_search` and `graphiti_ingest` available as agent tools
+- **Knowledge graph tools**: `graphiti_search` and `graphiti_ingest` available as agent tools for on-demand entity/relationship queries and manual ingestion
+- **Auto-capture**: Before compaction or session reset, ingests the conversation into the knowledge graph for entity/relationship extraction (async, via Graphiti's LLM pipeline)
+- **Auto-recall**: Optionally injects relevant facts before each turn — off by default, see [Auto-recall vs on-demand search](#auto-recall-vs-on-demand-search)
 - **CLI**: `openclaw graphiti status|search|episodes`
-- **Memory CLI bridge**: `openclaw memory status|index|search` (built-in file-based memory)
 - **Slash command**: `/graphiti` for quick health check
 
 ## Requirements
 
 - Graphiti server running (e.g., `http://localhost:8100`)
-- Neo4j database (Graphiti manages this)
-- OpenAI API key configured in Graphiti server
+- Neo4j database (Graphiti manages the connection)
+- OpenAI API key configured on the Graphiti server
 
 ## Installation
 
@@ -28,50 +27,41 @@ openclaw plugins install @robertogongora/graphiti
 ### From local directory
 
 ```bash
-# Clone the repo
 git clone https://github.com/RobertoGongora/openclaw-graphiti-plugin.git
-
-# Add to OpenClaw config
-openclaw config set plugins.load.paths '["/path/to/openclaw-graphiti-plugin"]'
-```
-
-### Auto-discovery
-
-Place the plugin in one of OpenClaw's extension directories:
-
-```bash
-# Global (all workspaces)
 ln -s /path/to/openclaw-graphiti-plugin ~/.openclaw/extensions/graphiti
-
-# Workspace-local
-ln -s /path/to/openclaw-graphiti-plugin .openclaw/extensions/graphiti
 ```
 
-The plugin declares `openclaw.extensions` in `package.json`, so OpenClaw discovers it automatically.
+The plugin declares `openclaw.extensions` in `package.json`, so OpenClaw discovers it automatically from `~/.openclaw/extensions/`.
 
-## Memory slot configuration
+## Recommended setup
 
-This plugin declares `kind: "memory"`. OpenClaw's memory slot is **exclusive** -- only one memory plugin can be active at a time. When Graphiti is selected, `memory-core` (the default) is automatically disabled.
+As of v0.3.0, Graphiti does **not** claim the exclusive memory slot. The recommended
+setup is to run Graphiti alongside `memory-core`:
 
-### Select Graphiti as memory plugin
+- **`memory-core`** owns the memory slot → provides `memory_search` and `memory_get`
+  over your workspace Markdown files (`MEMORY.md`, `memory/*.md`)
+- **Graphiti** runs as a complementary plugin → provides `graphiti_search` and
+  `graphiti_ingest` for temporal knowledge graph queries, and auto-captures
+  conversations on compaction/reset
 
-```bash
-openclaw config set plugins.slots.memory graphiti
-```
-
-Or in `~/.openclaw/settings.json`:
+This gives you file-based semantic search (hybrid BM25 + vector) **and** a temporal
+knowledge graph, operating independently on different data.
 
 ```json
 {
   "plugins": {
     "slots": {
-      "memory": "graphiti"
+      "memory": "memory-core"
     },
     "entries": {
+      "memory-core": { "enabled": true },
       "graphiti": {
+        "enabled": true,
         "config": {
           "url": "http://localhost:8100",
-          "groupId": "core"
+          "groupId": "core",
+          "autoCapture": true,
+          "autoRecall": false
         }
       }
     }
@@ -79,32 +69,14 @@ Or in `~/.openclaw/settings.json`:
 }
 ```
 
-### Revert to default (memory-core)
+### When to use each tool
 
-```bash
-openclaw config set plugins.slots.memory memory-core
-```
-
-### Disable all memory plugins
-
-```bash
-openclaw config set plugins.slots.memory none
-```
-
-## Status commands
-
-With Graphiti active:
-
-```bash
-# Overall status -- shows "Memory: enabled (plugin graphiti)"
-openclaw status
-
-# Graphiti server health
-openclaw graphiti status
-
-# Built-in file-based memory (MEMORY.md index) -- still works via bridge
-openclaw memory status
-```
+| Need | Tool |
+|------|------|
+| "What did I write about X in my notes?" | `memory_search` (memory-core) |
+| "What's the relationship between X and Y?" | `graphiti_search` |
+| "What was the history of project X?" | `graphiti_search` (temporal queries) |
+| "Remember this fact long-term" | `graphiti_ingest` |
 
 ## Configuration
 
@@ -112,42 +84,50 @@ openclaw memory status
 |--------|------|---------|-------------|
 | `url` | string | `http://localhost:8100` | Graphiti server URL |
 | `apiKey` | string | _(none)_ | Bearer token for authenticated Graphiti servers |
-| `groupId` | string | `core` | Graph namespace |
+| `groupId` | string | `core` | Graph namespace (use different IDs per agent) |
 | `autoRecall` | boolean | `false` | Inject relevant facts before each turn (opt-in) |
 | `autoCapture` | boolean | `true` | Ingest conversations on compaction/reset |
-| `recallMaxFacts` | number | `1` | Max facts to inject on recall |
-| `minPromptLength` | number | `10` | Min prompt length to trigger recall |
+| `recallMaxFacts` | number | `1` | Max facts to inject per turn when auto-recall is on |
+| `minPromptLength` | number | `10` | Min prompt length to trigger auto-recall |
 
-### Auto-recall vs on-demand search
+## Auto-recall vs on-demand search
 
-By default, `autoRecall` is **off**. The agent can still search the knowledge graph
-anytime using the `graphiti_search` tool — this is the recommended approach since it
-lets the agent decide when context is needed rather than injecting facts on every turn.
+By default, `autoRecall` is **off**. The agent can search the knowledge graph at any
+time using the `graphiti_search` tool — this is the recommended approach. The agent
+decides when graph context is relevant rather than injecting facts on every turn.
 
-If you enable `autoRecall`, the plugin searches the graph before each conversation turn
-and injects matching facts as a `<graphiti-context>` block. This can be useful for
-short sessions or when you want the agent to always have background context, but it
-adds latency and token cost to every message — and the results may not always be
-relevant to the current conversation.
+When `autoRecall: true`, the plugin fires `before_agent_start`, searches Graphiti with
+the incoming prompt, and injects matching facts as a `<graphiti-context>` block. This
+adds latency and token cost to every message. Useful when you want persistent background
+context without explicitly calling `graphiti_search`.
 
-```bash
-# Enable auto-recall (opt-in)
-openclaw config set plugins.entries.graphiti.config.autoRecall true
-
-# Control how many facts get injected per turn (default: 1)
-openclaw config set plugins.entries.graphiti.config.recallMaxFacts 5
+```json
+{
+  "plugins": {
+    "entries": {
+      "graphiti": {
+        "config": {
+          "autoRecall": true,
+          "recallMaxFacts": 5
+        }
+      }
+    }
+  }
+}
 ```
 
-### Remote / non-localhost setup
+## Auto-capture flow
 
-If your Graphiti server isn't on localhost (e.g., running on a different host, in
-Coolify, or behind a reverse proxy), update the URL:
-
-```bash
-openclaw config set plugins.entries.graphiti.config.url https://graphiti.example.com
+```
+Session compacts or resets
+  -> before_compaction / before_reset fires
+  -> Plugin extracts user+assistant messages (min 4)
+  -> POSTs up to 12,000 chars to Graphiti /messages
+  -> Graphiti extracts entities + relationships async (gpt-5-nano or configured model)
+  -> Facts become queryable via graphiti_search
 ```
 
-Or in config JSON:
+## Remote / non-localhost setup
 
 ```json
 {
@@ -164,23 +144,15 @@ Or in config JSON:
 }
 ```
 
-For the docker-compose, update Neo4j connection vars if using an external instance:
+For Docker, update Neo4j connection if using an external instance:
 
 ```yaml
 NEO4J_URI: neo4j+s://your-neo4j-host:7687
 ```
 
-### Authentication
+## Authentication
 
-If your Graphiti server requires authentication (e.g., behind an API gateway or
-reverse proxy with bearer token auth), set the `apiKey` config option. The plugin
-sends it as a `Bearer` token in the `Authorization` header on all requests.
-
-```bash
-openclaw config set plugins.entries.graphiti.config.apiKey your-secret-token
-```
-
-Or in config JSON:
+For Graphiti servers behind a reverse proxy or API gateway with bearer token auth:
 
 ```json
 {
@@ -197,69 +169,13 @@ Or in config JSON:
 }
 ```
 
-When `apiKey` is not set, no `Authorization` header is sent (suitable for localhost
-or trusted-network deployments).
-
-## How it works
-
-### Auto-recall flow
-```
-User sends message
-  -> before_agent_start fires
-  -> Plugin searches Graphiti with user's prompt
-  -> Top facts injected as <graphiti-context> block
-  -> Agent sees relevant knowledge alongside the prompt
-```
-
-### Auto-capture flow
-```
-Session compacts or resets
-  -> before_compaction / before_reset fires
-  -> Plugin extracts user+assistant text
-  -> Filters out short exchanges (<4 messages)
-  -> POSTs to Graphiti /messages endpoint
-  -> Graphiti extracts entities + relationships async
-```
-
-### Memory slot behavior
-```
-plugins.slots.memory = "graphiti"
-  -> memory-core: disabled (auto, slot exclusivity)
-  -> graphiti: enabled, selected
-  -> openclaw status: "Memory: enabled (plugin graphiti)"
-  -> openclaw memory status: works (bridge to built-in file memory)
-  -> openclaw graphiti status: works (knowledge graph health)
-```
-
-## Migrating from memory-core
-
-1. Install the Graphiti plugin (see Installation above)
-2. Deploy a Graphiti server (see Deploying Graphiti below)
-3. Set the memory slot:
-   ```bash
-   openclaw config set plugins.slots.memory graphiti
-   ```
-4. Configure the plugin:
-   ```bash
-   openclaw config set plugins.entries.graphiti.config.url http://localhost:8100
-   ```
-5. Verify:
-   ```bash
-   openclaw status          # Should show "Memory: enabled (plugin graphiti)"
-   openclaw graphiti status # Should show healthy
-   openclaw memory status   # Should still report file-based memory
-   ```
-
-Your existing `MEMORY.md` files and file-based memory index remain intact and
-accessible via `openclaw memory status`. Graphiti adds a knowledge graph layer
-on top without replacing the file system.
+When `apiKey` is not set, no `Authorization` header is sent.
 
 ## Deploying Graphiti
 
-See the [Graphiti GitHub](https://github.com/getzep/graphiti) for deployment options. Quick local setup:
+Quick local setup with Docker Compose:
 
 ```yaml
-# docker-compose.yml
 services:
   neo4j:
     image: neo4j:5-community
@@ -270,6 +186,10 @@ services:
       - "7687:7687"
     volumes:
       - neo4j_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 || exit 1"]
+      interval: 10s
+      retries: 5
 
   graphiti:
     image: zepai/graphiti:latest
@@ -288,6 +208,38 @@ services:
 volumes:
   neo4j_data:
 ```
+
+See the [Graphiti GitHub](https://github.com/getzep/graphiti) for full deployment options including Coolify, Railway, and cloud-hosted Neo4j.
+
+## Status commands
+
+```bash
+openclaw graphiti status          # Graphiti server health + episode count
+openclaw graphiti search "query"  # Search the knowledge graph
+openclaw graphiti episodes        # Recent ingested episodes
+openclaw memory status            # File-based memory index (memory-core)
+```
+
+## Migrating from v0.2.x
+
+In v0.2.x, Graphiti declared `kind: "memory"` and claimed the exclusive memory slot,
+auto-disabling `memory-core`. This is removed in v0.3.0.
+
+If you were using `plugins.slots.memory = "graphiti"`, update your config:
+
+```json
+{
+  "plugins": {
+    "slots": { "memory": "memory-core" },
+    "entries": {
+      "memory-core": { "enabled": true },
+      "graphiti": { "enabled": true }
+    }
+  }
+}
+```
+
+All Graphiti tools, hooks, and CLI remain unchanged.
 
 ## License
 
