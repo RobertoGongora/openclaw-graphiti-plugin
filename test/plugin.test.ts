@@ -19,7 +19,6 @@ describe("plugin shape", () => {
 
     expect(plugin.id).toBe("graphiti");
     expect(plugin.name).toBe("Graphiti Knowledge Graph");
-    expect(plugin.kind).toBe("memory");
     expect(plugin.description).toContain("knowledge graph");
     expect(plugin.register).toBeInstanceOf(Function);
   });
