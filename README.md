@@ -2,6 +2,9 @@
 
 Temporal knowledge graph plugin for [OpenClaw](https://github.com/openclaw/openclaw) using [Graphiti](https://github.com/getzep/graphiti) + Neo4j.
 
+> **⚠️ Upgrading from v0.2.x?** As of v0.3.0, Graphiti no longer claims the `plugins.slots.memory` slot. If you were using `plugins.slots.memory = "graphiti"`, you must re-enable `memory-core` manually — see [Migrating from v0.2.x](#migrating-from-v02x).
+
+
 ## What it does
 
 - **Knowledge graph tools**: `graphiti_search` and `graphiti_ingest` available as agent tools for on-demand entity/relationship queries and manual ingestion
