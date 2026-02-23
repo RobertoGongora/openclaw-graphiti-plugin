@@ -1,3 +1,9 @@
+## 0.3.1
+
+### Fixed
+
+- Remove failing `plugin.kind === "memory"` assertion from test suite.
+
 ## 0.3.0
 
 ### Breaking
