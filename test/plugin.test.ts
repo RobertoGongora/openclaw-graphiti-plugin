@@ -44,11 +44,13 @@ describe("registration", () => {
       expect.arrayContaining(["graphiti_search", "graphiti_ingest"]),
     );
 
-    // 2 hooks by default (autoRecall=false): before_compaction, before_reset
+    // 3 hooks by default (autoRecall=false, autoIndex=true):
+    // before_compaction, before_reset, after_tool_call
     expect(Object.keys(hooks)).toEqual(
       expect.arrayContaining([
         "before_compaction",
         "before_reset",
+        "after_tool_call",
       ]),
     );
     expect(Object.keys(hooks)).not.toContain("before_agent_start");
@@ -68,11 +70,12 @@ describe("registration", () => {
     expect(services[0].id).toBe("graphiti");
   });
 
-  test("skips hooks when autoRecall and autoCapture are false", async () => {
+  test("skips hooks when autoRecall, autoCapture, and autoIndex are false", async () => {
     const { default: plugin } = await import("../index.js");
     const { api, hooks } = createMockApi({
       autoRecall: false,
       autoCapture: false,
+      autoIndex: false,
     });
 
     plugin.register(api as any);
@@ -80,7 +83,7 @@ describe("registration", () => {
     expect(Object.keys(hooks)).toHaveLength(0);
   });
 
-  test("registers only recall hook when autoCapture is false", async () => {
+  test("registers recall + index hooks when autoCapture is false", async () => {
     const { default: plugin } = await import("../index.js");
     const { api, hooks } = createMockApi({
       autoRecall: true,
@@ -89,7 +92,10 @@ describe("registration", () => {
 
     plugin.register(api as any);
 
-    expect(Object.keys(hooks)).toEqual(["before_agent_start"]);
+    expect(Object.keys(hooks)).toEqual(
+      expect.arrayContaining(["before_agent_start", "after_tool_call"]),
+    );
+    expect(Object.keys(hooks)).toHaveLength(2);
   });
 
   test("graphiti CLI default action outputs help instead of erroring", async () => {

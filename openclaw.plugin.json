@@ -40,6 +40,11 @@
         "type": "string",
         "description": "Optional API key sent as Bearer token (for reverse proxy auth)"
       },
+      "autoIndex": {
+        "type": "boolean",
+        "default": true,
+        "description": "Create index episodes when files are written to memory/"
+      },
       "debug": {
         "type": "boolean",
         "default": true,
@@ -85,6 +90,10 @@
       "advanced": true,
       "sensitive": true,
       "help": "Optional Bearer token for Graphiti server auth (reverse proxy scenarios)"
+    },
+    "autoIndex": {
+      "label": "Auto-Index Memory",
+      "help": "Create index episodes in Graphiti when files are written to memory/"
     },
     "debug": {
       "label": "Debug Log",

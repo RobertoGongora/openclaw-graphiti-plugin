@@ -9,8 +9,9 @@ Temporal knowledge graph plugin for [OpenClaw](https://github.com/openclaw/openc
 
 - **Knowledge graph tools**: `graphiti_search` and `graphiti_ingest` available as agent tools for on-demand entity/relationship queries and manual ingestion
 - **Auto-capture**: Before compaction or session reset, ingests the conversation into the knowledge graph for entity/relationship extraction (async, via Graphiti's LLM pipeline)
+- **Auto-index**: Automatically creates index episodes in Graphiti when files are written to `memory/`, bridging file-based memory with the knowledge graph
 - **Auto-recall**: Optionally injects relevant facts before each turn — off by default, see [Auto-recall vs on-demand search](#auto-recall-vs-on-demand-search)
-- **CLI**: `openclaw graphiti status|search|episodes`
+- **CLI**: `openclaw graphiti status|search|episodes|backfill`
 - **Slash command**: `/graphiti` for quick health check
 
 ## Requirements
@@ -90,6 +91,7 @@ knowledge graph, operating independently on different data.
 | `groupId` | string | `core` | Graph namespace (use different IDs per agent) |
 | `autoRecall` | boolean | `false` | Inject relevant facts before each turn (opt-in) |
 | `autoCapture` | boolean | `true` | Ingest conversations on compaction/reset |
+| `autoIndex` | boolean | `true` | Create index episodes when files are written to `memory/` |
 | `recallMaxFacts` | number | `1` | Max facts to inject per turn when auto-recall is on |
 | `minPromptLength` | number | `10` | Min prompt length to trigger auto-recall |
 | `debug` | boolean | `true` | Enable structured debug log file |
@@ -130,6 +132,55 @@ Session compacts or resets
   -> POSTs up to 12,000 chars to Graphiti /messages
   -> Graphiti extracts entities + relationships async (gpt-5-nano or configured model)
   -> Facts become queryable via graphiti_search
+```
+
+## Auto-index flow
+
+When the agent writes a file to `memory/` (e.g., `memory/2026-03-05.md` or `MEMORY.md`), the plugin automatically creates a lightweight index episode in Graphiti. This bridges file-based memory with the knowledge graph — Graphiti can extract entities and relationships from your memory files.
+
+```
+Agent writes to memory/file.md
+  -> after_tool_call hook fires
+  -> Plugin detects memory/ path in tool params
+  -> Reads file metadata (mtime, size, first 500 chars)
+  -> Checks state file for idempotency (skips if mtime unchanged)
+  -> Ingests index episode with YAML frontmatter + excerpt
+  -> Updates state file (~/.openclaw/state/graphiti/graphiti-memory-index.json)
+```
+
+Index episodes are distinguishable from other episode types:
+
+| Type | name pattern | role | source_description |
+|------|-------------|------|--------------------|
+| Manual | `manual-<ts>` | `shiba` | `OpenClaw agent: manual` |
+| Compaction | `compaction-<ts>` | `conversation` | `...pre-compaction...` |
+| Reset | `session-reset-<ts>` | `conversation` | `...session reset` |
+| **Index** | `memory-index::memory/file.md` | `memory-index` | `OpenClaw auto-index: memory file` |
+
+### Backfill existing memory files
+
+To index memory files that were created before the plugin was installed:
+
+```bash
+openclaw graphiti backfill                  # Index all files in ./memory
+openclaw graphiti backfill --dir /path/to   # Custom memory directory
+openclaw graphiti backfill --dry-run        # Show what would be indexed
+```
+
+The backfill command checks the state file and only ingests new or modified files.
+
+To disable auto-indexing:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "graphiti": {
+        "config": { "autoIndex": false }
+      }
+    }
+  }
+}
 ```
 
 ## Remote / non-localhost setup
@@ -226,6 +277,7 @@ See the [Graphiti GitHub](https://github.com/getzep/graphiti) for full deploymen
 openclaw graphiti status          # Graphiti server health + episode count
 openclaw graphiti search "query"  # Search the knowledge graph
 openclaw graphiti episodes        # Recent ingested episodes
+openclaw graphiti backfill        # Index existing memory files into Graphiti
 openclaw memory status            # File-based memory index (memory-core)
 ```
 
