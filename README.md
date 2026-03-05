@@ -17,7 +17,7 @@ Temporal knowledge graph plugin for [OpenClaw](https://github.com/openclaw/openc
 
 - Graphiti server running (e.g., `http://localhost:8100`)
 - Neo4j database (Graphiti manages the connection)
-- OpenAI API key configured on the Graphiti server
+- `OPENAI_API_KEY` set in the Graphiti server environment — this is separate from OpenClaw's own key. Without it, ingestion returns `202 Accepted` but entity extraction never runs and no episodes appear.
 
 ## Installation
 
@@ -211,6 +211,10 @@ services:
 volumes:
   neo4j_data:
 ```
+
+**Environment variables:**
+- `OPENAI_API_KEY` — required. Must be set in your shell or a `.env` file alongside `docker-compose.yml`. If missing, Graphiti silently accepts ingestion but skips extraction — check `docker logs openclaw-graphiti` if episodes are not appearing after ingest.
+- `MODEL_NAME` — the LLM used for entity and relationship extraction. Defaults to `gpt-4o-mini` if omitted. Recommended: `gpt-4.1-mini` or `gpt-5-nano` for a cost-efficient option that works well for extraction workloads.
 
 See the [Graphiti GitHub](https://github.com/getzep/graphiti) for full deployment options including Coolify, Railway, and cloud-hosted Neo4j.
 
