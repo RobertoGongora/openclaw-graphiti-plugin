@@ -2,6 +2,8 @@
  * Graphiti HTTP client — talks to the Graphiti FastAPI server.
  */
 
+import { type DebugLog, NOOP_LOG } from "./debug-log.js";
+
 export interface GraphitiFact {
   uuid: string;
   name: string;
@@ -30,6 +32,7 @@ export class GraphitiClient {
     private groupId: string,
     private logger?: { info?: (...args: any[]) => void; warn: (...args: any[]) => void },
     private apiKey?: string,
+    private debugLog: DebugLog = NOOP_LOG,
   ) {}
 
   /** Build headers, optionally including the Authorization bearer token. */
@@ -42,6 +45,7 @@ export class GraphitiClient {
   private async fetch(path: string, body: unknown): Promise<any> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15_000);
+    const start = Date.now();
 
     try {
       const res = await fetch(`${this.url}${path}`, {
@@ -53,6 +57,7 @@ export class GraphitiClient {
 
       if (!res.ok) {
         const text = await res.text().catch(() => "");
+        this.debugLog.log(path.slice(1), { status: res.status, group: this.groupId, error: text.slice(0, 100), ms: Date.now() - start });
         throw new Error(`Graphiti ${path} returned ${res.status}: ${text}`);
       }
 
@@ -66,25 +71,31 @@ export class GraphitiClient {
    * Search for facts by query.
    */
   async search(query: string, maxFacts = 10): Promise<GraphitiFact[]> {
+    const start = Date.now();
     const data = await this.fetch("/search", {
       query,
       group_ids: [this.groupId],
       max_facts: maxFacts,
     });
-    return data.facts ?? [];
+    const facts = data.facts ?? [];
+    this.debugLog.log("search", { status: 200, group: this.groupId, count: facts.length, ms: Date.now() - start });
+    return facts;
   }
 
   /**
    * Get contextual memory based on messages.
    */
   async getMemory(messages: GraphitiMessage[], maxFacts = 10): Promise<GraphitiFact[]> {
+    const start = Date.now();
     const data = await this.fetch("/get-memory", {
       group_id: this.groupId,
       center_node_uuid: null,
       messages,
       max_facts: maxFacts,
     });
-    return data.facts ?? [];
+    const facts = data.facts ?? [];
+    this.debugLog.log("get-memory", { status: 200, group: this.groupId, count: facts.length, ms: Date.now() - start });
+    return facts;
   }
 
   /**
@@ -94,16 +105,20 @@ export class GraphitiClient {
    * because `res.ok` covers all 2xx status codes.
    */
   async ingest(messages: GraphitiMessage[]): Promise<{ success: boolean; message: string }> {
-    return this.fetch("/messages", {
+    const start = Date.now();
+    const result = await this.fetch("/messages", {
       group_id: this.groupId,
       messages,
     });
+    this.debugLog.log("ingest", { status: 202, group: this.groupId, messages: messages.length, ms: Date.now() - start });
+    return result;
   }
 
   /**
    * Health check.
    */
   async healthy(): Promise<boolean> {
+    const start = Date.now();
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 5_000);
@@ -112,11 +127,13 @@ export class GraphitiClient {
           headers: this.headers(),
           signal: controller.signal,
         });
+        this.debugLog.log("healthcheck", { status: res.status, ms: Date.now() - start });
         return res.ok;
       } finally {
         clearTimeout(timeout);
       }
     } catch {
+      this.debugLog.log("healthcheck", { error: "unreachable", ms: Date.now() - start });
       return false;
     }
   }
@@ -139,6 +156,7 @@ export class GraphitiClient {
    * Note: The server returns a bare JSON array, not a wrapped object.
    */
   async episodes(lastN = 10): Promise<any[]> {
+    const start = Date.now();
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 10_000);
@@ -147,12 +165,18 @@ export class GraphitiClient {
           headers: this.headers(),
           signal: controller.signal,
         });
-        if (!res.ok) return [];
-        return res.json();
+        if (!res.ok) {
+          this.debugLog.log("episodes", { status: res.status, group: this.groupId, error: "HTTP error", ms: Date.now() - start });
+          return [];
+        }
+        const data = await res.json();
+        this.debugLog.log("episodes", { status: 200, group: this.groupId, count: data.length, ms: Date.now() - start });
+        return data;
       } finally {
         clearTimeout(timeout);
       }
     } catch {
+      this.debugLog.log("episodes", { group: this.groupId, error: "unreachable", ms: Date.now() - start });
       return [];
     }
   }

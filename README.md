@@ -92,6 +92,8 @@ knowledge graph, operating independently on different data.
 | `autoCapture` | boolean | `true` | Ingest conversations on compaction/reset |
 | `recallMaxFacts` | number | `1` | Max facts to inject per turn when auto-recall is on |
 | `minPromptLength` | number | `10` | Min prompt length to trigger auto-recall |
+| `debug` | boolean | `true` | Enable structured debug log file |
+| `logFile` | string | `~/.openclaw/logs/graphiti-plugin.log` | Custom debug log file path |
 
 ## Auto-recall vs on-demand search
 
@@ -226,6 +228,51 @@ openclaw graphiti search "query"  # Search the knowledge graph
 openclaw graphiti episodes        # Recent ingested episodes
 openclaw memory status            # File-based memory index (memory-core)
 ```
+
+## Debug logging
+
+The plugin writes a structured, append-only debug log for diagnostics. It records HTTP status codes, timing, and result counts -- **never** conversation content, search queries, or PII. Safe to paste in bug reports.
+
+```bash
+openclaw graphiti logs           # Show last 50 log entries
+openclaw graphiti logs --clear   # Truncate the log file
+```
+
+The `status` subcommand also shows the last 20 log entries.
+
+**Default log path:** `~/.openclaw/logs/graphiti-plugin.log`
+
+**Example output:**
+```
+2026-03-05T10:30:00.123Z [graphiti] healthcheck  status=200 ms=42
+2026-03-05T10:30:00.200Z [graphiti] search       status=200 group=core count=3 ms=150
+2026-03-05T10:30:01.000Z [graphiti] ingest       status=202 group=core messages=8 ms=320
+2026-03-05T10:30:01.500Z [graphiti] episodes     group=core error=unreachable ms=5002
+```
+
+### Configuration
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `debug` | boolean | `true` | Enable/disable the debug log file |
+| `logFile` | string | `~/.openclaw/logs/graphiti-plugin.log` | Custom log file path |
+
+To disable:
+```json
+{
+  "plugins": {
+    "entries": {
+      "graphiti": {
+        "config": { "debug": false }
+      }
+    }
+  }
+}
+```
+
+### Including in bug reports
+
+When filing a bug report, paste the output of `openclaw graphiti logs`. The log contains only operational metadata (status codes, timing, counts) and is safe to share publicly.
 
 ## Migrating from v0.2.x
 

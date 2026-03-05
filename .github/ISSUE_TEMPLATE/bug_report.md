@@ -34,3 +34,11 @@ What actually happened.
 ## Logs / Screenshots
 
 If applicable, add logs or screenshots to help explain the problem.
+
+## Debug Log
+
+Paste the output of `openclaw graphiti logs` below. This contains only operational metadata (status codes, timing, counts) and is safe to share.
+
+```
+(paste output here)
+```
