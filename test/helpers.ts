@@ -44,7 +44,7 @@ export const SAMPLE_EPISODES = [
     labels: [],
     created_at: "2024-01-15T10:30:00+00:00",
     source: "message",
-    source_description: "OpenClaw auto-capture",
+    source_description: JSON.stringify({ plugin: "openclaw-graphiti", event: "before_compaction", ts: "2024-01-15T10:30:00.000Z", group_id: "test-group" }),
     content: "user(user): Hello",
     valid_at: "2024-01-15T10:30:00+00:00",
     entity_edges: ["fact-001"],

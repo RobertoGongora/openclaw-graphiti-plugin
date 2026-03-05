@@ -1,3 +1,22 @@
+## 0.5.0
+
+### Added
+
+- **Source provenance metadata**: All episodes ingested into Graphiti now carry a
+  JSON-encoded provenance object in `source_description` with `plugin`, `event`,
+  `ts`, `group_id`, and optional `session_key`/`file`/`source` fields. This
+  replaces the previous hard-coded strings (e.g. `"OpenClaw auto-capture:
+  pre-compaction conversation"`) with structured, parseable metadata for auditing
+  and debugging the knowledge graph.
+- **`buildProvenance()` helper** inside `register()` ensures consistent
+  provenance across all ingestion paths (manual tool, compaction hook, reset
+  hook, CLI ingest).
+- **`openclaw graphiti ingest`** CLI subcommand for file-based and text-based
+  ingestion with `--source-file`, `--content`, and `--name` options.
+- **`openclaw graphiti episodes`** now shows human-readable provenance summaries
+  per episode. Legacy plain-text `source_description` values display gracefully.
+  Use `--json` for raw output (previous default behavior).
+
 ## 0.4.0
 
 ### Added
