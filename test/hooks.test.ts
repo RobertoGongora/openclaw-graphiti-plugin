@@ -1,11 +1,14 @@
 /**
- * Hook behavior tests (before_agent_start, before_compaction, before_reset).
+ * Hook behavior tests (before_agent_start, before_compaction, before_reset, after_tool_call).
  *
  * Registers the plugin with a mock API, then invokes hook handlers
  * directly and verifies context injection + server ingestion payloads.
  */
 
-import { describe, test, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, test, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
 import {
   startMockServer,
   stopMockServer,
@@ -272,6 +275,97 @@ describe("hooks", () => {
       const req = lastRequest["/messages"] as any;
       const prov = JSON.parse(req.messages[0].source_description);
       expect(prov.session_key).toBe("sess-abc-123");
+    });
+  });
+
+  // ========================================================================
+  // after_tool_call (auto-index memory files)
+  // ========================================================================
+
+  describe("after_tool_call", () => {
+    let tmpDir: string;
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hooks-atc-test-"));
+    });
+
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    test("memory file write triggers ingest", async () => {
+      const memFile = path.join(tmpDir, "test.md");
+      fs.writeFileSync(memFile, "Memory file content for indexing");
+
+      const { default: plugin } = await import("../index.js");
+      const { api, hooks } = createMockApi();
+      // Make resolvePath return our temp file
+      api.resolvePath = () => memFile;
+      plugin.register(api as any);
+
+      const handler = hooks["after_tool_call"][0];
+      await handler({
+        toolName: "Write",
+        params: { file_path: "/project/memory/test.md" },
+      });
+
+      const req = lastRequest["/messages"] as any;
+      expect(req).toBeDefined();
+      expect(req.messages[0].name).toBe("memory-index::memory/test.md");
+      expect(req.messages[0].role).toBe("memory-index");
+      expect(req.messages[0].source_description).toBe("OpenClaw auto-index: memory file");
+    });
+
+    test("non-memory write is ignored", async () => {
+      const { default: plugin } = await import("../index.js");
+      const { api, hooks } = createMockApi();
+      plugin.register(api as any);
+
+      const handler = hooks["after_tool_call"][0];
+      await handler({
+        toolName: "Write",
+        params: { file_path: "/project/src/index.ts" },
+      });
+
+      expect(lastRequest["/messages"]).toBeUndefined();
+    });
+
+    test("error in event skips indexing", async () => {
+      const memFile = path.join(tmpDir, "test.md");
+      fs.writeFileSync(memFile, "content");
+
+      const { default: plugin } = await import("../index.js");
+      const { api, hooks } = createMockApi();
+      api.resolvePath = () => memFile;
+      plugin.register(api as any);
+
+      const handler = hooks["after_tool_call"][0];
+      await handler({
+        toolName: "Write",
+        params: { file_path: "/project/memory/test.md" },
+        error: "Tool execution failed",
+      });
+
+      expect(lastRequest["/messages"]).toBeUndefined();
+    });
+
+    test("skips when server is unhealthy", async () => {
+      mockOverrides.healthy = false;
+      const memFile = path.join(tmpDir, "test.md");
+      fs.writeFileSync(memFile, "content");
+
+      const { default: plugin } = await import("../index.js");
+      const { api, hooks } = createMockApi();
+      api.resolvePath = () => memFile;
+      plugin.register(api as any);
+
+      const handler = hooks["after_tool_call"][0];
+      await handler({
+        toolName: "Write",
+        params: { file_path: "/project/memory/test.md" },
+      });
+
+      expect(lastRequest["/messages"]).toBeUndefined();
     });
   });
 
