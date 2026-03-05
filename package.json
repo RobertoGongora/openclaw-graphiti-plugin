@@ -22,6 +22,7 @@
   "files": [
     "index.ts",
     "client.ts",
+    "debug-log.ts",
     "openclaw.plugin.json"
   ],
   "scripts": {

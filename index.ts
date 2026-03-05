@@ -18,6 +18,7 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { Type } from "@sinclair/typebox";
 import { GraphitiClient } from "./client.js";
+import { DebugLog, NOOP_LOG } from "./debug-log.js";
 
 function formatTimeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -41,6 +42,10 @@ interface PluginConfig {
   minPromptLength?: number;
   /** Optional API key sent as Bearer token for reverse proxy auth. */
   apiKey?: string;
+  /** Enable debug log file (default: true). */
+  debug?: boolean;
+  /** Custom path for the debug log file. */
+  logFile?: string;
 }
 
 const graphitiPlugin = {
@@ -57,8 +62,9 @@ const graphitiPlugin = {
     const recallMaxFacts = cfg.recallMaxFacts ?? 1;
     const minPromptLength = cfg.minPromptLength ?? 10;
     const apiKey = cfg.apiKey;
+    const debugLog = cfg.debug !== false ? new DebugLog(cfg.logFile) : NOOP_LOG;
 
-    const client = new GraphitiClient(url, groupId, api.logger, apiKey);
+    const client = new GraphitiClient(url, groupId, api.logger, apiKey, debugLog);
 
     // ========================================================================
     // Tools
@@ -160,7 +166,10 @@ const graphitiPlugin = {
     // Auto-recall: inject relevant facts before agent starts
     if (autoRecall) {
       api.on("before_agent_start", async (event: any) => {
-        if (!event.prompt || event.prompt.length < minPromptLength) return;
+        if (!event.prompt || event.prompt.length < minPromptLength) {
+          debugLog.log("recall", { skipped: true, reason: "prompt_too_short", length: event.prompt?.length ?? 0 });
+          return;
+        }
 
         // Skip system-only sessions
         if (
@@ -168,6 +177,7 @@ const graphitiPlugin = {
           event.prompt.includes("boot check")
         ) return;
 
+        const start = Date.now();
         try {
           const healthy = await client.healthy();
           if (!healthy) return;
@@ -177,6 +187,7 @@ const graphitiPlugin = {
 
           const context = facts.map((f) => `- **${f.name}**: ${f.fact}`).join("\n");
           api.logger.info?.(`graphiti: recalled ${facts.length} facts for context injection`);
+          debugLog.log("recall", { group: groupId, count: facts.length, ms: Date.now() - start });
 
           return {
             prependContext:
@@ -199,9 +210,11 @@ const graphitiPlugin = {
         // work from raw material, not pre-distilled summaries.
         const messages = event.messages;
         if (!messages || !Array.isArray(messages) || messages.length < 4) {
+          debugLog.log("capture", { skipped: true, reason: "too_few_messages" });
           return;
         }
 
+        const start = Date.now();
         try {
           const healthy = await client.healthy();
           if (!healthy) return;
@@ -241,6 +254,7 @@ const graphitiPlugin = {
           }]);
 
           api.logger.info?.(`graphiti: ingested pre-compaction conversation (${texts.length} messages, ${episode.length} chars)`);
+          debugLog.log("capture", { status: 202, group: groupId, messages: texts.length, ms: Date.now() - start });
         } catch (err) {
           api.logger.warn(`graphiti: compaction capture failed: ${String(err)}`);
         }
@@ -250,9 +264,11 @@ const graphitiPlugin = {
       // that are about to be lost, so we can extract knowledge before they disappear
       api.on("before_reset", async (event: any) => {
         if (!event.messages || event.messages.length < 4) {
+          debugLog.log("reset", { skipped: true, reason: "too_few_messages" });
           return;
         }
 
+        const start = Date.now();
         try {
           const healthy = await client.healthy();
           if (!healthy) return;
@@ -285,6 +301,7 @@ const graphitiPlugin = {
           }]);
 
           api.logger.info?.(`graphiti: ingested session-reset conversation (${texts.length} messages, ${sample.length} chars)`);
+          debugLog.log("reset", { status: 202, group: groupId, messages: texts.length, ms: Date.now() - start });
         } catch (err) {
           api.logger.warn(`graphiti: reset capture failed: ${String(err)}`);
         }
@@ -314,6 +331,11 @@ const graphitiPlugin = {
           if (stats.latestAt) {
             console.log(`  Last capture: ${formatTimeAgo(stats.latestAt)}`);
           }
+          const tail = debugLog.tail(20);
+          if (tail) {
+            console.log(`\nRecent debug log (${debugLog.filePath}):`);
+            console.log(tail);
+          }
         });
 
         cmd.command("search").description("Search the knowledge graph")
@@ -330,6 +352,15 @@ const graphitiPlugin = {
           .action(async (opts: { limit: string }) => {
             const eps = await client.episodes(parseInt(opts.limit));
             console.log(JSON.stringify(eps, null, 2));
+          });
+
+        cmd.command("logs").description("Show debug log")
+          .option("--clear", "Truncate the debug log")
+          .action(async (opts: { clear?: boolean }) => {
+            console.log(`Log file: ${debugLog.filePath}`);
+            if (opts.clear) { debugLog.clear(); console.log("Log cleared."); return; }
+            const tail = debugLog.tail(50);
+            console.log(tail || "(no log entries)");
           });
       },
       { commands: ["graphiti"] },

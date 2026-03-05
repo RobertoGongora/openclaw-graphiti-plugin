@@ -1,3 +1,24 @@
+## 0.4.0
+
+### Added
+
+- **Structured debug log file** (`~/.openclaw/logs/graphiti-plugin.log`):
+  Append-only log recording HTTP status codes, timing, and result counts for
+  all Graphiti operations. Never logs conversation content, search queries, or
+  PII. Designed for sharing in bug reports.
+- **`openclaw graphiti logs`** and **`openclaw graphiti logs --clear`** CLI
+  commands to view and truncate the debug log.
+- **`openclaw graphiti status`** now includes the last 20 debug log entries.
+- **`debug`** config option (default: `true`) to enable/disable the debug log.
+- **`logFile`** config option to customize the debug log file path.
+- All client methods (`search`, `ingest`, `getMemory`, `healthy`, `episodes`)
+  now log structured diagnostics: status codes, timing, result counts, and
+  errors.
+- Lifecycle hooks (`before_agent_start`, `before_compaction`, `before_reset`)
+  log skip reasons, capture counts, and timing.
+- `episodes()` errors are now observable via the debug log instead of being
+  silently swallowed (still returns `[]` for backward compatibility).
+
 ## 0.3.1
 
 ### Fixed

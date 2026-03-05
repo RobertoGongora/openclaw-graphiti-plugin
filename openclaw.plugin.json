@@ -39,6 +39,15 @@
       "apiKey": {
         "type": "string",
         "description": "Optional API key sent as Bearer token (for reverse proxy auth)"
+      },
+      "debug": {
+        "type": "boolean",
+        "default": true,
+        "description": "Enable debug log file"
+      },
+      "logFile": {
+        "type": "string",
+        "description": "Debug log file path (default: ~/.openclaw/logs/graphiti-plugin.log)"
       }
     }
   },
@@ -76,6 +85,15 @@
       "advanced": true,
       "sensitive": true,
       "help": "Optional Bearer token for Graphiti server auth (reverse proxy scenarios)"
+    },
+    "debug": {
+      "label": "Debug Log",
+      "help": "Write structured debug log for diagnostics (no conversation content)"
+    },
+    "logFile": {
+      "label": "Debug Log Path",
+      "advanced": true,
+      "help": "Custom path for the debug log file"
     }
   }
 }
