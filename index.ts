@@ -286,6 +286,7 @@ const graphitiPlugin = {
     if (autoCapture) {
       api.on("before_compaction", async (event: any, ctx: any) => {
         const meta = sessionMetaFromCtx(ctx ?? {});
+        if (!meta.sessionKey && event.sessionKey) meta.sessionKey = event.sessionKey;
 
         // Ingest the raw conversation BEFORE the agent compacts it.
         // Graphiti runs its own entity extraction (gpt-5-nano) and should
@@ -352,6 +353,7 @@ const graphitiPlugin = {
       // that are about to be lost, so we can extract knowledge before they disappear.
       api.on("before_reset", async (event: any, ctx: any) => {
         const meta = sessionMetaFromCtx(ctx ?? {});
+        if (!meta.sessionKey && event.sessionKey) meta.sessionKey = event.sessionKey;
         if (!event.messages || event.messages.length < 4) {
           debugLog.log("reset", { skipped: true, reason: "too_few_messages" });
           return;
@@ -414,6 +416,7 @@ const graphitiPlugin = {
     // timestamp so subsequent capture hooks can embed it in provenance metadata.
     api.on("session_start", async (_event: any, ctx: any) => {
       if (ctx?.sessionId) {
+        if (sessionStarts.size > 1000) sessionStarts.clear();
         sessionStarts.set(ctx.sessionId, new Date().toISOString());
       }
     });

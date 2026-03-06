@@ -426,7 +426,11 @@ describe("hooks", () => {
 
       const req = lastRequest["/messages"] as any;
       expect(req).toBeDefined();
-      expect(req.messages[0].source_description).toBe("OpenClaw auto-capture: pre-compaction conversation");
+      const prov = JSON.parse(req.messages[0].source_description);
+      expect(prov.event).toBe("before_compaction");
+      expect(prov.plugin).toBe("openclaw-graphiti");
+      expect(prov.group_id).toBe("test-group");
+      expect(prov.session_key).toBeUndefined();
     });
 
     test("handles partial ctx (missing fields)", async () => {
@@ -446,8 +450,9 @@ describe("hooks", () => {
       }, { sessionKey: "partial-key" });
 
       const req = lastRequest["/messages"] as any;
-      expect(req.messages[0].source_description).toContain("session=partial-key");
-      expect(req.messages[0].source_description).not.toContain("agent=");
+      const prov = JSON.parse(req.messages[0].source_description);
+      expect(prov.session_key).toBe("partial-key");
+      expect(prov.agent).toBeUndefined();
     });
 
     test("session_start hook records start time", async () => {
@@ -472,8 +477,11 @@ describe("hooks", () => {
       }, { sessionKey: "key-42", sessionId: "sess-42", agentId: "a1", messageProvider: "slack" });
 
       const req = lastRequest["/messages"] as any;
-      expect(req.messages[0].source_description).toContain("session=key-42");
-      expect(req.messages[0].source_description).toContain("session_start=");
+      const prov = JSON.parse(req.messages[0].source_description);
+      expect(prov.session_key).toBe("key-42");
+      expect(prov.session_start).toBeDefined();
+      expect(prov.agent).toBe("a1");
+      expect(prov.channel).toBe("slack");
     });
   });
 });
