@@ -33,7 +33,10 @@ function formatTimeAgo(iso: string): string {
   return `${days}d ago`;
 }
 
-/** Session context embedded in episode provenance for traceability. */
+/**
+ * Session context embedded in episode provenance for traceability.
+ * @exported - public API of this plugin
+ */
 export interface SessionMeta {
   sessionKey?: string;
   sessionStart?: string;
@@ -41,9 +44,20 @@ export interface SessionMeta {
   channel?: string;
 }
 
+/** Minimal context shape passed by OpenClaw to lifecycle hooks. */
+interface HookContext {
+  sessionKey?: string;
+  sessionId?: string;
+  agentId?: string;
+  messageProvider?: string;
+  messageChannel?: string;
+  [key: string]: unknown; // allow extension without breaking
+}
+
 /**
  * Build an episode name that includes the session key when available.
  * Produces `<prefix>-<sessionKey>-<ts>` or `<prefix>-<ts>` as fallback.
+ * @exported - public API of this plugin
  */
 export function buildEpisodeName(prefix: string, meta: SessionMeta): string {
   if (meta.sessionKey) return `${prefix}-${meta.sessionKey}-${Date.now()}`;
@@ -90,7 +104,7 @@ const graphitiPlugin = {
      * Extract session metadata from hook/tool context for provenance enrichment.
      * Returns whatever fields are available; missing fields are omitted from provenance.
      */
-    function sessionMetaFromCtx(ctx: any): SessionMeta {
+    function sessionMetaFromCtx(ctx: HookContext | undefined): SessionMeta {
       const meta: SessionMeta = {};
       if (!ctx) return meta;
       if (ctx.sessionKey) meta.sessionKey = ctx.sessionKey;
@@ -284,7 +298,7 @@ const graphitiPlugin = {
     // Auto-capture: ingest conversations into the knowledge graph before compaction/reset.
     // This fires when OpenClaw compacts a long session, not on every turn.
     if (autoCapture) {
-      api.on("before_compaction", async (event: any, ctx: any) => {
+      api.on("before_compaction", async (event: any, ctx: HookContext | undefined) => {
         const meta = sessionMetaFromCtx(ctx ?? {});
         if (!meta.sessionKey && event.sessionKey) meta.sessionKey = event.sessionKey;
 
@@ -351,10 +365,10 @@ const graphitiPlugin = {
 
       // Also capture on session reset (/new) — the before_reset hook includes messages
       // that are about to be lost, so we can extract knowledge before they disappear.
-      api.on("before_reset", async (event: any, ctx: any) => {
+      api.on("before_reset", async (event: any, ctx: HookContext | undefined) => {
         const meta = sessionMetaFromCtx(ctx ?? {});
         if (!meta.sessionKey && event.sessionKey) meta.sessionKey = event.sessionKey;
-        if (!event.messages || event.messages.length < 4) {
+        if (!event.messages || !Array.isArray(event.messages) || event.messages.length < 4) {
           debugLog.log("reset", { skipped: true, reason: "too_few_messages" });
           return;
         }
@@ -414,9 +428,9 @@ const graphitiPlugin = {
 
     // Session start tracking (always registered): records the session start
     // timestamp so subsequent capture hooks can embed it in provenance metadata.
-    api.on("session_start", async (_event: any, ctx: any) => {
+    api.on("session_start", async (_event: any, ctx: HookContext | undefined) => {
       if (ctx?.sessionId) {
-        if (sessionStarts.size > 1000) sessionStarts.clear();
+        if (sessionStarts.size >= 1000) sessionStarts.clear();
         sessionStarts.set(ctx.sessionId, new Date().toISOString());
       }
     });
@@ -471,6 +485,9 @@ const graphitiPlugin = {
           .option("-s, --session-key <key>", "Filter episodes by session key")
           .action(async (opts: { limit: string; json?: boolean; sessionKey?: string }) => {
             let eps = await client.episodes(parseInt(opts.limit));
+            // NOTE: --session-key filters the fetched set client-side.
+            // If your session has many episodes and --limit is low, increase
+            // --limit or use --json to retrieve all and filter externally.
             if (opts.sessionKey) {
               eps = eps.filter((ep: any) => {
                 try {
