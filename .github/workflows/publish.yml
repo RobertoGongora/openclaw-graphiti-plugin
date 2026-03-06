@@ -9,14 +9,15 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      id-token: write  # for provenance attestation (sigstore)
+      id-token: write   # required for npm Trusted Publishing (OIDC)
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '22'   # Trusted Publishing requires Node 22.14+ / npm 11.5.1+
           cache: npm
           registry-url: https://registry.npmjs.org
 
@@ -26,7 +27,7 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Publish to npm (with provenance attestation)
-        run: npm publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish to npm
+        run: npm publish --access public
+        # --provenance is automatic with Trusted Publishing from GHA
+        # No NODE_AUTH_TOKEN needed — OIDC handles auth
