@@ -193,7 +193,10 @@ const graphitiPlugin = {
         if (
           event.prompt.includes("HEARTBEAT") ||
           event.prompt.includes("boot check")
-        ) return;
+        ) {
+          debugLog.log("recall", { skipped: true, reason: "heartbeat_or_boot_check" });
+          return;
+        }
 
         const start = Date.now();
         try {
@@ -301,6 +304,13 @@ const graphitiPlugin = {
             const content = msgObj.content;
             if (typeof content === "string" && content.length > 20) {
               texts.push(`${role}: ${content.slice(0, 1000)}`);
+            } else if (Array.isArray(content)) {
+              for (const block of content) {
+                if (block && typeof block === "object" && (block as any).type === "text" && typeof (block as any).text === "string") {
+                  const text = (block as any).text;
+                  if (text.length > 20) texts.push(`${role}: ${text.slice(0, 1000)}`);
+                }
+              }
             }
           }
 
@@ -360,9 +370,14 @@ const graphitiPlugin = {
           .argument("<query>", "Search query")
           .option("-n, --limit <n>", "Max results", "10")
           .action(async (query: string, opts: { limit: string }) => {
-            const facts = await client.search(query, parseInt(opts.limit));
-            if (facts.length === 0) { console.log("No facts found."); return; }
-            for (const f of facts) { console.log(`• ${f.name}: ${f.fact}`); }
+            try {
+              const facts = await client.search(query, parseInt(opts.limit));
+              if (facts.length === 0) { console.log("No facts found."); return; }
+              for (const f of facts) { console.log(`• ${f.name}: ${f.fact}`); }
+            } catch (err) {
+              console.error(`Search failed: ${err instanceof Error ? err.message : String(err)}`);
+              process.exitCode = 1;
+            }
           });
 
         cmd.command("episodes").description("List recent episodes")
@@ -402,23 +417,27 @@ const graphitiPlugin = {
             try {
               let content: string;
               let filePath: string | undefined;
+              const { resolve, basename } = await import("node:path");
               if (opts.sourceFile) {
                 const { readFile } = await import("node:fs/promises");
-                const { resolve, basename } = await import("node:path");
                 filePath = resolve(opts.sourceFile);
                 content = await readFile(filePath, "utf-8");
+                const MAX_FILE_CHARS = 12_000;
+                if (content.length > MAX_FILE_CHARS) {
+                  console.warn("File content truncated to 12,000 characters");
+                  content = content.slice(0, MAX_FILE_CHARS);
+                }
               } else {
                 content = opts.content!;
               }
-              const { basename: baseName } = await import("node:path");
-              const label = opts.name ?? (filePath ? baseName(filePath) : `cli-${Date.now()}`);
+              const label = opts.name ?? (filePath ? basename(filePath) : `cli-${Date.now()}`);
               await client.ingest([{
                 content,
                 role_type: "system",
                 role: "shiba",
                 name: label,
                 timestamp: new Date().toISOString(),
-                source_description: buildProvenance({ event: "cli_ingest", file: filePath ? baseName(filePath) : undefined }),
+                source_description: buildProvenance({ event: "cli_ingest", file: filePath ? basename(filePath) : undefined }),
               }]);
               console.log(`Ingested "${label}" (${content.length} chars)`);
             } catch (err) {

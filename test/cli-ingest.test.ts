@@ -190,4 +190,36 @@ describe("CLI ingest command", () => {
     expect(process.exitCode).toBe(1);
     process.exitCode = origExitCode;
   });
+
+  test("--source-file truncates content exceeding 12,000 chars", async () => {
+    const action = await getIngestAction();
+
+    const largeContent = "x".repeat(15_000);
+    const testFile = path.join(tmpDir, "large-file.txt");
+    fs.writeFileSync(testFile, largeContent);
+
+    const logs: string[] = [];
+    const warns: string[] = [];
+    const origLog = console.log;
+    const origWarn = console.warn;
+    console.log = (...args: any[]) => logs.push(args.join(" "));
+    console.warn = (...args: any[]) => warns.push(args.join(" "));
+    try {
+      await action({ sourceFile: testFile });
+    } finally {
+      console.log = origLog;
+      console.warn = origWarn;
+    }
+
+    // Should warn about truncation
+    expect(warns.some((w) => w.includes("truncated to 12,000 characters"))).toBe(true);
+
+    // Content sent to server should be capped at 12,000
+    const req = lastRequest["/messages"] as any;
+    expect(req).toBeDefined();
+    expect(req.messages[0].content.length).toBe(12_000);
+
+    // Log should show truncated size
+    expect(logs.some((l) => l.includes("12000 chars"))).toBe(true);
+  });
 });

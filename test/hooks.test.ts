@@ -347,5 +347,50 @@ describe("hooks", () => {
 
       expect(lastRequest["/messages"]).toBeUndefined();
     });
+
+    test("handles content block arrays", async () => {
+      const { default: plugin } = await import("../index.js");
+      const { api, hooks } = createMockApi();
+      plugin.register(api as any);
+
+      const handler = hooks["before_reset"][0];
+      await handler({
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "What about our deployment pipeline?" },
+            ],
+          },
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "text",
+                text: "The pipeline uses GitHub Actions with ArgoCD.",
+              },
+            ],
+          },
+          {
+            role: "user",
+            content: [{ type: "text", text: "How does the rollback work?" }],
+          },
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "text",
+                text: "ArgoCD supports automatic rollback on health check failure.",
+              },
+            ],
+          },
+        ],
+      });
+
+      const req = lastRequest["/messages"] as any;
+      expect(req).toBeDefined();
+      expect(req.messages[0].content).toContain("deployment pipeline");
+      expect(req.messages[0].content).toContain("ArgoCD");
+    });
   });
 });

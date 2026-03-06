@@ -109,6 +109,26 @@ describe("DebugLog", () => {
     expect(fs.existsSync(logPath)).toBe(false);
   });
 
+  test("tail() returns '(disabled)' when log is disabled", () => {
+    const log = new DebugLog(logPath, false);
+    expect(log.tail(10)).toBe("(disabled)");
+  });
+
+  test("tail() uses default of 100 lines when no argument given", () => {
+    const log = new DebugLog(logPath);
+    // Write 150 lines
+    for (let i = 0; i < 150; i++) {
+      log.log("test", { n: i });
+    }
+    // Default tail (no arg) should return 100 lines
+    const tail = log.tail();
+    const lines = tail.split("\n");
+    expect(lines).toHaveLength(100);
+    // Should contain the last line (n=149) but not the first (n=0)
+    expect(lines[lines.length - 1]).toContain("n=149");
+    expect(lines[0]).toContain("n=50");
+  });
+
   test("NOOP_LOG writes nothing", () => {
     NOOP_LOG.log("test", { n: 1 });
     // Just verify it doesn't throw

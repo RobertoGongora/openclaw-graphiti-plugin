@@ -41,7 +41,14 @@ export class DebugLog {
     catch { /* ignore */ }
   }
 
-  tail(n: number): string {
+  /**
+   * Return the last `n` lines of the log file (default 100).
+   *
+   * NOTE: Currently reads the full file and slices. A future improvement
+   * could use reverse-reading or log rotation for very large files.
+   */
+  tail(n = 100): string {
+    if (this.disabled) return "(disabled)";
     try {
       const content = fs.readFileSync(this.filePath, "utf-8");
       const lines = content.trimEnd().split("\n");
