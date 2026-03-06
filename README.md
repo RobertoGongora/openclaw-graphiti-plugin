@@ -175,10 +175,13 @@ Index episodes are distinguishable from other episode types:
 
 | Type | name pattern | role | source_description |
 |------|-------------|------|--------------------|
-| Manual | `manual-<ts>` | `shiba` | `OpenClaw agent: manual` |
-| Compaction | `compaction-<ts>` | `conversation` | `...pre-compaction...` |
-| Reset | `session-reset-<ts>` | `conversation` | `...session reset` |
+| Manual | `manual-<ts>` | `shiba` | `{"plugin":"openclaw-graphiti","event":"manual",...}` |
+| Compaction | `compaction-<ts>` | `conversation` | `{"plugin":"openclaw-graphiti","event":"before_compaction",...}` |
+| Reset | `session-reset-<ts>` | `conversation` | `{"plugin":"openclaw-graphiti","event":"before_reset",...}` |
+| CLI ingest | `<filename>` | `shiba` | `{"plugin":"openclaw-graphiti","event":"cli_ingest",...}` |
 | **Index** | `memory-index::memory/file.md` | `memory-index` | `{"plugin":"openclaw-graphiti","event":"memory_index",...}` |
+
+> **Privacy note:** Indexed memory files are sent to the Graphiti server for entity extraction, which calls your configured LLM. Avoid storing secrets (API keys, passwords) in `memory/` files, or set `autoIndex: false` to disable this feature.
 
 ### Backfill existing memory files
 
