@@ -26,8 +26,5 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Build
-        run: npm run build
-
       - name: Publish to npm (provenance-attested)
         run: npm publish --access public --provenance
