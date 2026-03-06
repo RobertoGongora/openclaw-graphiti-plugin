@@ -1,4 +1,6 @@
-## 0.5.0
+# Changelog
+
+## [Unreleased]
 
 ### Added
 
@@ -16,11 +18,6 @@
 - **`openclaw graphiti episodes`** now shows human-readable provenance summaries
   per episode. Legacy plain-text `source_description` values display gracefully.
   Use `--json` for raw output (previous default behavior).
-
-## 0.4.0
-
-### Added
-
 - **Structured debug log file** (`~/.openclaw/logs/graphiti-plugin.log`):
   Append-only log recording HTTP status codes, timing, and result counts for
   all Graphiti operations. Never logs conversation content, search queries, or
@@ -80,8 +77,6 @@
   compatibility but is now a no-op redirect — `memory-core` handles the `memory`
   CLI directly when it holds the slot.
 
-
-# Changelog
 
 ## 0.2.1
 

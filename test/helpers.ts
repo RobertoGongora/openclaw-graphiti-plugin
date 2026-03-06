@@ -61,6 +61,7 @@ export type MockOverrides = {
   ingestStatus?: number;
   ingestBody?: Record<string, unknown>;
   searchStatus?: number;
+  searchErrorBody?: string;
 };
 
 let server: http.Server;
@@ -124,7 +125,7 @@ export function startMockServer(): Promise<void> {
         const status = mockOverrides.searchStatus ?? 200;
         if (status !== 200) {
           res.writeHead(status);
-          res.end(JSON.stringify({ detail: "search error" }));
+          res.end(mockOverrides.searchErrorBody ?? JSON.stringify({ detail: "search error" }));
           return;
         }
         res.writeHead(200, { "Content-Type": "application/json" });

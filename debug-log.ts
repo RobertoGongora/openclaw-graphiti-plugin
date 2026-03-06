@@ -27,7 +27,8 @@ export class DebugLog {
       const parts = Object.entries(fields)
         .filter(([, v]) => v !== undefined)
         .map(([k, v]) => {
-          const val = typeof v === "string" && v.includes(" ") ? `"${v}"` : String(v);
+          const sv = typeof v === "string" ? v.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/"/g, '\\"') : null;
+          const val = sv !== null && sv.includes(" ") ? `"${sv}"` : (sv ?? String(v));
           return `${k}=${val}`;
         });
       fs.appendFileSync(this.filePath, `${new Date().toISOString()} [graphiti] ${event.padEnd(12)} ${parts.join(" ")}\n`);

@@ -57,7 +57,7 @@ export class GraphitiClient {
 
       if (!res.ok) {
         const text = await res.text().catch(() => "");
-        this.debugLog.log(path.slice(1), { status: res.status, group: this.groupId, error: text.slice(0, 100), ms: Date.now() - start });
+        this.debugLog.log(path.slice(1), { status: res.status, group: this.groupId, error: "HTTP error", ms: Date.now() - start });
         throw new Error(`Graphiti ${path} returned ${res.status}: ${text}`);
       }
 

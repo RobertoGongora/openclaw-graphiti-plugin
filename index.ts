@@ -399,26 +399,32 @@ const graphitiPlugin = {
               process.exitCode = 1;
               return;
             }
-            let content: string;
-            let filePath: string | undefined;
-            if (opts.sourceFile) {
-              const { readFile } = await import("node:fs/promises");
-              const { resolve } = await import("node:path");
-              filePath = resolve(opts.sourceFile);
-              content = await readFile(filePath, "utf-8");
-            } else {
-              content = opts.content!;
+            try {
+              let content: string;
+              let filePath: string | undefined;
+              if (opts.sourceFile) {
+                const { readFile } = await import("node:fs/promises");
+                const { resolve, basename } = await import("node:path");
+                filePath = resolve(opts.sourceFile);
+                content = await readFile(filePath, "utf-8");
+              } else {
+                content = opts.content!;
+              }
+              const { basename: baseName } = await import("node:path");
+              const label = opts.name ?? (filePath ? baseName(filePath) : `cli-${Date.now()}`);
+              await client.ingest([{
+                content,
+                role_type: "system",
+                role: "shiba",
+                name: label,
+                timestamp: new Date().toISOString(),
+                source_description: buildProvenance({ event: "cli_ingest", file: filePath ? baseName(filePath) : undefined }),
+              }]);
+              console.log(`Ingested "${label}" (${content.length} chars)`);
+            } catch (err) {
+              console.error(`Ingest failed: ${err instanceof Error ? err.message : String(err)}`);
+              process.exitCode = 1;
             }
-            const label = opts.name ?? (filePath ? filePath.split("/").pop()! : `cli-${Date.now()}`);
-            await client.ingest([{
-              content,
-              role_type: "system",
-              role: "shiba",
-              name: label,
-              timestamp: new Date().toISOString(),
-              source_description: buildProvenance({ event: "cli_ingest", file: filePath }),
-            }]);
-            console.log(`Ingested "${label}" (${content.length} chars)`);
           });
 
         cmd.command("logs").description("Show debug log")
