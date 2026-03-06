@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-03-06
+
 ### Added
 
 - **Source provenance metadata**: All episodes ingested into Graphiti now carry a
