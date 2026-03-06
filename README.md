@@ -127,10 +127,26 @@ context without explicitly calling `graphiti_search`.
 Session compacts or resets
   -> before_compaction / before_reset fires
   -> Plugin extracts user+assistant messages (min 4)
+  -> Session metadata (session key, agent, channel) embedded in source_description
   -> POSTs up to 12,000 chars to Graphiti /messages
   -> Graphiti extracts entities + relationships async (gpt-5-nano or configured model)
   -> Facts become queryable via graphiti_search
 ```
+
+### Session metadata
+
+As of v0.5.0, every auto-captured episode and manually ingested episode (via
+`graphiti_ingest`) includes session metadata in its `source_description`:
+
+```
+OpenClaw auto-capture: pre-compaction conversation | session=abc123 agent=main channel=slack session_start=2026-03-06T10:00:00.000Z
+```
+
+This enables filtering episodes by session, agent, or channel. The metadata is
+embedded as a `| key=val key=val` suffix — fields are omitted when unavailable.
+
+Use `parseSourceMeta()` (exported from the plugin) to parse metadata back from
+a `source_description` string.
 
 ## Remote / non-localhost setup
 
@@ -223,10 +239,11 @@ See the [Graphiti GitHub](https://github.com/getzep/graphiti) for full deploymen
 ## Status commands
 
 ```bash
-openclaw graphiti status          # Graphiti server health + episode count
-openclaw graphiti search "query"  # Search the knowledge graph
-openclaw graphiti episodes        # Recent ingested episodes
-openclaw memory status            # File-based memory index (memory-core)
+openclaw graphiti status                    # Graphiti server health + episode count
+openclaw graphiti search "query"            # Search the knowledge graph
+openclaw graphiti episodes                  # Recent ingested episodes
+openclaw graphiti episodes -s <session-key> # Filter episodes by session key
+openclaw memory status                      # File-based memory index (memory-core)
 ```
 
 ## Debug logging

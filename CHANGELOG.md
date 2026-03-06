@@ -1,3 +1,34 @@
+## 0.5.0
+
+### Added
+
+- **Session metadata on auto-captured episodes**: Episodes ingested by
+  `before_compaction`, `before_reset`, and the `graphiti_ingest` tool now embed
+  session context in `source_description` using a structured suffix:
+  `"… | session=<key> agent=<id> channel=<provider> session_start=<iso>"`.
+  This makes it possible to query "what happened in this session?" or filter
+  episodes by session, agent, or channel.
+- **`session_start` hook** (always registered): Records session start timestamps
+  so `session_start=` metadata is available to subsequent capture hooks.
+- **`graphiti_ingest` factory pattern**: The ingest tool now receives tool
+  context from the SDK (`OpenClawPluginToolContext`), embedding the calling
+  session's metadata in every manually ingested episode.
+- **`--session-key` CLI filter**: `openclaw graphiti episodes --session-key=<key>`
+  filters episodes client-side by session key (matches `source_description` and
+  episode `name`).
+- **Exported helpers**: `SessionMeta`, `buildSourceDescription`,
+  `buildEpisodeName`, and `parseSourceMeta` are now named exports for use by
+  downstream consumers.
+
+### Changed
+
+- `before_compaction`, `before_reset`, and `before_agent_start` hooks now accept
+  the `ctx` (PluginHookAgentContext) second parameter from the SDK. Hooks remain
+  backward-compatible when `ctx` is `undefined`.
+- Episode names now include the session key when available
+  (e.g., `compaction-<sessionKey>-<timestamp>`).
+- Debug log entries for capture and reset now include `session` field.
+
 ## 0.4.0
 
 ### Added

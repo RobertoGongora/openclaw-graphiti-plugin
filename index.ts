@@ -33,6 +33,46 @@ function formatTimeAgo(iso: string): string {
   return `${days}d ago`;
 }
 
+export interface SessionMeta {
+  sessionKey?: string;
+  sessionStart?: string;
+  agent?: string;
+  channel?: string;
+}
+
+export function buildSourceDescription(base: string, meta: SessionMeta): string {
+  const parts: string[] = [];
+  if (meta.sessionKey) parts.push(`session=${meta.sessionKey}`);
+  if (meta.agent) parts.push(`agent=${meta.agent}`);
+  if (meta.channel) parts.push(`channel=${meta.channel}`);
+  if (meta.sessionStart) parts.push(`session_start=${meta.sessionStart}`);
+  if (parts.length === 0) return base;
+  return `${base} | ${parts.join(" ")}`;
+}
+
+export function buildEpisodeName(prefix: string, meta: SessionMeta): string {
+  if (meta.sessionKey) return `${prefix}-${meta.sessionKey}-${Date.now()}`;
+  return `${prefix}-${Date.now()}`;
+}
+
+export function parseSourceMeta(sourceDescription: string): SessionMeta {
+  const meta: SessionMeta = {};
+  const pipeIdx = sourceDescription.indexOf(" | ");
+  if (pipeIdx === -1) return meta;
+  const suffix = sourceDescription.slice(pipeIdx + 3);
+  for (const pair of suffix.split(" ")) {
+    const eqIdx = pair.indexOf("=");
+    if (eqIdx === -1) continue;
+    const key = pair.slice(0, eqIdx);
+    const val = pair.slice(eqIdx + 1);
+    if (key === "session") meta.sessionKey = val;
+    else if (key === "agent") meta.agent = val;
+    else if (key === "channel") meta.channel = val;
+    else if (key === "session_start") meta.sessionStart = val;
+  }
+  return meta;
+}
+
 interface PluginConfig {
   url?: string;
   groupId?: string;
@@ -65,6 +105,21 @@ const graphitiPlugin = {
     const debugLog = cfg.debug !== false ? new DebugLog(cfg.logFile) : NOOP_LOG;
 
     const client = new GraphitiClient(url, groupId, api.logger, apiKey, debugLog);
+
+    const sessionStarts = new Map<string, string>();
+
+    function sessionMetaFromCtx(ctx: any): SessionMeta {
+      const meta: SessionMeta = {};
+      if (!ctx) return meta;
+      if (ctx.sessionKey) meta.sessionKey = ctx.sessionKey;
+      if (ctx.agentId) meta.agent = ctx.agentId;
+      if (ctx.messageProvider) meta.channel = ctx.messageProvider;
+      else if (ctx.messageChannel) meta.channel = ctx.messageChannel;
+      if (ctx.sessionId && sessionStarts.has(ctx.sessionId)) {
+        meta.sessionStart = sessionStarts.get(ctx.sessionId);
+      }
+      return meta;
+    }
 
     // ========================================================================
     // Tools
@@ -119,42 +174,45 @@ const graphitiPlugin = {
     );
 
     api.registerTool(
-      {
-        name: "graphiti_ingest",
-        label: "Graphiti Ingest",
-        description:
-          "Manually ingest information into the knowledge graph. " +
-          "Use for important facts, decisions, or context that should be remembered long-term.",
-        parameters: Type.Object({
-          content: Type.String({ description: "Content to ingest (rich natural language)" }),
-          name: Type.Optional(Type.String({ description: "Episode name/label" })),
-          source: Type.Optional(Type.String({ description: "Source description (default: manual)" })),
-        }),
-        async execute(_toolCallId, params) {
-          const { content, name, source = "manual" } = params as {
-            content: string; name?: string; source?: string;
-          };
-
-          try {
-            const result = await client.ingest([{
-              content,
-              role_type: "system",
-              role: "shiba",
-              name: name ?? `manual-${Date.now()}`,
-              timestamp: new Date().toISOString(),
-              source_description: `OpenClaw agent: ${source}`,
-            }]);
-
-            return {
-              content: [{ type: "text", text: `Ingested into knowledge graph: "${content.slice(0, 100)}${content.length > 100 ? "..." : ""}"` }],
-              details: result,
+      (toolCtx: any) => {
+        const meta = sessionMetaFromCtx(toolCtx ?? {});
+        return {
+          name: "graphiti_ingest",
+          label: "Graphiti Ingest",
+          description:
+            "Manually ingest information into the knowledge graph. " +
+            "Use for important facts, decisions, or context that should be remembered long-term.",
+          parameters: Type.Object({
+            content: Type.String({ description: "Content to ingest (rich natural language)" }),
+            name: Type.Optional(Type.String({ description: "Episode name/label" })),
+            source: Type.Optional(Type.String({ description: "Source description (default: manual)" })),
+          }),
+          async execute(_toolCallId: string, params: any) {
+            const { content, name, source = "manual" } = params as {
+              content: string; name?: string; source?: string;
             };
-          } catch (err) {
-            return {
-              content: [{ type: "text", text: `Graphiti ingest failed: ${err instanceof Error ? err.message : String(err)}` }],
-            };
-          }
-        },
+
+            try {
+              const result = await client.ingest([{
+                content,
+                role_type: "system",
+                role: "shiba",
+                name: name ?? `manual-${Date.now()}`,
+                timestamp: new Date().toISOString(),
+                source_description: buildSourceDescription(`OpenClaw agent: ${source}`, meta),
+              }]);
+
+              return {
+                content: [{ type: "text", text: `Ingested into knowledge graph: "${content.slice(0, 100)}${content.length > 100 ? "..." : ""}"` }],
+                details: result,
+              };
+            } catch (err) {
+              return {
+                content: [{ type: "text", text: `Graphiti ingest failed: ${err instanceof Error ? err.message : String(err)}` }],
+              };
+            }
+          },
+        };
       },
       { name: "graphiti_ingest" },
     );
@@ -165,7 +223,7 @@ const graphitiPlugin = {
 
     // Auto-recall: inject relevant facts before agent starts
     if (autoRecall) {
-      api.on("before_agent_start", async (event: any) => {
+      api.on("before_agent_start", async (event: any, _ctx: any) => {
         if (!event.prompt || event.prompt.length < minPromptLength) {
           debugLog.log("recall", { skipped: true, reason: "prompt_too_short", length: event.prompt?.length ?? 0 });
           return;
@@ -203,7 +261,8 @@ const graphitiPlugin = {
     // Compaction summaries are distilled conversation context — perfect for extraction.
     // This fires when OpenClaw compacts a long session, not on every turn.
     if (autoCapture) {
-      api.on("before_compaction", async (event: any) => {
+      api.on("before_compaction", async (event: any, ctx: any) => {
+        const meta = sessionMetaFromCtx(ctx ?? {});
 
         // Ingest the raw conversation BEFORE the agent compacts it.
         // Graphiti runs its own entity extraction (gpt-5-nano) and should
@@ -248,13 +307,13 @@ const graphitiPlugin = {
             content: episode,
             role_type: "user",
             role: "conversation",
-            name: `compaction-${Date.now()}`,
+            name: buildEpisodeName("compaction", meta),
             timestamp: new Date().toISOString(),
-            source_description: "OpenClaw auto-capture: pre-compaction conversation",
+            source_description: buildSourceDescription("OpenClaw auto-capture: pre-compaction conversation", meta),
           }]);
 
           api.logger.info?.(`graphiti: ingested pre-compaction conversation (${texts.length} messages, ${episode.length} chars)`);
-          debugLog.log("capture", { status: 202, group: groupId, messages: texts.length, ms: Date.now() - start });
+          debugLog.log("capture", { status: 202, group: groupId, session: meta.sessionKey, messages: texts.length, ms: Date.now() - start });
         } catch (err) {
           api.logger.warn(`graphiti: compaction capture failed: ${String(err)}`);
         }
@@ -262,7 +321,8 @@ const graphitiPlugin = {
 
       // Also capture on session reset (/new) — the before_reset hook includes messages
       // that are about to be lost, so we can extract knowledge before they disappear
-      api.on("before_reset", async (event: any) => {
+      api.on("before_reset", async (event: any, ctx: any) => {
+        const meta = sessionMetaFromCtx(ctx ?? {});
         if (!event.messages || event.messages.length < 4) {
           debugLog.log("reset", { skipped: true, reason: "too_few_messages" });
           return;
@@ -295,18 +355,25 @@ const graphitiPlugin = {
             content: sample.slice(0, 12000),
             role_type: "user",
             role: "conversation",
-            name: `session-reset-${Date.now()}`,
+            name: buildEpisodeName("session-reset", meta),
             timestamp: new Date().toISOString(),
-            source_description: "OpenClaw auto-capture: session reset",
+            source_description: buildSourceDescription("OpenClaw auto-capture: session reset", meta),
           }]);
 
           api.logger.info?.(`graphiti: ingested session-reset conversation (${texts.length} messages, ${sample.length} chars)`);
-          debugLog.log("reset", { status: 202, group: groupId, messages: texts.length, ms: Date.now() - start });
+          debugLog.log("reset", { status: 202, group: groupId, session: meta.sessionKey, messages: texts.length, ms: Date.now() - start });
         } catch (err) {
           api.logger.warn(`graphiti: reset capture failed: ${String(err)}`);
         }
       });
     }
+
+    // Session start tracking (always registered)
+    api.on("session_start", async (_event: any, ctx: any) => {
+      if (ctx?.sessionId) {
+        sessionStarts.set(ctx.sessionId, new Date().toISOString());
+      }
+    });
 
     // ========================================================================
     // CLI
@@ -349,8 +416,15 @@ const graphitiPlugin = {
 
         cmd.command("episodes").description("List recent episodes")
           .option("-n, --limit <n>", "How many", "10")
-          .action(async (opts: { limit: string }) => {
-            const eps = await client.episodes(parseInt(opts.limit));
+          .option("-s, --session-key <key>", "Filter by session key")
+          .action(async (opts: { limit: string; sessionKey?: string }) => {
+            let eps = await client.episodes(parseInt(opts.limit));
+            if (opts.sessionKey) {
+              eps = eps.filter((ep: any) =>
+                ep.source_description?.includes(`session=${opts.sessionKey}`) ||
+                ep.name?.includes(opts.sessionKey)
+              );
+            }
             console.log(JSON.stringify(eps, null, 2));
           });
 
