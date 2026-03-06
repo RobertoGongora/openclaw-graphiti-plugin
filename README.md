@@ -127,6 +127,7 @@ context without explicitly calling `graphiti_search`.
 Session compacts or resets
   -> before_compaction / before_reset fires
   -> Plugin extracts user+assistant messages (min 4)
+  -> Session metadata (session key, agent, channel) embedded in source_description
   -> POSTs up to 12,000 chars to Graphiti /messages
   -> Graphiti extracts entities + relationships async (gpt-5-nano or configured model)
   -> Facts become queryable via graphiti_search
@@ -142,7 +143,10 @@ Every ingested episode carries a JSON-encoded provenance object in `source_descr
   "event": "before_compaction",
   "ts": "2026-03-05T10:30:00.000Z",
   "group_id": "core",
-  "session_key": "sess-abc-123"
+  "session_key": "sess-abc-123",
+  "agent": "main",
+  "channel": "slack",
+  "session_start": "2026-03-06T10:00:00.000Z"
 }
 ```
 
@@ -153,7 +157,10 @@ Every ingested episode carries a JSON-encoded provenance object in `source_descr
 | `before_reset` | Auto-capture on `/new` session reset |
 | `cli_ingest` | `openclaw graphiti ingest` CLI command |
 
-The `openclaw graphiti episodes` command parses this automatically and shows a human-readable summary. Legacy episodes with plain-text `source_description` still display gracefully.
+Session fields (`session_key`, `agent`, `channel`, `session_start`) are included
+when available and omitted otherwise. The `openclaw graphiti episodes` command
+parses this automatically and shows a human-readable summary. Legacy episodes
+with plain-text `source_description` still display gracefully.
 
 ## Remote / non-localhost setup
 
@@ -250,8 +257,9 @@ openclaw graphiti status          # Graphiti server health + episode count
 openclaw graphiti search "query"  # Search the knowledge graph
 openclaw graphiti episodes        # Recent episodes (human-readable provenance)
 openclaw graphiti episodes --json # Raw JSON output
-openclaw graphiti ingest --source-file ./notes.md   # Ingest a file
-openclaw graphiti ingest --content "key fact"        # Ingest text directly
+openclaw graphiti episodes -s <session-key>           # Filter by session key
+openclaw graphiti ingest --source-file ./notes.md     # Ingest a file
+openclaw graphiti ingest --content "key fact"          # Ingest text directly
 openclaw memory status            # File-based memory index (memory-core)
 ```
 

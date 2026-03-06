@@ -11,6 +11,7 @@ import {
   stopMockServer,
   resetMockState,
   createMockApi,
+  createMockHookCtx,
   mockOverrides,
   lastRequest,
 } from "./helpers.js";
@@ -33,7 +34,7 @@ describe("hooks", () => {
       const handler = hooks["before_agent_start"][0];
       const result = await handler({
         prompt: "Tell me about Alice at Acme",
-      });
+      }, createMockHookCtx());
 
       expect(result).toBeDefined();
       expect(result.prependContext).toContain("<graphiti-context>");
@@ -48,7 +49,7 @@ describe("hooks", () => {
       plugin.register(api as any);
 
       const handler = hooks["before_agent_start"][0];
-      const result = await handler({ prompt: "hi" });
+      const result = await handler({ prompt: "hi" }, createMockHookCtx());
 
       expect(result).toBeUndefined();
     });
@@ -61,7 +62,7 @@ describe("hooks", () => {
       const handler = hooks["before_agent_start"][0];
       const result = await handler({
         prompt: "HEARTBEAT system check for monitoring",
-      });
+      }, createMockHookCtx());
 
       expect(result).toBeUndefined();
     });
@@ -74,7 +75,7 @@ describe("hooks", () => {
       const handler = hooks["before_agent_start"][0];
       const result = await handler({
         prompt: "This is a boot check for the system",
-      });
+      }, createMockHookCtx());
 
       expect(result).toBeUndefined();
     });
@@ -88,7 +89,7 @@ describe("hooks", () => {
       const handler = hooks["before_agent_start"][0];
       const result = await handler({
         prompt: "Tell me about the project architecture",
-      });
+      }, createMockHookCtx());
 
       expect(result).toBeUndefined();
     });
@@ -102,7 +103,7 @@ describe("hooks", () => {
       const handler = hooks["before_agent_start"][0];
       const result = await handler({
         prompt: "Something with no matching knowledge",
-      });
+      }, createMockHookCtx());
 
       expect(result).toBeUndefined();
     });
@@ -141,7 +142,7 @@ describe("hooks", () => {
           },
         ],
         messageCount: 4,
-      });
+      }, createMockHookCtx());
 
       const req = lastRequest["/messages"] as any;
       expect(req).toBeDefined();
@@ -155,6 +156,10 @@ describe("hooks", () => {
       expect(prov.plugin).toBe("openclaw-graphiti");
       expect(prov.group_id).toBe("test-group");
       expect(prov.ts).toBeDefined();
+      expect(prov.session_key).toBe("test-session-key");
+      expect(prov.agent).toBe("test-agent");
+      expect(prov.channel).toBe("test-channel");
+      expect(req.messages[0].name).toContain("compaction-test-session-key-");
     });
 
     test("skips when fewer than 4 messages", async () => {
@@ -169,7 +174,7 @@ describe("hooks", () => {
           { role: "assistant", content: "Hi!" },
         ],
         messageCount: 2,
-      });
+      }, createMockHookCtx());
 
       expect(lastRequest["/messages"]).toBeUndefined();
     });
@@ -201,7 +206,7 @@ describe("hooks", () => {
           },
         ],
         messageCount: 4,
-      });
+      }, createMockHookCtx());
 
       expect(lastRequest["/messages"]).toBeUndefined();
     });
@@ -244,7 +249,7 @@ describe("hooks", () => {
           },
         ],
         messageCount: 4,
-      });
+      }, createMockHookCtx());
 
       const req = lastRequest["/messages"] as any;
       expect(req).toBeDefined();
@@ -307,7 +312,7 @@ describe("hooks", () => {
               "That is a solid GitOps workflow with Kubernetes and ArgoCD.",
           },
         ],
-      });
+      }, createMockHookCtx());
 
       const req = lastRequest["/messages"] as any;
       expect(req).toBeDefined();
@@ -319,6 +324,10 @@ describe("hooks", () => {
       expect(prov.plugin).toBe("openclaw-graphiti");
       expect(prov.group_id).toBe("test-group");
       expect(prov.ts).toBeDefined();
+      expect(prov.session_key).toBe("test-session-key");
+      expect(prov.agent).toBe("test-agent");
+      expect(prov.channel).toBe("test-channel");
+      expect(req.messages[0].name).toContain("session-reset-test-session-key-");
     });
 
     test("skips when fewer than 4 messages", async () => {
@@ -332,7 +341,7 @@ describe("hooks", () => {
           { role: "user", content: "Short session" },
           { role: "assistant", content: "Indeed." },
         ],
-      });
+      }, createMockHookCtx());
 
       expect(lastRequest["/messages"]).toBeUndefined();
     });
@@ -343,7 +352,7 @@ describe("hooks", () => {
       plugin.register(api as any);
 
       const handler = hooks["before_reset"][0];
-      await handler({});
+      await handler({}, createMockHookCtx());
 
       expect(lastRequest["/messages"]).toBeUndefined();
     });
@@ -391,6 +400,80 @@ describe("hooks", () => {
       expect(req).toBeDefined();
       expect(req.messages[0].content).toContain("deployment pipeline");
       expect(req.messages[0].content).toContain("ArgoCD");
+    });
+  });
+
+  // ========================================================================
+  // Session metadata edge cases
+  // ========================================================================
+
+  describe("session metadata", () => {
+    test("hooks work when ctx is undefined (backward compat)", async () => {
+      const { default: plugin } = await import("../index.js");
+      const { api, hooks } = createMockApi();
+      plugin.register(api as any);
+
+      const handler = hooks["before_compaction"][0];
+      await handler({
+        messages: [
+          { role: "user", content: "What is the architecture of our system?" },
+          { role: "assistant", content: "The system uses a microservices architecture with Neo4j." },
+          { role: "user", content: "Tell me more about the graph database." },
+          { role: "assistant", content: "Neo4j stores entities and relationships as a knowledge graph." },
+        ],
+        messageCount: 4,
+      }, undefined);
+
+      const req = lastRequest["/messages"] as any;
+      expect(req).toBeDefined();
+      expect(req.messages[0].source_description).toBe("OpenClaw auto-capture: pre-compaction conversation");
+    });
+
+    test("handles partial ctx (missing fields)", async () => {
+      const { default: plugin } = await import("../index.js");
+      const { api, hooks } = createMockApi();
+      plugin.register(api as any);
+
+      const handler = hooks["before_compaction"][0];
+      await handler({
+        messages: [
+          { role: "user", content: "What is the architecture of our system?" },
+          { role: "assistant", content: "The system uses a microservices architecture with Neo4j." },
+          { role: "user", content: "Tell me more about the graph database." },
+          { role: "assistant", content: "Neo4j stores entities and relationships as a knowledge graph." },
+        ],
+        messageCount: 4,
+      }, { sessionKey: "partial-key" });
+
+      const req = lastRequest["/messages"] as any;
+      expect(req.messages[0].source_description).toContain("session=partial-key");
+      expect(req.messages[0].source_description).not.toContain("agent=");
+    });
+
+    test("session_start hook records start time", async () => {
+      const { default: plugin } = await import("../index.js");
+      const { api, hooks } = createMockApi();
+      plugin.register(api as any);
+
+      expect(hooks["session_start"]).toBeDefined();
+      expect(hooks["session_start"]).toHaveLength(1);
+
+      // Fire session_start before compaction
+      await hooks["session_start"][0]({}, { sessionId: "sess-42", sessionKey: "key-42" });
+
+      // Now fire compaction with same sessionId
+      await hooks["before_compaction"][0]({
+        messages: [
+          { role: "user", content: "What is the architecture of our system?" },
+          { role: "assistant", content: "The system uses a microservices architecture with Neo4j." },
+          { role: "user", content: "Tell me more about the graph database." },
+          { role: "assistant", content: "Neo4j stores entities and relationships as a knowledge graph." },
+        ],
+      }, { sessionKey: "key-42", sessionId: "sess-42", agentId: "a1", messageProvider: "slack" });
+
+      const req = lastRequest["/messages"] as any;
+      expect(req.messages[0].source_description).toContain("session=key-42");
+      expect(req.messages[0].source_description).toContain("session_start=");
     });
   });
 });

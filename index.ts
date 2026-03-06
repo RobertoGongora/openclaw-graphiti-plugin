@@ -33,6 +33,23 @@ function formatTimeAgo(iso: string): string {
   return `${days}d ago`;
 }
 
+/** Session context embedded in episode provenance for traceability. */
+export interface SessionMeta {
+  sessionKey?: string;
+  sessionStart?: string;
+  agent?: string;
+  channel?: string;
+}
+
+/**
+ * Build an episode name that includes the session key when available.
+ * Produces `<prefix>-<sessionKey>-<ts>` or `<prefix>-<ts>` as fallback.
+ */
+export function buildEpisodeName(prefix: string, meta: SessionMeta): string {
+  if (meta.sessionKey) return `${prefix}-${meta.sessionKey}-${Date.now()}`;
+  return `${prefix}-${Date.now()}`;
+}
+
 interface PluginConfig {
   url?: string;
   groupId?: string;
@@ -66,11 +83,40 @@ const graphitiPlugin = {
 
     const client = new GraphitiClient(url, groupId, api.logger, apiKey, debugLog);
 
+    // Session start timestamps keyed by sessionId for metadata enrichment.
+    const sessionStarts = new Map<string, string>();
+
+    /**
+     * Extract session metadata from hook/tool context for provenance enrichment.
+     * Returns whatever fields are available; missing fields are omitted from provenance.
+     */
+    function sessionMetaFromCtx(ctx: any): SessionMeta {
+      const meta: SessionMeta = {};
+      if (!ctx) return meta;
+      if (ctx.sessionKey) meta.sessionKey = ctx.sessionKey;
+      if (ctx.agentId) meta.agent = ctx.agentId;
+      if (ctx.messageProvider) meta.channel = ctx.messageProvider;
+      else if (ctx.messageChannel) meta.channel = ctx.messageChannel;
+      if (ctx.sessionId && sessionStarts.has(ctx.sessionId)) {
+        meta.sessionStart = sessionStarts.get(ctx.sessionId);
+      }
+      return meta;
+    }
+
+    /**
+     * Build a JSON-encoded provenance object for episode source_description.
+     *
+     * Always includes: plugin, event, ts, group_id.
+     * Optional: session_key, file, source, agent, channel, session_start.
+     */
     function buildProvenance(fields: {
       event: string;
       session_key?: string;
       file?: string;
       source?: string;
+      agent?: string;
+      channel?: string;
+      session_start?: string;
     }): string {
       const prov: Record<string, string> = {
         plugin: "openclaw-graphiti",
@@ -81,6 +127,9 @@ const graphitiPlugin = {
       if (fields.session_key) prov.session_key = fields.session_key;
       if (fields.file) prov.file = fields.file;
       if (fields.source) prov.source = fields.source;
+      if (fields.agent) prov.agent = fields.agent;
+      if (fields.channel) prov.channel = fields.channel;
+      if (fields.session_start) prov.session_start = fields.session_start;
       return JSON.stringify(prov);
     }
 
@@ -136,43 +185,55 @@ const graphitiPlugin = {
       { name: "graphiti_search" },
     );
 
+    // Factory pattern: graphiti_ingest receives tool context (session/agent/channel)
+    // so every manual ingest episode carries full provenance metadata.
     api.registerTool(
-      {
-        name: "graphiti_ingest",
-        label: "Graphiti Ingest",
-        description:
-          "Manually ingest information into the knowledge graph. " +
-          "Use for important facts, decisions, or context that should be remembered long-term.",
-        parameters: Type.Object({
-          content: Type.String({ description: "Content to ingest (rich natural language)" }),
-          name: Type.Optional(Type.String({ description: "Episode name/label" })),
-          source: Type.Optional(Type.String({ description: "Source description (default: manual)" })),
-        }),
-        async execute(_toolCallId, params) {
-          const { content, name, source = "manual" } = params as {
-            content: string; name?: string; source?: string;
-          };
-
-          try {
-            const result = await client.ingest([{
-              content,
-              role_type: "system",
-              role: "shiba",
-              name: name ?? `manual-${Date.now()}`,
-              timestamp: new Date().toISOString(),
-              source_description: buildProvenance({ event: "manual", source }),
-            }]);
-
-            return {
-              content: [{ type: "text", text: `Ingested into knowledge graph: "${content.slice(0, 100)}${content.length > 100 ? "..." : ""}"` }],
-              details: result,
+      (toolCtx: any) => {
+        const meta = sessionMetaFromCtx(toolCtx ?? {});
+        return {
+          name: "graphiti_ingest",
+          label: "Graphiti Ingest",
+          description:
+            "Manually ingest information into the knowledge graph. " +
+            "Use for important facts, decisions, or context that should be remembered long-term.",
+          parameters: Type.Object({
+            content: Type.String({ description: "Content to ingest (rich natural language)" }),
+            name: Type.Optional(Type.String({ description: "Episode name/label" })),
+            source: Type.Optional(Type.String({ description: "Source description (default: manual)" })),
+          }),
+          async execute(_toolCallId: string, params: any) {
+            const { content, name, source = "manual" } = params as {
+              content: string; name?: string; source?: string;
             };
-          } catch (err) {
-            return {
-              content: [{ type: "text", text: `Graphiti ingest failed: ${err instanceof Error ? err.message : String(err)}` }],
-            };
-          }
-        },
+
+            try {
+              const result = await client.ingest([{
+                content,
+                role_type: "system",
+                role: "shiba",
+                name: name ?? `manual-${Date.now()}`,
+                timestamp: new Date().toISOString(),
+                source_description: buildProvenance({
+                  event: "manual",
+                  source,
+                  session_key: meta.sessionKey,
+                  agent: meta.agent,
+                  channel: meta.channel,
+                  session_start: meta.sessionStart,
+                }),
+              }]);
+
+              return {
+                content: [{ type: "text", text: `Ingested into knowledge graph: "${content.slice(0, 100)}${content.length > 100 ? "..." : ""}"` }],
+                details: result,
+              };
+            } catch (err) {
+              return {
+                content: [{ type: "text", text: `Graphiti ingest failed: ${err instanceof Error ? err.message : String(err)}` }],
+              };
+            }
+          },
+        };
       },
       { name: "graphiti_ingest" },
     );
@@ -220,11 +281,11 @@ const graphitiPlugin = {
       });
     }
 
-    // Auto-capture: ingest compaction summaries into the knowledge graph
-    // Compaction summaries are distilled conversation context — perfect for extraction.
+    // Auto-capture: ingest conversations into the knowledge graph before compaction/reset.
     // This fires when OpenClaw compacts a long session, not on every turn.
     if (autoCapture) {
-      api.on("before_compaction", async (event: any) => {
+      api.on("before_compaction", async (event: any, ctx: any) => {
+        const meta = sessionMetaFromCtx(ctx ?? {});
 
         // Ingest the raw conversation BEFORE the agent compacts it.
         // Graphiti runs its own entity extraction (gpt-5-nano) and should
@@ -269,21 +330,28 @@ const graphitiPlugin = {
             content: episode,
             role_type: "user",
             role: "conversation",
-            name: `compaction-${Date.now()}`,
+            name: buildEpisodeName("compaction", meta),
             timestamp: new Date().toISOString(),
-            source_description: buildProvenance({ event: "before_compaction", session_key: event.sessionKey }),
+            source_description: buildProvenance({
+              event: "before_compaction",
+              session_key: meta.sessionKey,
+              agent: meta.agent,
+              channel: meta.channel,
+              session_start: meta.sessionStart,
+            }),
           }]);
 
           api.logger.info?.(`graphiti: ingested pre-compaction conversation (${texts.length} messages, ${episode.length} chars)`);
-          debugLog.log("capture", { status: 202, group: groupId, messages: texts.length, ms: Date.now() - start });
+          debugLog.log("capture", { status: 202, group: groupId, session: meta.sessionKey, messages: texts.length, ms: Date.now() - start });
         } catch (err) {
           api.logger.warn(`graphiti: compaction capture failed: ${String(err)}`);
         }
       });
 
       // Also capture on session reset (/new) — the before_reset hook includes messages
-      // that are about to be lost, so we can extract knowledge before they disappear
-      api.on("before_reset", async (event: any) => {
+      // that are about to be lost, so we can extract knowledge before they disappear.
+      api.on("before_reset", async (event: any, ctx: any) => {
+        const meta = sessionMetaFromCtx(ctx ?? {});
         if (!event.messages || event.messages.length < 4) {
           debugLog.log("reset", { skipped: true, reason: "too_few_messages" });
           return;
@@ -323,18 +391,32 @@ const graphitiPlugin = {
             content: sample.slice(0, 12000),
             role_type: "user",
             role: "conversation",
-            name: `session-reset-${Date.now()}`,
+            name: buildEpisodeName("session-reset", meta),
             timestamp: new Date().toISOString(),
-            source_description: buildProvenance({ event: "before_reset", session_key: event.sessionKey }),
+            source_description: buildProvenance({
+              event: "before_reset",
+              session_key: meta.sessionKey,
+              agent: meta.agent,
+              channel: meta.channel,
+              session_start: meta.sessionStart,
+            }),
           }]);
 
           api.logger.info?.(`graphiti: ingested session-reset conversation (${texts.length} messages, ${sample.length} chars)`);
-          debugLog.log("reset", { status: 202, group: groupId, messages: texts.length, ms: Date.now() - start });
+          debugLog.log("reset", { status: 202, group: groupId, session: meta.sessionKey, messages: texts.length, ms: Date.now() - start });
         } catch (err) {
           api.logger.warn(`graphiti: reset capture failed: ${String(err)}`);
         }
       });
     }
+
+    // Session start tracking (always registered): records the session start
+    // timestamp so subsequent capture hooks can embed it in provenance metadata.
+    api.on("session_start", async (_event: any, ctx: any) => {
+      if (ctx?.sessionId) {
+        sessionStarts.set(ctx.sessionId, new Date().toISOString());
+      }
+    });
 
     // ========================================================================
     // CLI
@@ -383,8 +465,21 @@ const graphitiPlugin = {
         cmd.command("episodes").description("List recent episodes")
           .option("-n, --limit <n>", "How many", "10")
           .option("--json", "Output raw JSON")
-          .action(async (opts: { limit: string; json?: boolean }) => {
-            const eps = await client.episodes(parseInt(opts.limit));
+          .option("-s, --session-key <key>", "Filter episodes by session key")
+          .action(async (opts: { limit: string; json?: boolean; sessionKey?: string }) => {
+            let eps = await client.episodes(parseInt(opts.limit));
+            if (opts.sessionKey) {
+              eps = eps.filter((ep: any) => {
+                try {
+                  const prov = JSON.parse(ep.source_description ?? "");
+                  return prov.session_key === opts.sessionKey;
+                } catch {
+                  // Legacy plain-text format fallback
+                  return ep.source_description?.includes(`session=${opts.sessionKey}`) ||
+                    ep.name?.includes(opts.sessionKey);
+                }
+              });
+            }
             if (opts.json) {
               console.log(JSON.stringify(eps, null, 2));
               return;
@@ -398,6 +493,8 @@ const graphitiPlugin = {
                 if (prov.source) desc += ` source=${prov.source}`;
                 if (prov.file) desc += ` file=${prov.file}`;
                 if (prov.session_key) desc += ` session=${prov.session_key}`;
+                if (prov.agent) desc += ` agent=${prov.agent}`;
+                if (prov.channel) desc += ` channel=${prov.channel}`;
               } catch { /* legacy plain-text — use as-is */ }
               const age = ep.created_at ? formatTimeAgo(ep.created_at) : "";
               console.log(`• ${ep.name ?? ep.uuid}  ${desc}  ${age}`);
@@ -437,7 +534,10 @@ const graphitiPlugin = {
                 role: "shiba",
                 name: label,
                 timestamp: new Date().toISOString(),
-                source_description: buildProvenance({ event: "cli_ingest", file: filePath ? basename(filePath) : undefined }),
+                source_description: buildProvenance({
+                  event: "cli_ingest",
+                  file: filePath ? basename(filePath) : undefined,
+                }),
               }]);
               console.log(`Ingested "${label}" (${content.length} chars)`);
             } catch (err) {
