@@ -313,7 +313,10 @@ describe("hooks", () => {
       expect(req).toBeDefined();
       expect(req.messages[0].name).toBe("memory-index::memory/test.md");
       expect(req.messages[0].role).toBe("memory-index");
-      expect(req.messages[0].source_description).toBe("OpenClaw auto-index: memory file");
+      const prov = JSON.parse(req.messages[0].source_description);
+      expect(prov.plugin).toBe("openclaw-graphiti");
+      expect(prov.event).toBe("memory_index");
+      expect(prov.file).toBe("memory/test.md");
     });
 
     test("non-memory write is ignored", async () => {
