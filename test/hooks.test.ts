@@ -150,7 +150,11 @@ describe("hooks", () => {
       expect(req.messages[0].content).toContain("architecture");
       expect(req.messages[0].content).toContain("Neo4j");
       expect(req.messages[0].role_type).toBe("user");
-      expect(req.messages[0].source_description).toContain("pre-compaction");
+      const prov = JSON.parse(req.messages[0].source_description);
+      expect(prov.event).toBe("before_compaction");
+      expect(prov.plugin).toBe("openclaw-graphiti");
+      expect(prov.group_id).toBe("test-group");
+      expect(prov.ts).toBeDefined();
     });
 
     test("skips when fewer than 4 messages", async () => {
@@ -247,6 +251,28 @@ describe("hooks", () => {
       expect(req.messages[0].content).toContain("architecture");
       expect(req.messages[0].content).toContain("event-driven");
     });
+
+    test("sessionKey from event propagates into provenance", async () => {
+      const { default: plugin } = await import("../index.js");
+      const { api, hooks } = createMockApi();
+      plugin.register(api as any);
+
+      const handler = hooks["before_compaction"][0];
+      await handler({
+        sessionKey: "sess-abc-123",
+        messages: [
+          { role: "user", content: "What is the architecture of our system?" },
+          { role: "assistant", content: "The system uses a microservices architecture with Neo4j." },
+          { role: "user", content: "Tell me more about the graph database." },
+          { role: "assistant", content: "Neo4j stores entities and relationships as a knowledge graph." },
+        ],
+        messageCount: 4,
+      });
+
+      const req = lastRequest["/messages"] as any;
+      const prov = JSON.parse(req.messages[0].source_description);
+      expect(prov.session_key).toBe("sess-abc-123");
+    });
   });
 
   // ========================================================================
@@ -288,7 +314,11 @@ describe("hooks", () => {
       expect(req.group_id).toBe("test-group");
       expect(req.messages[0].content).toContain("deployment");
       expect(req.messages[0].content).toContain("Kubernetes");
-      expect(req.messages[0].source_description).toContain("session reset");
+      const prov = JSON.parse(req.messages[0].source_description);
+      expect(prov.event).toBe("before_reset");
+      expect(prov.plugin).toBe("openclaw-graphiti");
+      expect(prov.group_id).toBe("test-group");
+      expect(prov.ts).toBeDefined();
     });
 
     test("skips when fewer than 4 messages", async () => {
@@ -316,6 +346,51 @@ describe("hooks", () => {
       await handler({});
 
       expect(lastRequest["/messages"]).toBeUndefined();
+    });
+
+    test("handles content block arrays", async () => {
+      const { default: plugin } = await import("../index.js");
+      const { api, hooks } = createMockApi();
+      plugin.register(api as any);
+
+      const handler = hooks["before_reset"][0];
+      await handler({
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "What about our deployment pipeline?" },
+            ],
+          },
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "text",
+                text: "The pipeline uses GitHub Actions with ArgoCD.",
+              },
+            ],
+          },
+          {
+            role: "user",
+            content: [{ type: "text", text: "How does the rollback work?" }],
+          },
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "text",
+                text: "ArgoCD supports automatic rollback on health check failure.",
+              },
+            ],
+          },
+        ],
+      });
+
+      const req = lastRequest["/messages"] as any;
+      expect(req).toBeDefined();
+      expect(req.messages[0].content).toContain("deployment pipeline");
+      expect(req.messages[0].content).toContain("ArgoCD");
     });
   });
 });

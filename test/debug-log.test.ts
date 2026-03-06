@@ -109,6 +109,26 @@ describe("DebugLog", () => {
     expect(fs.existsSync(logPath)).toBe(false);
   });
 
+  test("tail() returns '(disabled)' when log is disabled", () => {
+    const log = new DebugLog(logPath, false);
+    expect(log.tail(10)).toBe("(disabled)");
+  });
+
+  test("tail() uses default of 100 lines when no argument given", () => {
+    const log = new DebugLog(logPath);
+    // Write 150 lines
+    for (let i = 0; i < 150; i++) {
+      log.log("test", { n: i });
+    }
+    // Default tail (no arg) should return 100 lines
+    const tail = log.tail();
+    const lines = tail.split("\n");
+    expect(lines).toHaveLength(100);
+    // Should contain the last line (n=149) but not the first (n=0)
+    expect(lines[lines.length - 1]).toContain("n=149");
+    expect(lines[0]).toContain("n=50");
+  });
+
   test("NOOP_LOG writes nothing", () => {
     NOOP_LOG.log("test", { n: 1 });
     // Just verify it doesn't throw
@@ -136,6 +156,27 @@ describe("DebugLog", () => {
 
     const content = fs.readFileSync(logPath, "utf-8");
     expect(content).toContain("skipped=true");
+  });
+
+  test("escapes newlines in field values", () => {
+    const log = new DebugLog(logPath);
+    log.log("test", { error: "line1\nline2" });
+
+    const content = fs.readFileSync(logPath, "utf-8");
+    // Should be a single line — newline escaped
+    const lines = content.trimEnd().split("\n");
+    expect(lines).toHaveLength(1);
+    expect(content).toContain("error=line1\\nline2");
+  });
+
+  test("escapes quotes in field values", () => {
+    const log = new DebugLog(logPath);
+    log.log("test", { msg: 'has "quotes" inside' });
+
+    const content = fs.readFileSync(logPath, "utf-8");
+    // Quotes should be escaped, not breaking the format
+    expect(content).not.toMatch(/msg="has "quotes"/);
+    expect(content).toContain('\\"');
   });
 });
 
@@ -354,5 +395,25 @@ describe("DebugLog PII safety", () => {
     expect(content).toContain("episodes");
     expect(content).toContain("error=unreachable");
     // The error is now observable, not silent
+  });
+
+  test("server error response body with PII is NOT logged to debug file", async () => {
+    // Simulate upstream proxy echoing PII in error response
+    const piiBody = "Error: invalid request from user john.doe@example.com SSN 987-65-4321";
+    mockOverrides.searchStatus = 500;
+    mockOverrides.searchErrorBody = piiBody;
+
+    try {
+      await instrumentedClient().search("test query", 5);
+    } catch { /* expected */ }
+
+    const content = logContent();
+    // PII from error response body must NOT appear in the log
+    expect(content).not.toContain("john.doe@example.com");
+    expect(content).not.toContain("987-65-4321");
+    expect(content).not.toContain(piiBody);
+    // Should log a generic error label instead
+    expect(content).toContain("HTTP error");
+    expect(content).toContain("status=500");
   });
 });

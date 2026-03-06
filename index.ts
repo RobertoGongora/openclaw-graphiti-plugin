@@ -10,7 +10,7 @@
  * - graphiti_ingest: Manual episode ingestion
  * - Auto-recall: Injects relevant facts before each conversation (via before_agent_start)
  * - Auto-capture: Ingests conversation content before compaction/reset
- * - CLI: `openclaw graphiti status|search|episodes`
+ * - CLI: `openclaw graphiti status|search|episodes|ingest`
  * - CLI bridge: `openclaw memory status` (built-in file-based memory)
  * - Slash command: /graphiti
  */
@@ -65,6 +65,24 @@ const graphitiPlugin = {
     const debugLog = cfg.debug !== false ? new DebugLog(cfg.logFile) : NOOP_LOG;
 
     const client = new GraphitiClient(url, groupId, api.logger, apiKey, debugLog);
+
+    function buildProvenance(fields: {
+      event: string;
+      session_key?: string;
+      file?: string;
+      source?: string;
+    }): string {
+      const prov: Record<string, string> = {
+        plugin: "openclaw-graphiti",
+        event: fields.event,
+        ts: new Date().toISOString(),
+        group_id: groupId,
+      };
+      if (fields.session_key) prov.session_key = fields.session_key;
+      if (fields.file) prov.file = fields.file;
+      if (fields.source) prov.source = fields.source;
+      return JSON.stringify(prov);
+    }
 
     // ========================================================================
     // Tools
@@ -142,7 +160,7 @@ const graphitiPlugin = {
               role: "shiba",
               name: name ?? `manual-${Date.now()}`,
               timestamp: new Date().toISOString(),
-              source_description: `OpenClaw agent: ${source}`,
+              source_description: buildProvenance({ event: "manual", source }),
             }]);
 
             return {
@@ -175,7 +193,10 @@ const graphitiPlugin = {
         if (
           event.prompt.includes("HEARTBEAT") ||
           event.prompt.includes("boot check")
-        ) return;
+        ) {
+          debugLog.log("recall", { skipped: true, reason: "heartbeat_or_boot_check" });
+          return;
+        }
 
         const start = Date.now();
         try {
@@ -250,7 +271,7 @@ const graphitiPlugin = {
             role: "conversation",
             name: `compaction-${Date.now()}`,
             timestamp: new Date().toISOString(),
-            source_description: "OpenClaw auto-capture: pre-compaction conversation",
+            source_description: buildProvenance({ event: "before_compaction", session_key: event.sessionKey }),
           }]);
 
           api.logger.info?.(`graphiti: ingested pre-compaction conversation (${texts.length} messages, ${episode.length} chars)`);
@@ -283,6 +304,13 @@ const graphitiPlugin = {
             const content = msgObj.content;
             if (typeof content === "string" && content.length > 20) {
               texts.push(`${role}: ${content.slice(0, 1000)}`);
+            } else if (Array.isArray(content)) {
+              for (const block of content) {
+                if (block && typeof block === "object" && (block as any).type === "text" && typeof (block as any).text === "string") {
+                  const text = (block as any).text;
+                  if (text.length > 20) texts.push(`${role}: ${text.slice(0, 1000)}`);
+                }
+              }
             }
           }
 
@@ -297,7 +325,7 @@ const graphitiPlugin = {
             role: "conversation",
             name: `session-reset-${Date.now()}`,
             timestamp: new Date().toISOString(),
-            source_description: "OpenClaw auto-capture: session reset",
+            source_description: buildProvenance({ event: "before_reset", session_key: event.sessionKey }),
           }]);
 
           api.logger.info?.(`graphiti: ingested session-reset conversation (${texts.length} messages, ${sample.length} chars)`);
@@ -342,16 +370,80 @@ const graphitiPlugin = {
           .argument("<query>", "Search query")
           .option("-n, --limit <n>", "Max results", "10")
           .action(async (query: string, opts: { limit: string }) => {
-            const facts = await client.search(query, parseInt(opts.limit));
-            if (facts.length === 0) { console.log("No facts found."); return; }
-            for (const f of facts) { console.log(`• ${f.name}: ${f.fact}`); }
+            try {
+              const facts = await client.search(query, parseInt(opts.limit));
+              if (facts.length === 0) { console.log("No facts found."); return; }
+              for (const f of facts) { console.log(`• ${f.name}: ${f.fact}`); }
+            } catch (err) {
+              console.error(`Search failed: ${err instanceof Error ? err.message : String(err)}`);
+              process.exitCode = 1;
+            }
           });
 
         cmd.command("episodes").description("List recent episodes")
           .option("-n, --limit <n>", "How many", "10")
-          .action(async (opts: { limit: string }) => {
+          .option("--json", "Output raw JSON")
+          .action(async (opts: { limit: string; json?: boolean }) => {
             const eps = await client.episodes(parseInt(opts.limit));
-            console.log(JSON.stringify(eps, null, 2));
+            if (opts.json) {
+              console.log(JSON.stringify(eps, null, 2));
+              return;
+            }
+            if (eps.length === 0) { console.log("No episodes found."); return; }
+            for (const ep of eps) {
+              let desc = ep.source_description ?? "";
+              try {
+                const prov = JSON.parse(desc);
+                desc = `[${prov.event}]`;
+                if (prov.source) desc += ` source=${prov.source}`;
+                if (prov.file) desc += ` file=${prov.file}`;
+                if (prov.session_key) desc += ` session=${prov.session_key}`;
+              } catch { /* legacy plain-text — use as-is */ }
+              const age = ep.created_at ? formatTimeAgo(ep.created_at) : "";
+              console.log(`• ${ep.name ?? ep.uuid}  ${desc}  ${age}`);
+            }
+          });
+
+        cmd.command("ingest").description("Ingest a file or text into the knowledge graph")
+          .option("--source-file <path>", "Path to file to ingest")
+          .option("--content <text>", "Text content to ingest directly")
+          .option("--name <label>", "Episode name/label")
+          .action(async (opts: { sourceFile?: string; content?: string; name?: string }) => {
+            if (!opts.sourceFile && !opts.content) {
+              console.error("Provide --source-file or --content");
+              process.exitCode = 1;
+              return;
+            }
+            try {
+              let content: string;
+              let filePath: string | undefined;
+              const { resolve, basename } = await import("node:path");
+              if (opts.sourceFile) {
+                const { readFile } = await import("node:fs/promises");
+                filePath = resolve(opts.sourceFile);
+                content = await readFile(filePath, "utf-8");
+                const MAX_FILE_CHARS = 12_000;
+                if (content.length > MAX_FILE_CHARS) {
+                  console.warn("File content truncated to 12,000 characters");
+                  content = content.slice(0, MAX_FILE_CHARS);
+                }
+              } else {
+                content = opts.content!;
+              }
+              const label = opts.name ?? (filePath ? basename(filePath) : `cli-${Date.now()}`);
+              await client.ingest([{
+                content,
+                role_type: "system",
+                role: "shiba",
+                name: label,
+                timestamp: new Date().toISOString(),
+                source_description: buildProvenance({ event: "cli_ingest", file: filePath ? basename(filePath) : undefined }),
+              }]);
+              console.log(`Ingested "${label}" (${content.length} chars)`);
+            } catch (err) {
+              console.error(`Ingest failed: ${err instanceof Error ? err.message : String(err)}`);
+              process.exitCode = 1;
+            }
           });
 
         cmd.command("logs").description("Show debug log")

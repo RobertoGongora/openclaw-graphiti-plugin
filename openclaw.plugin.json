@@ -18,17 +18,17 @@
       },
       "autoRecall": {
         "type": "boolean",
-        "default": true,
+        "default": false,
         "description": "Inject relevant facts before each conversation turn"
       },
       "autoCapture": {
         "type": "boolean",
         "default": true,
-        "description": "Ingest conversation turns after each exchange"
+        "description": "Automatically ingest conversations on compaction/reset events"
       },
       "recallMaxFacts": {
         "type": "number",
-        "default": 10,
+        "default": 1,
         "description": "Max facts to inject on auto-recall"
       },
       "minPromptLength": {

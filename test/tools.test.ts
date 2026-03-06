@@ -89,6 +89,26 @@ describe("tool execution", () => {
     expect(req.messages[0].role_type).toBe("system");
   });
 
+  test("graphiti_ingest provenance has event, source, ts, group_id", async () => {
+    const { default: plugin } = await import("../index.js");
+    const { api, tools } = createMockApi();
+    plugin.register(api as any);
+
+    const tool = tools.find((t) => t.opts.name === "graphiti_ingest")!.tool;
+    await tool.execute("call-prov", {
+      content: "Architecture uses event sourcing",
+      source: "design-doc",
+    });
+
+    const req = lastRequest["/messages"] as any;
+    const prov = JSON.parse(req.messages[0].source_description);
+    expect(prov.event).toBe("manual");
+    expect(prov.source).toBe("design-doc");
+    expect(prov.ts).toBeDefined();
+    expect(prov.group_id).toBe("test-group");
+    expect(prov.plugin).toBe("openclaw-graphiti");
+  });
+
   test("graphiti_ingest returns error message on failure", async () => {
     mockOverrides.ingestStatus = 500;
     const { default: plugin } = await import("../index.js");

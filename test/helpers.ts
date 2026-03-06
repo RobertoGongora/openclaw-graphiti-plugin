@@ -44,7 +44,7 @@ export const SAMPLE_EPISODES = [
     labels: [],
     created_at: "2024-01-15T10:30:00+00:00",
     source: "message",
-    source_description: "OpenClaw auto-capture",
+    source_description: JSON.stringify({ plugin: "openclaw-graphiti", event: "before_compaction", ts: "2024-01-15T10:30:00.000Z", group_id: "test-group" }),
     content: "user(user): Hello",
     valid_at: "2024-01-15T10:30:00+00:00",
     entity_edges: ["fact-001"],
@@ -61,6 +61,7 @@ export type MockOverrides = {
   ingestStatus?: number;
   ingestBody?: Record<string, unknown>;
   searchStatus?: number;
+  searchErrorBody?: string;
 };
 
 let server: http.Server;
@@ -124,7 +125,7 @@ export function startMockServer(): Promise<void> {
         const status = mockOverrides.searchStatus ?? 200;
         if (status !== 200) {
           res.writeHead(status);
-          res.end(JSON.stringify({ detail: "search error" }));
+          res.end(mockOverrides.searchErrorBody ?? JSON.stringify({ detail: "search error" }));
           return;
         }
         res.writeHead(200, { "Content-Type": "application/json" });

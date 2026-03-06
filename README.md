@@ -10,7 +10,7 @@ Temporal knowledge graph plugin for [OpenClaw](https://github.com/openclaw/openc
 - **Knowledge graph tools**: `graphiti_search` and `graphiti_ingest` available as agent tools for on-demand entity/relationship queries and manual ingestion
 - **Auto-capture**: Before compaction or session reset, ingests the conversation into the knowledge graph for entity/relationship extraction (async, via Graphiti's LLM pipeline)
 - **Auto-recall**: Optionally injects relevant facts before each turn — off by default, see [Auto-recall vs on-demand search](#auto-recall-vs-on-demand-search)
-- **CLI**: `openclaw graphiti status|search|episodes`
+- **CLI**: `openclaw graphiti status|search|episodes|ingest`
 - **Slash command**: `/graphiti` for quick health check
 
 ## Requirements
@@ -132,6 +132,29 @@ Session compacts or resets
   -> Facts become queryable via graphiti_search
 ```
 
+## Source provenance
+
+Every ingested episode carries a JSON-encoded provenance object in `source_description` for traceability:
+
+```json
+{
+  "plugin": "openclaw-graphiti",
+  "event": "before_compaction",
+  "ts": "2026-03-05T10:30:00.000Z",
+  "group_id": "core",
+  "session_key": "sess-abc-123"
+}
+```
+
+| `event` value | Trigger |
+|---------------|---------|
+| `manual` | `graphiti_ingest` tool call |
+| `before_compaction` | Auto-capture on session compaction |
+| `before_reset` | Auto-capture on `/new` session reset |
+| `cli_ingest` | `openclaw graphiti ingest` CLI command |
+
+The `openclaw graphiti episodes` command parses this automatically and shows a human-readable summary. Legacy episodes with plain-text `source_description` still display gracefully.
+
 ## Remote / non-localhost setup
 
 ```json
@@ -225,7 +248,10 @@ See the [Graphiti GitHub](https://github.com/getzep/graphiti) for full deploymen
 ```bash
 openclaw graphiti status          # Graphiti server health + episode count
 openclaw graphiti search "query"  # Search the knowledge graph
-openclaw graphiti episodes        # Recent ingested episodes
+openclaw graphiti episodes        # Recent episodes (human-readable provenance)
+openclaw graphiti episodes --json # Raw JSON output
+openclaw graphiti ingest --source-file ./notes.md   # Ingest a file
+openclaw graphiti ingest --content "key fact"        # Ingest text directly
 openclaw memory status            # File-based memory index (memory-core)
 ```
 
