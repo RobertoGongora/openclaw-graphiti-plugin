@@ -9,7 +9,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      id-token: write  # required for npm Trusted Publishing (OIDC)
+      id-token: write  # for provenance attestation (sigstore)
 
     steps:
       - uses: actions/checkout@v4
@@ -18,8 +18,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          # Note: no registry-url here — that would inject NODE_AUTH_TOKEN
-          # which conflicts with OIDC Trusted Publishing
+          registry-url: https://registry.npmjs.org
 
       - name: Install dependencies
         run: npm install
@@ -27,7 +26,7 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Publish to npm (Trusted Publishing / OIDC)
+      - name: Publish to npm (with provenance attestation)
         run: npm publish --access public --provenance
         env:
-          NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
