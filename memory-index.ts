@@ -81,11 +81,7 @@ export interface MemoryFileMeta {
 export function readMemoryFileMeta(absolutePath: string): MemoryFileMeta | null {
   try {
     const stat = fs.statSync(absolutePath);
-    const buf = Buffer.alloc(2048);
-    const fd = fs.openSync(absolutePath, "r");
-    const bytesRead = fs.readSync(fd, buf, 0, 2048, 0);
-    fs.closeSync(fd);
-    const raw = buf.toString("utf-8", 0, bytesRead);
+    const raw = fs.readFileSync(absolutePath, "utf-8").slice(0, 2048);
     const excerpt = raw.length > 500 ? raw.slice(0, 500) : raw;
 
     return {
@@ -169,7 +165,13 @@ export async function upsertIndexEpisode(opts: UpsertOptions): Promise<boolean> 
     role: "memory-index",
     name: indexEpisodeName(filePath),
     timestamp: meta.lastModified,
-    source_description: "OpenClaw auto-index: memory file",
+    source_description: JSON.stringify({
+      plugin: "openclaw-graphiti",
+      event: "memory_index",
+      ts: new Date().toISOString(),
+      group_id: groupId,
+      file: filePath,
+    }),
   }]);
 
   // Update state

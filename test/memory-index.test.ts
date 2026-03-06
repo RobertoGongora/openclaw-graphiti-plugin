@@ -242,6 +242,17 @@ describe("scanMemoryFiles", () => {
   test("returns empty for non-existent dir", () => {
     expect(scanMemoryFiles(path.join(tmpDir, "nope"))).toEqual([]);
   });
+
+  test("uses custom prefix for path construction", () => {
+    fs.writeFileSync(path.join(tmpDir, "a.md"), "a");
+    fs.mkdirSync(path.join(tmpDir, "sub"));
+    fs.writeFileSync(path.join(tmpDir, "sub", "b.md"), "b");
+
+    const files = scanMemoryFiles(tmpDir, "my-notes");
+    expect(files).toHaveLength(2);
+    expect(files).toContain("my-notes/a.md");
+    expect(files).toContain(path.join("my-notes", "sub", "b.md"));
+  });
 });
 
 // ============================================================================
@@ -294,7 +305,12 @@ describe("upsertIndexEpisode", () => {
     expect(req.messages[0].name).toBe("memory-index::memory/test.md");
     expect(req.messages[0].role).toBe("memory-index");
     expect(req.messages[0].role_type).toBe("system");
-    expect(req.messages[0].source_description).toBe("OpenClaw auto-index: memory file");
+    const prov = JSON.parse(req.messages[0].source_description);
+    expect(prov.plugin).toBe("openclaw-graphiti");
+    expect(prov.event).toBe("memory_index");
+    expect(prov.file).toBe("memory/test.md");
+    expect(prov.group_id).toBe("test-group");
+    expect(prov.ts).toBeTruthy();
     expect(req.messages[0].content).toContain("type: memory-index");
     expect(req.messages[0].content).toContain("Some memory content");
   });

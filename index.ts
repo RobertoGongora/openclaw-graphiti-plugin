@@ -494,7 +494,8 @@ const graphitiPlugin = {
           .option("--dry-run", "Show what would be indexed without ingesting")
           .action(async (opts: { dir: string; dryRun?: boolean }) => {
             const memoryDir = path.resolve(opts.dir);
-            const files = scanMemoryFiles(memoryDir);
+            const prefix = path.basename(memoryDir);
+            const files = scanMemoryFiles(memoryDir, prefix);
             if (files.length === 0) {
               console.log(`No files found in ${memoryDir}`);
               return;
@@ -506,7 +507,7 @@ const graphitiPlugin = {
               let updatedCount = 0;
               let unchangedCount = 0;
               for (const f of files) {
-                const absPath = path.join(memoryDir, "..", f);
+                const absPath = path.join(memoryDir, path.relative(prefix, f));
                 const meta = readMemoryFileMeta(absPath);
                 const existing = state[f];
                 if (!existing) { newCount++; console.log(`  [new] ${f}`); }
@@ -523,7 +524,7 @@ const graphitiPlugin = {
             let indexed = 0;
             let skipped = 0;
             for (const f of files) {
-              const absPath = path.join(memoryDir, "..", f);
+              const absPath = path.join(memoryDir, path.relative(prefix, f));
               const didIndex = await upsertIndexEpisode({
                 client, filePath: f, absolutePath: absPath, groupId, debugLog, stateDir,
               });

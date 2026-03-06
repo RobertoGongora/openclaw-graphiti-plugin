@@ -159,7 +159,7 @@ The `openclaw graphiti episodes` command parses this automatically and shows a h
 
 ## Auto-index flow
 
-When the agent writes a file to `memory/` (e.g., `memory/2026-03-05.md` or `MEMORY.md`), the plugin automatically creates a lightweight index episode in Graphiti. This bridges file-based memory with the knowledge graph — Graphiti can extract entities and relationships from your memory files.
+When the agent writes a file to `memory/` (e.g., `memory/2026-03-05.md` or `memory/topics/project.md`), the plugin automatically creates a lightweight index episode in Graphiti. This bridges file-based memory with the knowledge graph — Graphiti can extract entities and relationships from your memory files.
 
 ```
 Agent writes to memory/file.md
@@ -178,7 +178,7 @@ Index episodes are distinguishable from other episode types:
 | Manual | `manual-<ts>` | `shiba` | `OpenClaw agent: manual` |
 | Compaction | `compaction-<ts>` | `conversation` | `...pre-compaction...` |
 | Reset | `session-reset-<ts>` | `conversation` | `...session reset` |
-| **Index** | `memory-index::memory/file.md` | `memory-index` | `OpenClaw auto-index: memory file` |
+| **Index** | `memory-index::memory/file.md` | `memory-index` | `{"plugin":"openclaw-graphiti","event":"memory_index",...}` |
 
 ### Backfill existing memory files
 
