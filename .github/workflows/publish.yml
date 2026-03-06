@@ -18,7 +18,8 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          registry-url: https://registry.npmjs.org
+          # Note: no registry-url here — that would inject NODE_AUTH_TOKEN
+          # which conflicts with OIDC Trusted Publishing
 
       - name: Install dependencies
         run: npm install
@@ -26,5 +27,7 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Publish to npm (provenance-attested)
+      - name: Publish to npm (Trusted Publishing / OIDC)
         run: npm publish --access public --provenance
+        env:
+          NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
