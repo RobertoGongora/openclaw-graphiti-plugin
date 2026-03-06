@@ -78,10 +78,23 @@ export interface MemoryFileMeta {
   fileSize: number;
 }
 
+/** Skip files larger than 1 MB — likely binary or log dumps. */
+const MAX_FILE_SIZE = 1_048_576; // 1 MB
+
 export function readMemoryFileMeta(absolutePath: string): MemoryFileMeta | null {
   try {
     const stat = fs.statSync(absolutePath);
-    const raw = fs.readFileSync(absolutePath, "utf-8").slice(0, 2048);
+    if (stat.size > MAX_FILE_SIZE) return null;
+
+    const fd = fs.openSync(absolutePath, "r");
+    const bufSize = Math.min(stat.size, 2048);
+    const buf = Buffer.alloc(bufSize);
+    try {
+      fs.readSync(fd, buf, 0, bufSize, 0);
+    } finally {
+      fs.closeSync(fd);
+    }
+    const raw = buf.toString("utf-8");
     const excerpt = raw.length > 500 ? raw.slice(0, 500) : raw;
 
     return {
@@ -205,7 +218,7 @@ export function scanMemoryFiles(memoryDir: string, prefix = "memory"): string[] 
       if (entry.isDirectory()) {
         walk(fullPath, relPath);
       } else if (entry.isFile()) {
-        results.push(relPath);
+        results.push(relPath.replaceAll("\\", "/"));
       }
     }
   }

@@ -21,7 +21,7 @@ import path from "node:path";
 import os from "node:os";
 import { GraphitiClient } from "./client.js";
 import { DebugLog, NOOP_LOG } from "./debug-log.js";
-import { extractMemoryPath, upsertIndexEpisode, scanMemoryFiles, readIndexState, readMemoryFileMeta } from "./memory-index.js";
+import { extractMemoryPath, upsertIndexEpisode, scanMemoryFiles, readIndexState, writeIndexState, readMemoryFileMeta, buildIndexContent, indexEpisodeName } from "./memory-index.js";
 
 function formatTimeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -521,16 +521,38 @@ const graphitiPlugin = {
             const ok = await client.healthy();
             if (!ok) { console.log("Graphiti server unreachable. Aborting backfill."); return; }
 
+            // Batch state writes: read once, accumulate updates, write once
+            const state = readIndexState(stateDir);
             let indexed = 0;
             let skipped = 0;
             for (const f of files) {
               const absPath = path.join(memoryDir, path.relative(prefix, f));
-              const didIndex = await upsertIndexEpisode({
-                client, filePath: f, absolutePath: absPath, groupId, debugLog, stateDir,
-              });
-              if (didIndex) indexed++;
-              else skipped++;
+              const meta = readMemoryFileMeta(absPath);
+              if (!meta) { skipped++; continue; }
+
+              const existing = state[f];
+              if (existing && existing.lastModified === meta.lastModified) {
+                skipped++;
+                continue;
+              }
+
+              const episodeContent = buildIndexContent(f, meta.lastModified, meta.excerpt, meta.fileSize);
+              await client.ingest([{
+                content: episodeContent,
+                role_type: "system",
+                role: "memory-index",
+                name: indexEpisodeName(f),
+                timestamp: meta.lastModified,
+                source_description: buildProvenance({ event: "memory_index", file: f }),
+              }]);
+
+              state[f] = {
+                lastModified: meta.lastModified,
+                lastIndexed: new Date().toISOString(),
+              };
+              indexed++;
             }
+            writeIndexState(stateDir, state);
             console.log(`Indexed ${indexed} files (${skipped} unchanged)`);
           });
       },
