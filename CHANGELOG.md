@@ -4,6 +4,25 @@
 
 ### Added
 
+- **Session metadata on auto-captured episodes**: Episodes ingested by
+  `before_compaction`, `before_reset`, and the `graphiti_ingest` tool now embed
+  session context in the JSON provenance `source_description`. The fields
+  `session_key`, `agent`, `channel`, and `session_start` are added when
+  available, enabling queries like "what happened in this session?" and
+  per-session episode filtering.
+- **`session_start` hook** (always registered): Records session start timestamps
+  so `session_start` metadata is available to subsequent capture hooks.
+- **`SessionMeta` interface** and **`buildEpisodeName()` helper** exported from
+  the plugin for downstream use. Episode names now include the session key when
+  available (`compaction-<sessionKey>-<ts>`), making them more traceable.
+- **Factory pattern for `graphiti_ingest`**: The ingest tool is now registered
+  via a factory function receiving tool context (session key, agent, channel),
+  so every manual ingest episode carries full session provenance automatically.
+- **`openclaw graphiti episodes --session-key <key>`**: Filter episodes by
+  session key. Works with JSON provenance format; falls back to name-based
+  matching for legacy episodes.
+- **Session fields in `episodes` display**: `openclaw graphiti episodes` now
+  shows `agent=` and `channel=` from provenance when available.
 - **Auto-index memory files**: When the agent writes a file to `memory/`, the
   plugin automatically creates a lightweight index episode in Graphiti via the
   `after_tool_call` hook. Episodes include YAML frontmatter (type, file path,

@@ -87,6 +87,10 @@ describe("tool execution", () => {
       "Important fact about the project architecture",
     );
     expect(req.messages[0].role_type).toBe("system");
+    const prov = JSON.parse(req.messages[0].source_description);
+    expect(prov.session_key).toBe("test-session-key");
+    expect(prov.agent).toBe("test-agent");
+    expect(prov.channel).toBe("test-channel");
   });
 
   test("graphiti_ingest provenance has event, source, ts, group_id", async () => {

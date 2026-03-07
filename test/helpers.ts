@@ -197,11 +197,31 @@ export function stopMockServer(): Promise<void> {
 }
 
 // ============================================================================
+// Mock Context Factories
+// ============================================================================
+
+export function createMockHookCtx(overrides: Record<string, unknown> = {}) {
+  return {
+    sessionKey: "test-session-key",
+    sessionId: "test-session-id",
+    agentId: "test-agent",
+    messageProvider: "test-channel",
+    ...overrides,
+  };
+}
+
+// ============================================================================
 // Mock OpenClaw Plugin API
 // ============================================================================
 
 export type RegisteredTool = { tool: any; opts: any };
 export type RegisteredHooks = Record<string, ((...args: any[]) => any)[]>;
+
+const DEFAULT_TOOL_CTX = {
+  sessionKey: "test-session-key",
+  messageChannel: "test-channel",
+  agentId: "test-agent",
+};
 
 export function createMockApi(configOverrides: Record<string, unknown> = {}) {
   const tools: RegisteredTool[] = [];
@@ -227,7 +247,13 @@ export function createMockApi(configOverrides: Record<string, unknown> = {}) {
       error: vi.fn(),
       debug: vi.fn(),
     },
-    registerTool: vi.fn((tool: any, opts: any) => tools.push({ tool, opts })),
+    registerTool: vi.fn((toolOrFactory: any, opts: any) => {
+      if (typeof toolOrFactory === "function") {
+        tools.push({ tool: toolOrFactory(DEFAULT_TOOL_CTX), opts });
+      } else {
+        tools.push({ tool: toolOrFactory, opts });
+      }
+    }),
     registerCli: vi.fn((reg: any, opts: any) => clis.push({ reg, opts })),
     registerService: vi.fn((svc: any) => services.push(svc)),
     registerCommand: vi.fn((cmd: any) => commands.push(cmd)),
