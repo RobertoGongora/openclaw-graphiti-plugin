@@ -44,12 +44,14 @@ describe("registration", () => {
       expect.arrayContaining(["graphiti_search", "graphiti_ingest"]),
     );
 
-    // 3 hooks by default (autoRecall=false): before_compaction, before_reset, session_start
+    // 4 hooks by default (autoRecall=false, autoCapture=true, autoIndex=true):
+    // before_compaction, before_reset, session_start (always), after_tool_call
     expect(Object.keys(hooks)).toEqual(
       expect.arrayContaining([
         "before_compaction",
         "before_reset",
         "session_start",
+        "after_tool_call",
       ]),
     );
     expect(Object.keys(hooks)).not.toContain("before_agent_start");
@@ -69,11 +71,12 @@ describe("registration", () => {
     expect(services[0].id).toBe("graphiti");
   });
 
-  test("registers only session_start when autoRecall and autoCapture are false", async () => {
+  test("registers only session_start when autoRecall, autoCapture, and autoIndex are false", async () => {
     const { default: plugin } = await import("../index.js");
     const { api, hooks } = createMockApi({
       autoRecall: false,
       autoCapture: false,
+      autoIndex: false,
     });
 
     plugin.register(api as any);
@@ -81,7 +84,7 @@ describe("registration", () => {
     expect(Object.keys(hooks)).toEqual(["session_start"]);
   });
 
-  test("registers recall and session_start hooks when autoCapture is false", async () => {
+  test("registers recall, index, and session_start hooks when autoCapture is false", async () => {
     const { default: plugin } = await import("../index.js");
     const { api, hooks } = createMockApi({
       autoRecall: true,
@@ -91,9 +94,9 @@ describe("registration", () => {
     plugin.register(api as any);
 
     expect(Object.keys(hooks)).toEqual(
-      expect.arrayContaining(["before_agent_start", "session_start"]),
+      expect.arrayContaining(["before_agent_start", "session_start", "after_tool_call"]),
     );
-    expect(Object.keys(hooks)).toHaveLength(2);
+    expect(Object.keys(hooks)).toHaveLength(3);
   });
 
   test("graphiti CLI default action outputs help instead of erroring", async () => {

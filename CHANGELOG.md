@@ -23,6 +23,24 @@
   matching for legacy episodes.
 - **Session fields in `episodes` display**: `openclaw graphiti episodes` now
   shows `agent=` and `channel=` from provenance when available.
+- **Auto-index memory files**: When the agent writes a file to `memory/`, the
+  plugin automatically creates a lightweight index episode in Graphiti via the
+  `after_tool_call` hook. Episodes include YAML frontmatter (type, file path,
+  mtime, size) and a ~500-char excerpt. Controlled by the new `autoIndex`
+  config option (default: `true`).
+- **Idempotent state tracking**: Index state is persisted to
+  `~/.openclaw/state/graphiti/graphiti-memory-index.json` with atomic writes.
+  Files are only re-indexed when their mtime changes.
+- **`openclaw graphiti backfill`** CLI command: Scans a memory directory
+  (default: `./memory`) and indexes all new or modified files into Graphiti.
+  Supports `--dir <path>` and `--dry-run` flags.
+- **`autoIndex`** config option and UI hint for toggling memory file indexing.
+- New `memory-index.ts` module with `extractMemoryPath`, `indexEpisodeName`,
+  `buildIndexContent`, `readMemoryFileMeta`, state read/write, `upsertIndexEpisode`,
+  and `scanMemoryFiles`.
+- 25 new unit tests in `test/memory-index.test.ts` covering path extraction,
+  naming, content format, state persistence, upsert integration, and scanning.
+- 4 new hook tests in `test/hooks.test.ts` for `after_tool_call` behavior.
 
 ## [0.4.0] — 2026-03-06
 

@@ -23,6 +23,7 @@
     "index.ts",
     "client.ts",
     "debug-log.ts",
+    "memory-index.ts",
     "openclaw.plugin.json"
   ],
   "scripts": {

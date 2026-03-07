@@ -17,8 +17,11 @@
 
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { Type } from "@sinclair/typebox";
+import path from "node:path";
+import os from "node:os";
 import { GraphitiClient } from "./client.js";
 import { DebugLog, NOOP_LOG } from "./debug-log.js";
+import { extractMemoryPath, upsertIndexEpisode, scanMemoryFiles, readIndexState, writeIndexState, readMemoryFileMeta, buildIndexContent, indexEpisodeName } from "./memory-index.js";
 
 function formatTimeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -77,6 +80,8 @@ interface PluginConfig {
   debug?: boolean;
   /** Custom path for the debug log file. */
   logFile?: string;
+  /** Create index episodes when files are written to memory/ (default: true). */
+  autoIndex?: boolean;
 }
 
 const graphitiPlugin = {
@@ -93,7 +98,9 @@ const graphitiPlugin = {
     const recallMaxFacts = cfg.recallMaxFacts ?? 1;
     const minPromptLength = cfg.minPromptLength ?? 10;
     const apiKey = cfg.apiKey;
+    const autoIndex = cfg.autoIndex !== false;
     const debugLog = cfg.debug !== false ? new DebugLog(cfg.logFile) : NOOP_LOG;
+    const stateDir = path.join(os.homedir(), ".openclaw", "state", "graphiti");
 
     const client = new GraphitiClient(url, groupId, api.logger, apiKey, debugLog);
 
@@ -435,6 +442,33 @@ const graphitiPlugin = {
       }
     });
 
+    // Auto-index: create index episodes for memory file writes
+    if (autoIndex) {
+      api.on("after_tool_call", async (event: any) => {
+        if (event.error) return;
+
+        const memPath = extractMemoryPath(event.toolName, event.params);
+        if (!memPath) return;
+
+        try {
+          const healthy = await client.healthy();
+          if (!healthy) return;
+
+          const absolutePath = api.resolvePath(memPath);
+          await upsertIndexEpisode({
+            client,
+            filePath: memPath,
+            absolutePath,
+            groupId,
+            debugLog,
+            stateDir,
+          });
+        } catch (err) {
+          api.logger.warn(`graphiti: memory index failed: ${String(err)}`);
+        }
+      });
+    }
+
     // ========================================================================
     // CLI
     // ========================================================================
@@ -573,6 +607,73 @@ const graphitiPlugin = {
             if (opts.clear) { debugLog.clear(); console.log("Log cleared."); return; }
             const tail = debugLog.tail(50);
             console.log(tail || "(no log entries)");
+          });
+
+        cmd.command("backfill").description("Index existing memory files into Graphiti")
+          .option("--dir <path>", "Memory directory to scan", "./memory")
+          .option("--dry-run", "Show what would be indexed without ingesting")
+          .action(async (opts: { dir: string; dryRun?: boolean }) => {
+            const memoryDir = path.resolve(opts.dir);
+            const prefix = path.basename(memoryDir);
+            const files = scanMemoryFiles(memoryDir, prefix);
+            if (files.length === 0) {
+              console.log(`No files found in ${memoryDir}`);
+              return;
+            }
+
+            if (opts.dryRun) {
+              const state = readIndexState(stateDir);
+              let newCount = 0;
+              let updatedCount = 0;
+              let unchangedCount = 0;
+              for (const f of files) {
+                const absPath = path.join(memoryDir, path.relative(prefix, f));
+                const meta = readMemoryFileMeta(absPath);
+                const existing = state[f];
+                if (!existing) { newCount++; console.log(`  [new] ${f}`); }
+                else if (meta && existing.lastModified !== meta.lastModified) { updatedCount++; console.log(`  [updated] ${f}`); }
+                else { unchangedCount++; console.log(`  [unchanged] ${f}`); }
+              }
+              console.log(`\nDry run: ${files.length} files (${newCount} new, ${updatedCount} updated, ${unchangedCount} unchanged)`);
+              return;
+            }
+
+            const ok = await client.healthy();
+            if (!ok) { console.log("Graphiti server unreachable. Aborting backfill."); return; }
+
+            // Batch state writes: read once, accumulate updates, write once
+            const state = readIndexState(stateDir);
+            let indexed = 0;
+            let skipped = 0;
+            for (const f of files) {
+              const absPath = path.join(memoryDir, path.relative(prefix, f));
+              const meta = readMemoryFileMeta(absPath);
+              if (!meta) { skipped++; continue; }
+
+              const existing = state[f];
+              if (existing && existing.lastModified === meta.lastModified) {
+                skipped++;
+                continue;
+              }
+
+              const episodeContent = buildIndexContent(f, meta.lastModified, meta.excerpt, meta.fileSize);
+              await client.ingest([{
+                content: episodeContent,
+                role_type: "system",
+                role: "memory-index",
+                name: indexEpisodeName(f),
+                timestamp: meta.lastModified,
+                source_description: buildProvenance({ event: "memory_index", file: f }),
+              }]);
+
+              state[f] = {
+                lastModified: meta.lastModified,
+                lastIndexed: new Date().toISOString(),
+              };
+              indexed++;
+            }
+            writeIndexState(stateDir, state);
+            console.log(`Indexed ${indexed} files (${skipped} unchanged)`);
           });
       },
       { commands: ["graphiti"] },
