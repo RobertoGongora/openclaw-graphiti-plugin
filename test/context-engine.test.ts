@@ -670,6 +670,22 @@ describe("GraphitiContextEngine", () => {
       ).resolves.toBeUndefined();
     });
 
+    test("compact() returns ok: false on server error", async () => {
+      mockOverrides.ingestStatus = 500;
+      const engine = createEngine();
+      const result = await engine.compact({
+        sessionId: "sess-1",
+        messages: [
+          { role: "user", content: "Tell me about the project architecture and design patterns" },
+          { role: "assistant", content: "The project uses a modular architecture with clean separation" },
+        ],
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.compacted).toBe(false);
+      expect(result.reason).toBe("error");
+    });
+
     test("prepareSubagentSpawn() returns undefined on search error", async () => {
       mockOverrides.searchStatus = 500;
       const engine = createEngine();
