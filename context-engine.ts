@@ -236,48 +236,54 @@ export class GraphitiContextEngine {
     messages?: unknown[];
     legacyParams?: { bridge?: { compact: () => Promise<any> } };
   }): Promise<CompactResult> {
-    if (params.messages) {
-      const healthy = await this.cachedHealthy();
-      if (!healthy) {
-        if (params.legacyParams?.bridge) {
-          this.debugLog.log("ce-compact", { action: "legacy_bridge_fallback" });
-          await params.legacyParams.bridge.compact();
+    try {
+      if (params.messages) {
+        const healthy = await this.cachedHealthy();
+        if (!healthy) {
+          if (params.legacyParams?.bridge) {
+            this.debugLog.log("ce-compact", { action: "legacy_bridge_fallback" });
+            await params.legacyParams.bridge.compact();
+            return { ok: true, compacted: true };
+          }
+          this.debugLog.log("ce-compact", { action: "unhealthy", compacted: false });
+          return { ok: true, compacted: false, reason: "server-unhealthy" };
+        }
+
+        const texts = extractTextsFromMessages(params.messages);
+        if (texts.length === 0) {
+          // No user/assistant text to preserve — safe to signal compaction complete.
+          // The graph already holds any knowledge from prior ingestion cycles.
+          this.debugLog.log("ce-compact", { action: "no_text", compacted: true });
           return { ok: true, compacted: true };
         }
-        this.debugLog.log("ce-compact", { action: "unhealthy", compacted: false });
-        return { ok: true, compacted: false, reason: "server-unhealthy" };
-      }
 
-      const texts = extractTextsFromMessages(params.messages);
-      if (texts.length === 0) {
-        // No user/assistant text to preserve — safe to signal compaction complete.
-        // The graph already holds any knowledge from prior ingestion cycles.
-        this.debugLog.log("ce-compact", { action: "no_text", compacted: true });
+        const episode = texts.join("\n\n").slice(0, 12000);
+        await this.client.ingest([{
+          content: episode,
+          role_type: "user",
+          role: "conversation",
+          name: buildEpisodeName("compact", { sessionKey: params.sessionId }),
+          timestamp: new Date().toISOString(),
+          source_description: buildProvenance(this.groupId, { event: "compact", session_key: params.sessionId }),
+        }]);
+
+        this.debugLog.log("ce-compact", { action: "ingested", texts: texts.length, compacted: true });
         return { ok: true, compacted: true };
       }
 
-      const episode = texts.join("\n\n").slice(0, 12000);
-      await this.client.ingest([{
-        content: episode,
-        role_type: "user",
-        role: "conversation",
-        name: buildEpisodeName("compact", { sessionKey: params.sessionId }),
-        timestamp: new Date().toISOString(),
-        source_description: buildProvenance(this.groupId, { event: "compact", session_key: params.sessionId }),
-      }]);
+      if (params.legacyParams?.bridge) {
+        this.debugLog.log("ce-compact", { action: "legacy_bridge" });
+        await params.legacyParams.bridge.compact();
+        return { ok: true, compacted: true };
+      }
 
-      this.debugLog.log("ce-compact", { action: "ingested", texts: texts.length, compacted: true });
-      return { ok: true, compacted: true };
+      this.debugLog.log("ce-compact", { action: "no_messages", compacted: false });
+      return { ok: true, compacted: false, reason: "no-messages" };
+    } catch (err) {
+      this.logger?.warn(`graphiti: compact failed: ${String(err)}`);
+      this.debugLog.log("ce-compact", { error: String(err) });
+      return { ok: false, compacted: false, reason: "error" };
     }
-
-    if (params.legacyParams?.bridge) {
-      this.debugLog.log("ce-compact", { action: "legacy_bridge" });
-      await params.legacyParams.bridge.compact();
-      return { ok: true, compacted: true };
-    }
-
-    this.debugLog.log("ce-compact", { action: "no_messages", compacted: false });
-    return { ok: true, compacted: false, reason: "no-messages" };
   }
 
   // ========================================================================

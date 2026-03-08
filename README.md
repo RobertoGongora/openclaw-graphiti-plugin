@@ -135,6 +135,40 @@ Session compacts or resets
   -> Facts become queryable via graphiti_search
 ```
 
+## ContextEngine mode (v0.6.0+)
+
+On OpenClaw v2026.3.7+, the plugin manifest declares `kind: "context-engine"` instead of
+plain hooks. OpenClaw detects this and wires the plugin into the ContextEngine lifecycle
+automatically — **no configuration changes needed**. On older OpenClaw versions, the
+plugin falls back to the existing sidecar hooks (`before_agent_start`,
+`before_compaction`, `before_reset`), so there is no breaking change.
+
+### How it works
+
+Instead of event hooks that fire at fixed points, the ContextEngine exposes lifecycle
+methods that the runtime calls directly:
+
+| Lifecycle method | Replaces hook | Purpose |
+|------------------|---------------|---------|
+| `assemble()` | `before_agent_start` | Recall relevant facts into the system prompt |
+| `ingest()` | _(new)_ | Ingest a single message into the graph |
+| `ingestBatch()` | _(new)_ | Batch-ingest multiple messages |
+| `afterTurn()` | _(new)_ | Ingest new messages after each turn (replaces batch fallback) |
+| `compact()` | `before_compaction` | Graph-aware compaction — ingest then truncate |
+| `bootstrap()` | _(new)_ | Health-check and report graph population on startup |
+| `onSubagentEnded()` | _(new)_ | Ingest a subagent's findings into the parent graph scope |
+| `prepareSubagentSpawn()` | _(new)_ | Inject relevant facts into a spawning subagent's context |
+
+The engine declares `ownsCompaction: true`, meaning it controls the compaction strategy.
+During compaction, messages being discarded are first ingested into the knowledge graph,
+so long-term memory is preserved even after the context window is truncated.
+
+### Backwards compatibility
+
+- **OpenClaw v2026.3.7+**: ContextEngine methods are used; hooks are not registered.
+- **Older OpenClaw**: Hooks fire as before. No behavioural change.
+- Config format is identical in both modes.
+
 ## Source provenance
 
 Every ingested episode carries a JSON-encoded provenance object in `source_description` for traceability:
@@ -155,9 +189,14 @@ Every ingested episode carries a JSON-encoded provenance object in `source_descr
 | `event` value | Trigger |
 |---------------|---------|
 | `manual` | `graphiti_ingest` tool call |
-| `before_compaction` | Auto-capture on session compaction |
-| `before_reset` | Auto-capture on `/new` session reset |
+| `before_compaction` | Auto-capture on session compaction (hooks mode) |
+| `before_reset` | Auto-capture on `/new` session reset (hooks mode) |
 | `cli_ingest` | `openclaw graphiti ingest` CLI command |
+| `ingest` | ContextEngine single-message ingestion |
+| `ingest_batch` | ContextEngine batch ingestion |
+| `after_turn` | ContextEngine after-turn ingestion |
+| `compact` | ContextEngine graph-aware compaction |
+| `subagent_ended` | ContextEngine subagent result ingestion |
 
 Session fields (`session_key`, `agent`, `channel`, `session_start`) are included
 when available and omitted otherwise. The `openclaw graphiti episodes` command
