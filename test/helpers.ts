@@ -229,6 +229,7 @@ export function createMockApi(configOverrides: Record<string, unknown> = {}) {
   const clis: { reg: any; opts: any }[] = [];
   const services: any[] = [];
   const commands: any[] = [];
+  const contextEngines: { id: string; factory: () => any }[] = [];
 
   const api = {
     id: "graphiti",
@@ -263,5 +264,20 @@ export function createMockApi(configOverrides: Record<string, unknown> = {}) {
     resolvePath: (p: string) => p,
   };
 
-  return { api, tools, hooks, clis, services, commands };
+  return { api, tools, hooks, clis, services, commands, contextEngines };
+}
+
+/**
+ * Create a mock API that supports registerContextEngine.
+ * Use this to test the ContextEngine code path.
+ */
+export function createMockApiWithEngineSupport(configOverrides: Record<string, unknown> = {}) {
+  const result = createMockApi(configOverrides);
+  const { contextEngines } = result;
+
+  (result.api as any).registerContextEngine = vi.fn((id: string, factory: () => any) => {
+    contextEngines.push({ id, factory });
+  });
+
+  return result;
 }

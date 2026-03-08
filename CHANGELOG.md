@@ -1,5 +1,58 @@
 # Changelog
 
+## [0.6.0] — 2026-03-08
+
+### Added
+
+- **`GraphitiContextEngine` class** (`context-engine.ts`): First-class
+  ContextEngine implementation for OpenClaw v2026.3.7+. When the host supports
+  `registerContextEngine`, the engine replaces the sidecar hooks
+  (`before_agent_start`, `before_compaction`, `before_reset`) with structured
+  lifecycle methods. All 9 interface methods are fully implemented:
+  - **`ingest`** / **`ingestBatch`**: Ingest individual or batched messages into
+    the knowledge graph, filtering by role and content length.
+  - **`afterTurn`**: Ingest new messages from each conversation turn (replaces
+    the per-turn capture that hooks couldn't do).
+  - **`assemble`**: Recall relevant facts via `/get-memory` and inject them as a
+    `<graphiti-context>` system prompt addition.
+  - **`compact`**: Graph-aware compaction — safety-ingests messages being
+    compacted, then signals the runtime to truncate. Falls back to legacy bridge
+    when the server is unhealthy.
+  - **`bootstrap`**: Health-checks the server and reports graph population
+    (episode count) on session start.
+  - **`onSubagentEnded`**: Cross-agent propagation — ingests a subagent's
+    summary or raw messages into the parent's graph scope when it finishes.
+  - **`prepareSubagentSpawn`**: Injects relevant facts from the graph into a
+    child agent's initial context based on its task description.
+  - **`dispose`**: No-op (no persistent connections).
+
+- **`shared.ts` module**: Extracted shared helpers to avoid circular
+  dependencies between `index.ts` and `context-engine.ts`:
+  - `buildProvenance()` — JSON-encoded provenance for episode source_description.
+  - `extractTextContent()` — extract text from string or content-block-array.
+  - `extractTextsFromMessages()` — extract user/assistant texts from a message
+    array.
+  - `formatFactsAsContext()` — format facts as a `<graphiti-context>` block
+    (shared by `assemble()` and `prepareSubagentSpawn()`).
+
+- **`kind: "context-engine"` in plugin manifest** (`openclaw.plugin.json` and
+  `index.ts`): Declares the plugin as a context engine provider so OpenClaw can
+  route lifecycle calls to it when supported.
+
+- **40 new tests** in `test/context-engine.test.ts` covering all engine methods
+  against the mock HTTP server.
+
+### Changed
+
+- **Deduplicated `index.ts`**: The local `buildProvenance()` function and inline
+  text extraction in `before_compaction`/`before_reset` hooks are replaced with
+  imports from `shared.ts`. Behavior is identical; no hook output changes.
+
+- **Hooks are skipped when ContextEngine is active**: When the host supports
+  `registerContextEngine`, the plugin does not register `before_agent_start`,
+  `before_compaction`, or `before_reset` hooks (the engine handles these).
+  `session_start` and `after_tool_call` hooks are still registered.
+
 ## [0.5.0] — 2026-03-06
 
 ### Added

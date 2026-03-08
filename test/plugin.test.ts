@@ -7,6 +7,7 @@ import {
   startMockServer,
   stopMockServer,
   createMockApi,
+  createMockApiWithEngineSupport,
 } from "./helpers.js";
 
 // ============================================================================
@@ -21,6 +22,11 @@ describe("plugin shape", () => {
     expect(plugin.name).toBe("Graphiti Knowledge Graph");
     expect(plugin.description).toContain("knowledge graph");
     expect(plugin.register).toBeInstanceOf(Function);
+  });
+
+  test("has kind: context-engine", async () => {
+    const { default: plugin } = await import("../index.js");
+    expect(plugin.kind).toBe("context-engine");
   });
 });
 
@@ -158,5 +164,58 @@ describe("registration", () => {
     expect(api.runtime.tools.registerMemoryCli).toHaveBeenCalledWith(
       mockProgram,
     );
+  });
+
+  // ========================================================================
+  // ContextEngine code path
+  // ========================================================================
+
+  test("registers context engine when api.registerContextEngine exists", async () => {
+    const { default: plugin } = await import("../index.js");
+    const { api, contextEngines } = createMockApiWithEngineSupport();
+
+    plugin.register(api as any);
+
+    expect((api as any).registerContextEngine).toHaveBeenCalledWith(
+      "graphiti",
+      expect.any(Function),
+    );
+    expect(contextEngines).toHaveLength(1);
+    expect(contextEngines[0].id).toBe("graphiti");
+
+    // Factory should produce a GraphitiContextEngine
+    const engine = contextEngines[0].factory();
+    expect(engine.info.id).toBe("graphiti");
+    expect(engine.info.ownsCompaction).toBe(true);
+  });
+
+  test("skips recall/capture hooks when context engine is registered", async () => {
+    const { default: plugin } = await import("../index.js");
+    const { api, hooks } = createMockApiWithEngineSupport({ autoRecall: true, autoCapture: true });
+
+    plugin.register(api as any);
+
+    // Should NOT have recall/capture hooks
+    expect(hooks["before_agent_start"]).toBeUndefined();
+    expect(hooks["before_compaction"]).toBeUndefined();
+    expect(hooks["before_reset"]).toBeUndefined();
+
+    // Should still have session_start and after_tool_call
+    expect(hooks["session_start"]).toBeDefined();
+    expect(hooks["after_tool_call"]).toBeDefined();
+  });
+
+  test("falls back to hooks when api.registerContextEngine does not exist", async () => {
+    const { default: plugin } = await import("../index.js");
+    const { api, hooks } = createMockApi({ autoRecall: true, autoCapture: true });
+
+    plugin.register(api as any);
+
+    // Should have all hooks (no registerContextEngine on api)
+    expect(hooks["before_agent_start"]).toBeDefined();
+    expect(hooks["before_compaction"]).toBeDefined();
+    expect(hooks["before_reset"]).toBeDefined();
+    expect(hooks["session_start"]).toBeDefined();
+    expect(hooks["after_tool_call"]).toBeDefined();
   });
 });
