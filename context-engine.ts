@@ -6,10 +6,13 @@
  * before_reset) with first-class assemble/ingest/compact methods.
  */
 
+import { createRequire } from "node:module";
 import type { GraphitiClient, GraphitiMessage } from "./client.js";
 import type { DebugLog } from "./debug-log.js";
-import { buildProvenance, extractTextContent, extractTextsFromMessages, formatFactsAsContext } from "./shared.js";
-import { buildEpisodeName } from "./index.js";
+import { buildEpisodeName, buildProvenance, extractTextContent, extractTextsFromMessages, formatFactsAsContext } from "./shared.js";
+
+const _require = createRequire(import.meta.url);
+const PLUGIN_VERSION: string = (_require("./package.json") as any).version;
 
 // ---------------------------------------------------------------------------
 // Types from openclaw/plugin-sdk — declared locally so the plugin compiles
@@ -59,6 +62,11 @@ export interface SubagentSpawnPreparation {
 
 interface PluginConfig {
   recallMaxFacts?: number;
+  autoRecall?: boolean;
+  autoCapture?: boolean;
+  debug?: boolean;
+  /** Allow extension without breaking. */
+  [key: string]: unknown;
 }
 
 // ---------------------------------------------------------------------------
@@ -69,9 +77,13 @@ export class GraphitiContextEngine {
   readonly info: ContextEngineInfo = {
     id: "graphiti",
     name: "Graphiti Knowledge Graph",
-    version: "0.6.0",
+    version: PLUGIN_VERSION,
     ownsCompaction: true,
   };
+
+  /** Cached healthy() result with TTL to avoid redundant HTTP round-trips. */
+  private _healthCache: { result: boolean; ts: number } | null = null;
+  private static readonly HEALTH_CACHE_TTL_MS = 15_000;
 
   constructor(
     private client: GraphitiClient,
@@ -80,6 +92,17 @@ export class GraphitiContextEngine {
     private debugLog: DebugLog,
     private logger?: { info?: (...args: any[]) => void; warn: (...args: any[]) => void },
   ) {}
+
+  /** Health check with short TTL cache (15s). */
+  private async cachedHealthy(): Promise<boolean> {
+    const now = Date.now();
+    if (this._healthCache && now - this._healthCache.ts < GraphitiContextEngine.HEALTH_CACHE_TTL_MS) {
+      return this._healthCache.result;
+    }
+    const result = await this.client.healthy();
+    this._healthCache = { result, ts: now };
+    return result;
+  }
 
   // ========================================================================
   // Required methods
@@ -110,18 +133,24 @@ export class GraphitiContextEngine {
       return { ingested: false };
     }
 
-    const start = Date.now();
-    await this.client.ingest([{
-      content: `${role}: ${text.slice(0, 2000)}`,
-      role_type: role as "user" | "assistant",
-      role,
-      name: `ingest-${params.sessionId}-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      source_description: buildProvenance(this.groupId, { event: "ingest" }),
-    }]);
+    try {
+      const start = Date.now();
+      await this.client.ingest([{
+        content: `${role}: ${text.slice(0, 2000)}`,
+        role_type: role as "user" | "assistant",
+        role,
+        name: `ingest-${params.sessionId}-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        source_description: buildProvenance(this.groupId, { event: "ingest" }),
+      }]);
 
-    this.debugLog.log("ce-ingest", { ingested: true, role, ms: Date.now() - start });
-    return { ingested: true };
+      this.debugLog.log("ce-ingest", { ingested: true, role, ms: Date.now() - start });
+      return { ingested: true };
+    } catch (err) {
+      this.logger?.warn(`graphiti: ingest failed: ${String(err)}`);
+      this.debugLog.log("ce-ingest", { error: String(err) });
+      return { ingested: false };
+    }
   }
 
   /**
@@ -137,7 +166,7 @@ export class GraphitiContextEngine {
     const start = Date.now();
 
     try {
-      const healthy = await this.client.healthy();
+      const healthy = await this.cachedHealthy();
       if (!healthy) {
         this.debugLog.log("ce-assemble", { skipped: true, reason: "unhealthy" });
         return passThrough;
@@ -208,7 +237,7 @@ export class GraphitiContextEngine {
     legacyParams?: { bridge?: { compact: () => Promise<any> } };
   }): Promise<CompactResult> {
     if (params.messages) {
-      const healthy = await this.client.healthy();
+      const healthy = await this.cachedHealthy();
       if (!healthy) {
         if (params.legacyParams?.bridge) {
           this.debugLog.log("ce-compact", { action: "legacy_bridge_fallback" });
@@ -221,6 +250,8 @@ export class GraphitiContextEngine {
 
       const texts = extractTextsFromMessages(params.messages);
       if (texts.length === 0) {
+        // No user/assistant text to preserve — safe to signal compaction complete.
+        // The graph already holds any knowledge from prior ingestion cycles.
         this.debugLog.log("ce-compact", { action: "no_text", compacted: true });
         return { ok: true, compacted: true };
       }
@@ -272,23 +303,29 @@ export class GraphitiContextEngine {
       return { ingestedCount: 0 };
     }
 
-    const start = Date.now();
-    const episode = texts.join("\n\n").slice(0, 12000);
+    try {
+      const start = Date.now();
+      const episode = texts.join("\n\n").slice(0, 12000);
 
-    await this.client.ingest([{
-      content: episode,
-      role_type: "user",
-      role: "conversation",
-      name: buildEpisodeName("batch", { sessionKey: params.sessionId }),
-      timestamp: new Date().toISOString(),
-      source_description: buildProvenance(this.groupId, {
-        event: "ingest_batch",
-        session_key: params.sessionId,
-      }),
-    }]);
+      await this.client.ingest([{
+        content: episode,
+        role_type: "user",
+        role: "conversation",
+        name: buildEpisodeName("batch", { sessionKey: params.sessionId }),
+        timestamp: new Date().toISOString(),
+        source_description: buildProvenance(this.groupId, {
+          event: "ingest_batch",
+          session_key: params.sessionId,
+        }),
+      }]);
 
-    this.debugLog.log("ce-ingestBatch", { count: texts.length, ms: Date.now() - start });
-    return { ingestedCount: texts.length };
+      this.debugLog.log("ce-ingestBatch", { count: texts.length, ms: Date.now() - start });
+      return { ingestedCount: texts.length };
+    } catch (err) {
+      this.logger?.warn(`graphiti: ingestBatch failed: ${String(err)}`);
+      this.debugLog.log("ce-ingestBatch", { error: String(err) });
+      return { ingestedCount: 0 };
+    }
   }
 
   /**
@@ -320,23 +357,28 @@ export class GraphitiContextEngine {
       return;
     }
 
-    const start = Date.now();
-    const episode = texts.join("\n\n").slice(0, 12000);
+    try {
+      const start = Date.now();
+      const episode = texts.join("\n\n").slice(0, 12000);
 
-    await this.client.ingest([{
-      content: episode,
-      role_type: "user",
-      role: "conversation",
-      name: buildEpisodeName("turn", { sessionKey: params.sessionId }),
-      timestamp: new Date().toISOString(),
-      source_description: buildProvenance(this.groupId, {
-        event: "after_turn",
-        session_key: params.sessionId,
-      }),
-    }]);
+      await this.client.ingest([{
+        content: episode,
+        role_type: "user",
+        role: "conversation",
+        name: buildEpisodeName("turn", { sessionKey: params.sessionId }),
+        timestamp: new Date().toISOString(),
+        source_description: buildProvenance(this.groupId, {
+          event: "after_turn",
+          session_key: params.sessionId,
+        }),
+      }]);
 
-    this.logger?.info?.(`graphiti: after-turn ingested ${texts.length} messages`);
-    this.debugLog.log("ce-afterTurn", { count: texts.length, ms: Date.now() - start });
+      this.logger?.info?.(`graphiti: after-turn ingested ${texts.length} messages`);
+      this.debugLog.log("ce-afterTurn", { count: texts.length, ms: Date.now() - start });
+    } catch (err) {
+      this.logger?.warn(`graphiti: afterTurn failed: ${String(err)}`);
+      this.debugLog.log("ce-afterTurn", { error: String(err) });
+    }
   }
 
   /**
@@ -346,15 +388,21 @@ export class GraphitiContextEngine {
     sessionId: string;
     sessionFile?: string;
   }): Promise<BootstrapResult> {
-    const healthy = await this.client.healthy();
-    if (!healthy) {
-      this.debugLog.log("ce-bootstrap", { healthy: false });
-      return { bootstrapped: false, reason: "server-unhealthy" };
-    }
+    try {
+      const healthy = await this.cachedHealthy();
+      if (!healthy) {
+        this.debugLog.log("ce-bootstrap", { healthy: false });
+        return { bootstrapped: false, reason: "server-unhealthy" };
+      }
 
-    const stats = await this.client.episodeCount();
-    this.debugLog.log("ce-bootstrap", { healthy: true, episodes: stats.count });
-    return { bootstrapped: true, episodeCount: stats.count };
+      const stats = await this.client.episodeCount();
+      this.debugLog.log("ce-bootstrap", { healthy: true, episodes: stats.count });
+      return { bootstrapped: true, episodeCount: stats.count };
+    } catch (err) {
+      this.logger?.warn(`graphiti: bootstrap failed: ${String(err)}`);
+      this.debugLog.log("ce-bootstrap", { error: String(err) });
+      return { bootstrapped: false, reason: "error" };
+    }
   }
 
   /**
@@ -377,40 +425,47 @@ export class GraphitiContextEngine {
       return;
     }
 
-    const healthy = await this.client.healthy();
-    if (!healthy) {
-      this.debugLog.log("ce-subagentEnded", { child: params.childSessionKey, skipped: true, reason: "unhealthy" });
-      return;
-    }
-
-    let episode: string;
-    if (hasSummary) {
-      episode = params.summary!.slice(0, 12000);
-    } else {
-      const texts = extractTextsFromMessages(params.messages!);
-      if (texts.length === 0) {
-        this.debugLog.log("ce-subagentEnded", { child: params.childSessionKey, action: "no_content" });
+    try {
+      const healthy = await this.cachedHealthy();
+      if (!healthy) {
+        this.debugLog.log("ce-subagentEnded", { child: params.childSessionKey, skipped: true, reason: "unhealthy" });
         return;
       }
-      episode = texts.join("\n\n").slice(0, 12000);
+
+      let episode: string;
+      if (hasSummary) {
+        episode = params.summary!.slice(0, 12000);
+      } else {
+        const texts = extractTextsFromMessages(params.messages!);
+        if (texts.length === 0) {
+          this.debugLog.log("ce-subagentEnded", { child: params.childSessionKey, action: "no_content" });
+          return;
+        }
+        episode = texts.join("\n\n").slice(0, 12000);
+      }
+
+      await this.client.ingest([{
+        content: episode,
+        // "system" is a valid GraphitiMessage.role_type — subagent results are
+        // neither user nor assistant from the parent conversation's perspective.
+        role_type: "system",
+        role: "subagent-result",
+        name: buildEpisodeName("subagent", { sessionKey: params.childSessionKey }),
+        timestamp: new Date().toISOString(),
+        source_description: buildProvenance(this.groupId, {
+          event: "subagent_ended",
+          session_key: params.childSessionKey,
+        }),
+      }]);
+
+      this.debugLog.log("ce-subagentEnded", {
+        child: params.childSessionKey,
+        action: hasSummary ? "ingested_summary" : "ingested_messages",
+      });
+    } catch (err) {
+      this.logger?.warn(`graphiti: onSubagentEnded failed: ${String(err)}`);
+      this.debugLog.log("ce-subagentEnded", { child: params.childSessionKey, error: String(err) });
     }
-
-    await this.client.ingest([{
-      content: episode,
-      role_type: "system",
-      role: "subagent-result",
-      name: buildEpisodeName("subagent", { sessionKey: params.childSessionKey }),
-      timestamp: new Date().toISOString(),
-      source_description: buildProvenance(this.groupId, {
-        event: "subagent_ended",
-        session_key: params.childSessionKey,
-      }),
-    }]);
-
-    this.debugLog.log("ce-subagentEnded", {
-      child: params.childSessionKey,
-      action: hasSummary ? "ingested_summary" : "ingested_messages",
-    });
   }
 
   /**
@@ -424,14 +479,20 @@ export class GraphitiContextEngine {
   }): Promise<SubagentSpawnPreparation | undefined> {
     if (!params.taskDescription) return undefined;
 
-    const healthy = await this.client.healthy();
-    if (!healthy) return undefined;
+    try {
+      const healthy = await this.cachedHealthy();
+      if (!healthy) return undefined;
 
-    const maxFacts = this.cfg.recallMaxFacts ?? 10;
-    const facts = await this.client.search(params.taskDescription, maxFacts);
-    if (facts.length === 0) return undefined;
+      const maxFacts = this.cfg.recallMaxFacts ?? 10;
+      const facts = await this.client.search(params.taskDescription, maxFacts);
+      if (facts.length === 0) return undefined;
 
-    return { systemPromptAddition: formatFactsAsContext(facts) };
+      return { systemPromptAddition: formatFactsAsContext(facts) };
+    } catch (err) {
+      this.logger?.warn(`graphiti: prepareSubagentSpawn failed: ${String(err)}`);
+      this.debugLog.log("ce-prepareSubagentSpawn", { error: String(err) });
+      return undefined;
+    }
   }
 
   /**

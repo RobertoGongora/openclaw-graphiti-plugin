@@ -4,8 +4,26 @@
  * Extracted to avoid circular dependencies and reduce duplication.
  */
 
-// Re-export public types
-export type { SessionMeta } from "./index.js";
+/**
+ * Session context embedded in episode provenance for traceability.
+ * @exported - public API of this plugin
+ */
+export interface SessionMeta {
+  sessionKey?: string;
+  sessionStart?: string;
+  agent?: string;
+  channel?: string;
+}
+
+/**
+ * Build an episode name that includes the session key when available.
+ * Produces `<prefix>-<sessionKey>-<ts>` or `<prefix>-<ts>` as fallback.
+ * @exported - public API of this plugin
+ */
+export function buildEpisodeName(prefix: string, meta: SessionMeta): string {
+  if (meta.sessionKey) return `${prefix}-${meta.sessionKey}-${Date.now()}`;
+  return `${prefix}-${Date.now()}`;
+}
 
 /**
  * Build a JSON-encoded provenance object for episode source_description.
@@ -50,9 +68,10 @@ export function extractTextContent(
   minLength = 20,
 ): string | null {
   if (typeof content === "string") {
-    return content.length >= minLength ? content : null;
+    return content.length > minLength ? content : null;
   }
   if (Array.isArray(content)) {
+    const parts: string[] = [];
     for (const block of content) {
       if (
         block &&
@@ -61,9 +80,12 @@ export function extractTextContent(
         typeof (block as any).text === "string"
       ) {
         const text = (block as any).text;
-        if (text.length >= minLength) return text;
+        if (text.length > minLength) {
+          parts.push(text);
+        }
       }
     }
+    return parts.length > 0 ? parts.join("\n") : null;
   }
   return null;
 }

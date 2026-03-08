@@ -22,8 +22,12 @@ import os from "node:os";
 import { GraphitiClient } from "./client.js";
 import { DebugLog, NOOP_LOG } from "./debug-log.js";
 import { extractMemoryPath, upsertIndexEpisode, scanMemoryFiles, readIndexState, writeIndexState, readMemoryFileMeta, buildIndexContent, indexEpisodeName } from "./memory-index.js";
-import { buildProvenance, extractTextsFromMessages } from "./shared.js";
+import { buildProvenance, extractTextsFromMessages, buildEpisodeName, type SessionMeta } from "./shared.js";
 import { GraphitiContextEngine } from "./context-engine.js";
+
+// Re-export public types from shared.ts for backwards compatibility
+export type { SessionMeta } from "./shared.js";
+export { buildEpisodeName } from "./shared.js";
 
 function formatTimeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -38,17 +42,6 @@ function formatTimeAgo(iso: string): string {
   return `${days}d ago`;
 }
 
-/**
- * Session context embedded in episode provenance for traceability.
- * @exported - public API of this plugin
- */
-export interface SessionMeta {
-  sessionKey?: string;
-  sessionStart?: string;
-  agent?: string;
-  channel?: string;
-}
-
 /** Minimal context shape passed by OpenClaw to lifecycle hooks. */
 interface HookContext {
   sessionKey?: string;
@@ -57,16 +50,6 @@ interface HookContext {
   messageProvider?: string;
   messageChannel?: string;
   [key: string]: unknown; // allow extension without breaking
-}
-
-/**
- * Build an episode name that includes the session key when available.
- * Produces `<prefix>-<sessionKey>-<ts>` or `<prefix>-<ts>` as fallback.
- * @exported - public API of this plugin
- */
-export function buildEpisodeName(prefix: string, meta: SessionMeta): string {
-  if (meta.sessionKey) return `${prefix}-${meta.sessionKey}-${Date.now()}`;
-  return `${prefix}-${Date.now()}`;
 }
 
 interface PluginConfig {
