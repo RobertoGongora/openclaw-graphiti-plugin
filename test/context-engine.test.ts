@@ -18,6 +18,10 @@ import { GraphitiClient } from "../client.js";
 import { NOOP_LOG } from "../debug-log.js";
 import { GraphitiContextEngine } from "../context-engine.js";
 import { formatFactsAsContext } from "../shared.js";
+import { createRequire } from "node:module";
+
+const _require = createRequire(import.meta.url);
+const PKG_VERSION: string = (_require("../package.json") as any).version;
 
 function createEngine() {
   const port = getMockPort();
@@ -39,7 +43,7 @@ describe("GraphitiContextEngine", () => {
       const engine = createEngine();
       expect(engine.info.id).toBe("graphiti");
       expect(engine.info.name).toBe("Graphiti Knowledge Graph");
-      expect(engine.info.version).toBe("0.6.0");
+      expect(engine.info.version).toBe(PKG_VERSION);
       expect(engine.info.ownsCompaction).toBe(true);
     });
   });
@@ -602,6 +606,77 @@ describe("GraphitiContextEngine", () => {
         parentSessionKey: "parent",
         childSessionKey: "child",
         taskDescription: "Find information about Alice",
+      });
+
+      expect(result).toBeUndefined();
+    });
+  });
+
+  // ========================================================================
+  // error paths (server failures)
+  // ========================================================================
+
+  describe("error paths", () => {
+    test("ingest() returns ingested: false on server error", async () => {
+      mockOverrides.ingestStatus = 500;
+      const engine = createEngine();
+      const result = await engine.ingest({
+        sessionId: "sess-1",
+        message: { role: "user", content: "Tell me about the project architecture and design patterns" },
+      });
+
+      expect(result.ingested).toBe(false);
+    });
+
+    test("ingestBatch() returns ingestedCount: 0 on server error", async () => {
+      mockOverrides.ingestStatus = 500;
+      const engine = createEngine();
+      const result = await engine.ingestBatch({
+        sessionId: "sess-1",
+        messages: [
+          { role: "user", content: "What is the architecture of our system?" },
+          { role: "assistant", content: "The system uses a microservices architecture with Neo4j." },
+        ],
+      });
+
+      expect(result.ingestedCount).toBe(0);
+    });
+
+    test("afterTurn() does not throw on server error", async () => {
+      mockOverrides.ingestStatus = 500;
+      const engine = createEngine();
+      await expect(
+        engine.afterTurn({
+          sessionId: "sess-1",
+          messages: [
+            { role: "system", content: "System prompt" },
+            { role: "user", content: "New question about the project architecture" },
+            { role: "assistant", content: "New answer about the system design patterns" },
+          ],
+          prePromptMessageCount: 1,
+        }),
+      ).resolves.toBeUndefined();
+    });
+
+    test("onSubagentEnded() does not throw on server error", async () => {
+      mockOverrides.ingestStatus = 500;
+      const engine = createEngine();
+      await expect(
+        engine.onSubagentEnded({
+          childSessionKey: "child-1",
+          reason: "completed",
+          summary: "The subagent found that the database schema needs migration to support new features",
+        }),
+      ).resolves.toBeUndefined();
+    });
+
+    test("prepareSubagentSpawn() returns undefined on search error", async () => {
+      mockOverrides.searchStatus = 500;
+      const engine = createEngine();
+      const result = await engine.prepareSubagentSpawn({
+        parentSessionKey: "parent",
+        childSessionKey: "child",
+        taskDescription: "Find information about Alice at Acme Corp",
       });
 
       expect(result).toBeUndefined();
