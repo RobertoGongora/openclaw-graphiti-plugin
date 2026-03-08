@@ -22,6 +22,8 @@ import os from "node:os";
 import { GraphitiClient } from "./client.js";
 import { DebugLog, NOOP_LOG } from "./debug-log.js";
 import { extractMemoryPath, upsertIndexEpisode, scanMemoryFiles, readIndexState, writeIndexState, readMemoryFileMeta, buildIndexContent, indexEpisodeName } from "./memory-index.js";
+import { buildProvenance, extractTextsFromMessages } from "./shared.js";
+import { GraphitiContextEngine } from "./context-engine.js";
 
 function formatTimeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -88,6 +90,7 @@ const graphitiPlugin = {
   id: "graphiti",
   name: "Graphiti Knowledge Graph",
   description: "Temporal knowledge graph for persistent agent memory",
+  kind: "context-engine" as const,
 
   register(api: OpenClawPluginApi) {
     const cfg = (api.pluginConfig ?? {}) as PluginConfig;
@@ -122,36 +125,6 @@ const graphitiPlugin = {
         meta.sessionStart = sessionStarts.get(ctx.sessionId);
       }
       return meta;
-    }
-
-    /**
-     * Build a JSON-encoded provenance object for episode source_description.
-     *
-     * Always includes: plugin, event, ts, group_id.
-     * Optional: session_key, file, source, agent, channel, session_start.
-     */
-    function buildProvenance(fields: {
-      event: string;
-      session_key?: string;
-      file?: string;
-      source?: string;
-      agent?: string;
-      channel?: string;
-      session_start?: string;
-    }): string {
-      const prov: Record<string, string> = {
-        plugin: "openclaw-graphiti",
-        event: fields.event,
-        ts: new Date().toISOString(),
-        group_id: groupId,
-      };
-      if (fields.session_key) prov.session_key = fields.session_key;
-      if (fields.file) prov.file = fields.file;
-      if (fields.source) prov.source = fields.source;
-      if (fields.agent) prov.agent = fields.agent;
-      if (fields.channel) prov.channel = fields.channel;
-      if (fields.session_start) prov.session_start = fields.session_start;
-      return JSON.stringify(prov);
     }
 
     // ========================================================================
@@ -234,7 +207,7 @@ const graphitiPlugin = {
                 role: "shiba",
                 name: name ?? `manual-${Date.now()}`,
                 timestamp: new Date().toISOString(),
-                source_description: buildProvenance({
+                source_description: buildProvenance(groupId, {
                   event: "manual",
                   source,
                   session_key: meta.sessionKey,
@@ -260,11 +233,23 @@ const graphitiPlugin = {
     );
 
     // ========================================================================
-    // Lifecycle Hooks
+    // ContextEngine registration (OpenClaw v2026.3.7+)
+    // ========================================================================
+
+    const hasEngineSupport = typeof (api as any).registerContextEngine === "function";
+
+    if (hasEngineSupport) {
+      (api as any).registerContextEngine("graphiti", () =>
+        new GraphitiContextEngine(client, cfg, groupId, debugLog, api.logger),
+      );
+    }
+
+    // ========================================================================
+    // Lifecycle Hooks (skipped when ContextEngine handles them)
     // ========================================================================
 
     // Auto-recall: inject relevant facts before agent starts
-    if (autoRecall) {
+    if (!hasEngineSupport && autoRecall) {
       api.on("before_agent_start", async (event: any) => {
         if (!event.prompt || event.prompt.length < minPromptLength) {
           debugLog.log("recall", { skipped: true, reason: "prompt_too_short", length: event.prompt?.length ?? 0 });
@@ -304,7 +289,8 @@ const graphitiPlugin = {
 
     // Auto-capture: ingest conversations into the knowledge graph before compaction/reset.
     // This fires when OpenClaw compacts a long session, not on every turn.
-    if (autoCapture) {
+    // Skipped when ContextEngine is active (afterTurn + compact handle this).
+    if (!hasEngineSupport && autoCapture) {
       api.on("before_compaction", async (event: any, ctx: HookContext | undefined) => {
         const meta = sessionMetaFromCtx(ctx ?? {});
         if (!meta.sessionKey && event.sessionKey) meta.sessionKey = event.sessionKey;
@@ -323,27 +309,7 @@ const graphitiPlugin = {
           const healthy = await client.healthy();
           if (!healthy) return;
 
-          // Extract user + assistant text
-          const texts: string[] = [];
-          for (const msg of messages) {
-            if (!msg || typeof msg !== "object") continue;
-            const msgObj = msg as Record<string, unknown>;
-            const role = msgObj.role as string;
-            if (role !== "user" && role !== "assistant") continue;
-
-            const content = msgObj.content;
-            if (typeof content === "string" && content.length > 20) {
-              texts.push(`${role}: ${content.slice(0, 2000)}`);
-            } else if (Array.isArray(content)) {
-              for (const block of content) {
-                if (block && typeof block === "object" && (block as any).type === "text" && typeof (block as any).text === "string") {
-                  const text = (block as any).text;
-                  if (text.length > 20) texts.push(`${role}: ${text.slice(0, 2000)}`);
-                }
-              }
-            }
-          }
-
+          const texts = extractTextsFromMessages(messages);
           if (texts.length < 2) return;
 
           const episode = texts.join("\n\n").slice(0, 12000);
@@ -354,7 +320,7 @@ const graphitiPlugin = {
             role: "conversation",
             name: buildEpisodeName("compaction", meta),
             timestamp: new Date().toISOString(),
-            source_description: buildProvenance({
+            source_description: buildProvenance(groupId, {
               event: "before_compaction",
               session_key: meta.sessionKey,
               agent: meta.agent,
@@ -385,26 +351,7 @@ const graphitiPlugin = {
           const healthy = await client.healthy();
           if (!healthy) return;
 
-          // Extract user+assistant text from the last messages
-          const texts: string[] = [];
-          for (const msg of event.messages) {
-            if (!msg || typeof msg !== "object") continue;
-            const msgObj = msg as Record<string, unknown>;
-            const role = msgObj.role as string;
-            if (role !== "user" && role !== "assistant") continue;
-            const content = msgObj.content;
-            if (typeof content === "string" && content.length > 20) {
-              texts.push(`${role}: ${content.slice(0, 1000)}`);
-            } else if (Array.isArray(content)) {
-              for (const block of content) {
-                if (block && typeof block === "object" && (block as any).type === "text" && typeof (block as any).text === "string") {
-                  const text = (block as any).text;
-                  if (text.length > 20) texts.push(`${role}: ${text.slice(0, 1000)}`);
-                }
-              }
-            }
-          }
-
+          const texts = extractTextsFromMessages(event.messages, { maxPerMessage: 1000 });
           if (texts.length < 2) return;
 
           // Take a sample — last 20 exchanges max
@@ -416,7 +363,7 @@ const graphitiPlugin = {
             role: "conversation",
             name: buildEpisodeName("session-reset", meta),
             timestamp: new Date().toISOString(),
-            source_description: buildProvenance({
+            source_description: buildProvenance(groupId, {
               event: "before_reset",
               session_key: meta.sessionKey,
               agent: meta.agent,
@@ -588,7 +535,7 @@ const graphitiPlugin = {
                 role: "shiba",
                 name: label,
                 timestamp: new Date().toISOString(),
-                source_description: buildProvenance({
+                source_description: buildProvenance(groupId, {
                   event: "cli_ingest",
                   file: filePath ? basename(filePath) : undefined,
                 }),
@@ -663,7 +610,7 @@ const graphitiPlugin = {
                 role: "memory-index",
                 name: indexEpisodeName(f),
                 timestamp: meta.lastModified,
-                source_description: buildProvenance({ event: "memory_index", file: f }),
+                source_description: buildProvenance(groupId, { event: "memory_index", file: f }),
               }]);
 
               state[f] = {
