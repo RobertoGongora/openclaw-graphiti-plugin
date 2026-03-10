@@ -37,6 +37,7 @@ export function buildProvenance(
     event: string;
     session_key?: string;
     file?: string;
+    file_type?: string;
     source?: string;
     agent?: string;
     channel?: string;
@@ -51,6 +52,7 @@ export function buildProvenance(
   };
   if (fields.session_key) prov.session_key = fields.session_key;
   if (fields.file) prov.file = fields.file;
+  if (fields.file_type) prov.file_type = fields.file_type;
   if (fields.source) prov.source = fields.source;
   if (fields.agent) prov.agent = fields.agent;
   if (fields.channel) prov.channel = fields.channel;

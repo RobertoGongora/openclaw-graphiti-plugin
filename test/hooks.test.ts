@@ -375,6 +375,42 @@ describe("hooks", () => {
 
       expect(lastRequest["/messages"]).toBeUndefined();
     });
+
+    test("non-prose file extension is filtered", async () => {
+      const memFile = path.join(tmpDir, "state.json");
+      fs.writeFileSync(memFile, '{"key": "value"}');
+
+      const { default: plugin } = await import("../index.js");
+      const { api, hooks } = createMockApi();
+      api.resolvePath = () => memFile;
+      plugin.register(api as any);
+
+      const handler = hooks["after_tool_call"][0];
+      await handler({
+        toolName: "Write",
+        params: { file_path: "/project/memory/state.json" },
+      });
+
+      expect(lastRequest["/messages"]).toBeUndefined();
+    });
+
+    test(".png file is filtered", async () => {
+      const memFile = path.join(tmpDir, "screenshot.png");
+      fs.writeFileSync(memFile, "fake png data");
+
+      const { default: plugin } = await import("../index.js");
+      const { api, hooks } = createMockApi();
+      api.resolvePath = () => memFile;
+      plugin.register(api as any);
+
+      const handler = hooks["after_tool_call"][0];
+      await handler({
+        toolName: "Write",
+        params: { file_path: "/project/memory/screenshot.png" },
+      });
+
+      expect(lastRequest["/messages"]).toBeUndefined();
+    });
   });
 
   // ========================================================================
