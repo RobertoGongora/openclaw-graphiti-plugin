@@ -590,12 +590,13 @@ const graphitiPlugin = {
             const state = readIndexState(stateDir);
             let indexed = 0;
             let skipped = 0;
+            let unreadable = 0;
             let filtered = 0;
             for (const f of files) {
               if (!isIndexableFile(f, autoIndexExtensions)) { filtered++; continue; }
               const absPath = path.join(memoryDir, path.relative(prefix, f));
               const meta = readMemoryFileMeta(absPath);
-              if (!meta) { skipped++; continue; }
+              if (!meta) { unreadable++; continue; }
 
               const existing = state[f];
               if (existing && existing.lastModified === meta.lastModified) {
@@ -610,7 +611,7 @@ const graphitiPlugin = {
                 role: "memory-index",
                 name: indexEpisodeName(f),
                 timestamp: meta.lastModified,
-                source_description: buildProvenance(groupId, { event: "memory_index", file: f, file_type: path.extname(f).toLowerCase() || "unknown" }),
+                source_description: buildProvenance(groupId, { event: "memory_index", file: f, file_type: path.extname(f).toLowerCase() || "unknown" /* safety net — isIndexableFile rejects extensionless files */ }),
               }]);
 
               state[f] = {
@@ -620,7 +621,11 @@ const graphitiPlugin = {
               indexed++;
             }
             writeIndexState(stateDir, state);
-            console.log(`Indexed ${indexed} files (${skipped} unchanged, ${filtered} filtered)`);
+            const parts = [`Indexed ${indexed} files`];
+            if (skipped) parts.push(`${skipped} unchanged`);
+            if (unreadable) parts.push(`${unreadable} unreadable`);
+            if (filtered) parts.push(`${filtered} filtered`);
+            console.log(parts.length > 1 ? `${parts[0]} (${parts.slice(1).join(", ")})` : parts[0]);
           });
       },
       { commands: ["graphiti"] },

@@ -20,6 +20,9 @@
   file extension in `source_description` for traceability.
 - **`[filtered]` label in backfill dry-run**: `openclaw graphiti backfill --dry-run`
   now shows which files would be skipped due to extension filtering.
+- **Separate `unreadable` counter in backfill**: `openclaw graphiti backfill` now
+  distinguishes files that couldn't be read (too large, missing, etc.) from files
+  that were simply unchanged. Non-zero counts are shown only when present.
 
 ## [0.6.0] — 2026-03-08
 

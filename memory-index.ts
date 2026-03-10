@@ -206,7 +206,7 @@ export async function upsertIndexEpisode(opts: UpsertOptions): Promise<boolean> 
       ts: new Date().toISOString(),
       group_id: groupId,
       file: filePath,
-      file_type: path.extname(filePath).toLowerCase() || "unknown",
+      file_type: path.extname(filePath).toLowerCase() || "unknown", // safety net — isIndexableFile rejects extensionless files
     }),
   }]);
 
