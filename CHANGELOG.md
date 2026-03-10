@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.6.1] — 2026-03-10
+
+### Fixed
+
+- **autoIndex skips non-prose files** (#13): Memory file indexing now filters
+  by file extension before sending content to Graphiti. Only `.md` and `.txt`
+  files are indexed by default; `.json`, `.png`, and other structured/binary
+  files are skipped. This eliminates ~15% noise entities (file paths, dates,
+  metadata field names, URLs) and ~187 junk edges traced to non-prose files in
+  production graph audits.
+
+### Added
+
+- **`autoIndexExtensions` config option**: User-configurable array of file
+  extensions to index (default: `[".md", ".txt"]`). Applies to both the
+  `after_tool_call` hook and the `backfill` CLI command.
+- **`file_type` in episode provenance**: Memory-index episodes now include the
+  file extension in `source_description` for traceability.
+- **`[filtered]` label in backfill dry-run**: `openclaw graphiti backfill --dry-run`
+  now shows which files would be skipped due to extension filtering.
+
 ## [0.6.0] — 2026-03-08
 
 ### Added

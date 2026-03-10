@@ -46,6 +46,12 @@
         "default": true,
         "description": "Create index episodes when files are written to memory/"
       },
+      "autoIndexExtensions": {
+        "type": "array",
+        "items": { "type": "string" },
+        "default": [".md", ".txt"],
+        "description": "File extensions to index when autoIndex is enabled"
+      },
       "debug": {
         "type": "boolean",
         "default": true,
@@ -95,6 +101,11 @@
     "autoIndex": {
       "label": "Auto-Index Memory",
       "help": "Create index episodes in Graphiti when files are written to memory/"
+    },
+    "autoIndexExtensions": {
+      "label": "Index File Extensions",
+      "advanced": true,
+      "help": "Only index memory files with these extensions (default: .md, .txt)"
     },
     "debug": {
       "label": "Debug Log",

@@ -21,7 +21,7 @@ import path from "node:path";
 import os from "node:os";
 import { GraphitiClient } from "./client.js";
 import { DebugLog, NOOP_LOG } from "./debug-log.js";
-import { extractMemoryPath, upsertIndexEpisode, scanMemoryFiles, readIndexState, writeIndexState, readMemoryFileMeta, buildIndexContent, indexEpisodeName } from "./memory-index.js";
+import { extractMemoryPath, upsertIndexEpisode, scanMemoryFiles, readIndexState, writeIndexState, readMemoryFileMeta, buildIndexContent, indexEpisodeName, isIndexableFile, DEFAULT_INDEX_EXTENSIONS } from "./memory-index.js";
 import { buildProvenance, extractTextsFromMessages, buildEpisodeName, type SessionMeta } from "./shared.js";
 import { GraphitiContextEngine } from "./context-engine.js";
 
@@ -67,6 +67,8 @@ interface PluginConfig {
   logFile?: string;
   /** Create index episodes when files are written to memory/ (default: true). */
   autoIndex?: boolean;
+  /** File extensions to index (default: [".md", ".txt"]). Only relevant when autoIndex is enabled. */
+  autoIndexExtensions?: string[];
 }
 
 const graphitiPlugin = {
@@ -85,6 +87,7 @@ const graphitiPlugin = {
     const minPromptLength = cfg.minPromptLength ?? 10;
     const apiKey = cfg.apiKey;
     const autoIndex = cfg.autoIndex !== false;
+    const autoIndexExtensions = cfg.autoIndexExtensions ?? DEFAULT_INDEX_EXTENSIONS;
     const debugLog = cfg.debug !== false ? new DebugLog(cfg.logFile) : NOOP_LOG;
     const stateDir = path.join(os.homedir(), ".openclaw", "state", "graphiti");
 
@@ -380,6 +383,11 @@ const graphitiPlugin = {
         const memPath = extractMemoryPath(event.toolName, event.params);
         if (!memPath) return;
 
+        if (!isIndexableFile(memPath, autoIndexExtensions)) {
+          debugLog.log("mem-index", { skipped: true, reason: "extension_filtered", file: memPath });
+          return;
+        }
+
         try {
           const healthy = await client.healthy();
           if (!healthy) return;
@@ -556,7 +564,13 @@ const graphitiPlugin = {
               let newCount = 0;
               let updatedCount = 0;
               let unchangedCount = 0;
+              let filteredCount = 0;
               for (const f of files) {
+                if (!isIndexableFile(f, autoIndexExtensions)) {
+                  filteredCount++;
+                  console.log(`  [filtered] ${f}`);
+                  continue;
+                }
                 const absPath = path.join(memoryDir, path.relative(prefix, f));
                 const meta = readMemoryFileMeta(absPath);
                 const existing = state[f];
@@ -564,7 +578,7 @@ const graphitiPlugin = {
                 else if (meta && existing.lastModified !== meta.lastModified) { updatedCount++; console.log(`  [updated] ${f}`); }
                 else { unchangedCount++; console.log(`  [unchanged] ${f}`); }
               }
-              console.log(`\nDry run: ${files.length} files (${newCount} new, ${updatedCount} updated, ${unchangedCount} unchanged)`);
+              console.log(`\nDry run: ${files.length} files (${newCount} new, ${updatedCount} updated, ${unchangedCount} unchanged, ${filteredCount} filtered)`);
               return;
             }
 
@@ -576,6 +590,7 @@ const graphitiPlugin = {
             let indexed = 0;
             let skipped = 0;
             for (const f of files) {
+              if (!isIndexableFile(f, autoIndexExtensions)) { skipped++; continue; }
               const absPath = path.join(memoryDir, path.relative(prefix, f));
               const meta = readMemoryFileMeta(absPath);
               if (!meta) { skipped++; continue; }
@@ -593,7 +608,7 @@ const graphitiPlugin = {
                 role: "memory-index",
                 name: indexEpisodeName(f),
                 timestamp: meta.lastModified,
-                source_description: buildProvenance(groupId, { event: "memory_index", file: f }),
+                source_description: buildProvenance(groupId, { event: "memory_index", file: f, file_type: path.extname(f).toLowerCase() || "unknown" }),
               }]);
 
               state[f] = {

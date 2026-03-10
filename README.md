@@ -92,6 +92,7 @@ knowledge graph, operating independently on different data.
 | `autoRecall` | boolean | `false` | Inject relevant facts before each turn (opt-in) |
 | `autoCapture` | boolean | `true` | Ingest conversations on compaction/reset |
 | `autoIndex` | boolean | `true` | Create index episodes when files are written to `memory/` |
+| `autoIndexExtensions` | string[] | `[".md", ".txt"]` | File extensions to index (non-matching files are skipped) |
 | `recallMaxFacts` | number | `1` | Max facts to inject per turn when auto-recall is on |
 | `minPromptLength` | number | `10` | Min prompt length to trigger auto-recall |
 | `debug` | boolean | `true` | Enable structured debug log file |
@@ -207,10 +208,13 @@ with plain-text `source_description` still display gracefully.
 
 When the agent writes a file to `memory/` (e.g., `memory/2026-03-05.md` or `memory/topics/project.md`), the plugin automatically creates a lightweight index episode in Graphiti. This bridges file-based memory with the knowledge graph — Graphiti can extract entities and relationships from your memory files.
 
+Only prose files are indexed by default (`.md` and `.txt`). Structured data files (`.json`, `.png`, `.diff`, etc.) are skipped to avoid creating noise entities from metadata fields, file paths, and timestamps. Customize which extensions are indexed with the `autoIndexExtensions` config option.
+
 ```
 Agent writes to memory/file.md
   -> after_tool_call hook fires
   -> Plugin detects memory/ path in tool params
+  -> Extension check: skip unless file matches autoIndexExtensions
   -> Reads file metadata (mtime, size, first 500 chars)
   -> Checks state file for idempotency (skips if mtime unchanged)
   -> Ingests index episode with YAML frontmatter + excerpt
@@ -225,7 +229,7 @@ Index episodes are distinguishable from other episode types:
 | Compaction | `compaction-<ts>` | `conversation` | `{"plugin":"openclaw-graphiti","event":"before_compaction",...}` |
 | Reset | `session-reset-<ts>` | `conversation` | `{"plugin":"openclaw-graphiti","event":"before_reset",...}` |
 | CLI ingest | `<filename>` | `shiba` | `{"plugin":"openclaw-graphiti","event":"cli_ingest",...}` |
-| **Index** | `memory-index::memory/file.md` | `memory-index` | `{"plugin":"openclaw-graphiti","event":"memory_index",...}` |
+| **Index** | `memory-index::memory/file.md` | `memory-index` | `{"plugin":"openclaw-graphiti","event":"memory_index","file_type":".md",...}` |
 
 > **Privacy note:** Indexed memory files are sent to the Graphiti server for entity extraction, which calls your configured LLM. Avoid storing secrets (API keys, passwords) in `memory/` files, or set `autoIndex: false` to disable this feature.
 
@@ -241,14 +245,30 @@ openclaw graphiti backfill --dry-run        # Show what would be indexed
 
 The backfill command checks the state file and only ingests new or modified files.
 
-To disable auto-indexing:
+To disable auto-indexing or customize which file types are indexed:
 
 ```json
 {
   "plugins": {
     "entries": {
       "graphiti": {
-        "config": { "autoIndex": false }
+        "config": {
+          "autoIndex": false
+        }
+      }
+    }
+  }
+}
+```
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "graphiti": {
+        "config": {
+          "autoIndexExtensions": [".md", ".txt", ".org"]
+        }
       }
     }
   }
