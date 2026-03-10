@@ -87,7 +87,8 @@ const graphitiPlugin = {
     const minPromptLength = cfg.minPromptLength ?? 10;
     const apiKey = cfg.apiKey;
     const autoIndex = cfg.autoIndex !== false;
-    const autoIndexExtensions = cfg.autoIndexExtensions ?? DEFAULT_INDEX_EXTENSIONS;
+    const autoIndexExtensions = (cfg.autoIndexExtensions ?? [...DEFAULT_INDEX_EXTENSIONS])
+      .map((ext) => { const e = ext.toLowerCase(); return e.startsWith(".") ? e : `.${e}`; });
     const debugLog = cfg.debug !== false ? new DebugLog(cfg.logFile) : NOOP_LOG;
     const stateDir = path.join(os.homedir(), ".openclaw", "state", "graphiti");
 
@@ -589,8 +590,9 @@ const graphitiPlugin = {
             const state = readIndexState(stateDir);
             let indexed = 0;
             let skipped = 0;
+            let filtered = 0;
             for (const f of files) {
-              if (!isIndexableFile(f, autoIndexExtensions)) { skipped++; continue; }
+              if (!isIndexableFile(f, autoIndexExtensions)) { filtered++; continue; }
               const absPath = path.join(memoryDir, path.relative(prefix, f));
               const meta = readMemoryFileMeta(absPath);
               if (!meta) { skipped++; continue; }
@@ -618,7 +620,7 @@ const graphitiPlugin = {
               indexed++;
             }
             writeIndexState(stateDir, state);
-            console.log(`Indexed ${indexed} files (${skipped} unchanged)`);
+            console.log(`Indexed ${indexed} files (${skipped} unchanged, ${filtered} filtered)`);
           });
       },
       { commands: ["graphiti"] },

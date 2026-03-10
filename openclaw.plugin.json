@@ -50,7 +50,7 @@
         "type": "array",
         "items": { "type": "string" },
         "default": [".md", ".txt"],
-        "description": "File extensions to index when autoIndex is enabled"
+        "description": "File extensions to index when autoIndex is enabled (include leading dot, e.g. \".md\")"
       },
       "debug": {
         "type": "boolean",

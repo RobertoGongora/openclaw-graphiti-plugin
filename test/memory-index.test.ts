@@ -123,6 +123,12 @@ describe("isIndexableFile", () => {
     expect(isIndexableFile("memory/notes.md", [".json"])).toBe(false);
   });
 
+  test("normalizes extensions without leading dot", () => {
+    expect(isIndexableFile("memory/notes.md", ["md", "txt"])).toBe(true);
+    expect(isIndexableFile("memory/log.txt", ["md", "txt"])).toBe(true);
+    expect(isIndexableFile("memory/data.json", ["md", "txt"])).toBe(false);
+  });
+
   test("handles nested paths", () => {
     expect(isIndexableFile("memory/sub/deep/file.md")).toBe(true);
     expect(isIndexableFile("memory/sub/deep/data.json")).toBe(false);
