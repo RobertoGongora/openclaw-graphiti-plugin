@@ -8,7 +8,7 @@ Temporal knowledge graph plugin for [OpenClaw](https://github.com/openclaw/openc
 ## What it does
 
 - **Knowledge graph tools**: `graphiti_search` and `graphiti_ingest` available as agent tools for on-demand entity/relationship queries and manual ingestion
-- **Auto-capture**: Before compaction or session reset, ingests the conversation into the knowledge graph for entity/relationship extraction (async, via Graphiti's LLM pipeline)
+- **Auto-capture**: Automatically ingests conversation content into the knowledge graph (per-turn in ContextEngine mode, on compaction/reset in hooks mode) for entity/relationship extraction (async, via Graphiti's LLM pipeline)
 - **Auto-index**: Automatically creates index episodes in Graphiti when files are written to `memory/`, bridging file-based memory with the knowledge graph
 - **Auto-recall**: Optionally injects relevant facts before each turn — off by default, see [Auto-recall vs on-demand search](#auto-recall-vs-on-demand-search)
 - **CLI**: `openclaw graphiti status|search|episodes|ingest|backfill`
@@ -90,7 +90,7 @@ knowledge graph, operating independently on different data.
 | `apiKey` | string | _(none)_ | Bearer token for authenticated Graphiti servers |
 | `groupId` | string | `core` | Graph namespace (use different IDs per agent) |
 | `autoRecall` | boolean | `false` | Inject relevant facts before each turn (opt-in) |
-| `autoCapture` | boolean | `true` | Ingest conversations on compaction/reset |
+| `autoCapture` | boolean | `true` | Automatically ingest conversation content into the graph |
 | `autoIndex` | boolean | `true` | Create index episodes when files are written to `memory/` |
 | `autoIndexExtensions` | string[] | `[".md", ".txt"]` | File extensions to index (non-matching files are skipped) |
 | `recallMaxFacts` | number | `1` | Max facts to inject per turn when auto-recall is on |
@@ -125,6 +125,10 @@ context without explicitly calling `graphiti_search`.
 ```
 
 ## Auto-capture flow
+
+> **Note:** The flow below describes **hooks mode** (OpenClaw < v2026.3.7). In
+> **ContextEngine mode** (v2026.3.7+), auto-capture runs per-turn via `afterTurn()`
+> instead of waiting for compaction/reset — see [ContextEngine mode](#contextengine-mode-v060).
 
 ```
 Session compacts or resets
