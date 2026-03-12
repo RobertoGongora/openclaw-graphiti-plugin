@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.6.1] — 2026-03-12
+## [0.6.2] — 2026-03-12
 
 ### Fixed
 
@@ -8,23 +8,31 @@
   compaction. With `ownsCompaction: true`, `compact()` was called without
   `messages` — causing it to always return `{ compacted: false }` — and the
   runtime trusted this, so sessions grew unbounded. Setting it to `false`
-  defers to Pi's built-in auto-compaction.
+  defers to OpenClaw's built-in auto-compaction.
 
-- **`afterTurn` compaction sweep**: When Pi auto-compaction fires mid-prompt,
+- **`afterTurn` compaction sweep**: When auto-compaction fires mid-prompt,
   `prePromptMessageCount` becomes stale (pre-compaction count) while `messages`
   is post-compaction. `messages.slice(prePromptMessageCount)` returned `[]`,
   silently losing the current turn's content from the graph. `afterTurn` now
   detects when `prePromptMessageCount > messages.length` and sweeps all current
-  messages. Sweep ingestions use `"after_turn_sweep"` event in provenance.
-  Sweep truncation now keeps the tail (`slice(-12000)`) so the newest messages
+  messages. Sweep ingestions use the `"after_turn_sweep"` provenance event, and
+  sweep truncation keeps the tail (`slice(-12000)`) so the newest messages
   survive when the survivor set exceeds 12k chars.
 
 - **`autoCapture: false` honored in ContextEngine capture paths**: `afterTurn()`,
   `ingest()`, and `ingestBatch()` now check `this.cfg.autoCapture` and return
   early when disabled. Previously, setting `autoCapture: false` had no effect
   on ContextEngine methods — every turn was still ingested into Graphiti.
-  `compact()` ingestion is intentionally not gated (preserving messages before
-  truncation is a safety mechanism, not ambient capture).
+
+### Changed
+
+- **`compact()` accepts `runtimeContext` and `customInstructions` params**:
+  Forward-compatible with a future OpenClaw `runtimeContext.compactBuiltIn`
+  callback. No logic changes — the params are accepted but unused.
+
+## [0.6.1] — 2026-03-10
+
+### Fixed
 
 - **autoIndex skips non-prose files** (#13): Memory file indexing now filters
   by file extension before sending content to Graphiti. Only `.md` and `.txt`
@@ -45,12 +53,6 @@
 - **Separate `unreadable` counter in backfill**: `openclaw graphiti backfill` now
   distinguishes files that couldn't be read (too large, missing, etc.) from files
   that were simply unchanged. Non-zero counts are shown only when present.
-
-### Changed
-
-- **`compact()` accepts `runtimeContext` and `customInstructions` params**:
-  Forward-compatible with a future OpenClaw `runtimeContext.compactBuiltIn`
-  callback. No logic changes — the params are accepted but unused.
 
 ## [0.6.0] — 2026-03-08
 

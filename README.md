@@ -46,7 +46,7 @@ setup is to run Graphiti alongside `memory-core`:
   over your workspace Markdown files (`MEMORY.md`, `memory/*.md`)
 - **Graphiti** runs as a complementary plugin → provides `graphiti_search` and
   `graphiti_ingest` for temporal knowledge graph queries, and auto-captures
-  conversations on compaction/reset
+  conversation knowledge into the graph
 
 This gives you file-based semantic search (hybrid BM25 + vector) **and** a temporal
 knowledge graph, operating independently on different data.
