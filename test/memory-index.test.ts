@@ -15,6 +15,7 @@ import {
   writeIndexState,
   upsertIndexEpisode,
   scanMemoryFiles,
+  isIndexableFile,
 } from "../memory-index.js";
 import {
   startMockServer,
@@ -84,6 +85,53 @@ describe("extractMemoryPath", () => {
     expect(
       extractMemoryPath("create_file", { path: "/x/memory/y.md" }),
     ).toBe("memory/y.md");
+  });
+});
+
+// ============================================================================
+// isIndexableFile
+// ============================================================================
+
+describe("isIndexableFile", () => {
+  test("allows .md files", () => {
+    expect(isIndexableFile("memory/notes.md")).toBe(true);
+  });
+
+  test("allows .txt files", () => {
+    expect(isIndexableFile("memory/log.txt")).toBe(true);
+  });
+
+  test("rejects .json files", () => {
+    expect(isIndexableFile("memory/state.json")).toBe(false);
+  });
+
+  test("rejects .png files", () => {
+    expect(isIndexableFile("memory/screenshot.png")).toBe(false);
+  });
+
+  test("case-insensitive extension matching", () => {
+    expect(isIndexableFile("memory/NOTES.MD")).toBe(true);
+    expect(isIndexableFile("memory/DATA.JSON")).toBe(false);
+  });
+
+  test("rejects files with no extension", () => {
+    expect(isIndexableFile("memory/Makefile")).toBe(false);
+  });
+
+  test("respects custom allowed extensions", () => {
+    expect(isIndexableFile("memory/data.json", [".json"])).toBe(true);
+    expect(isIndexableFile("memory/notes.md", [".json"])).toBe(false);
+  });
+
+  test("normalizes extensions without leading dot", () => {
+    expect(isIndexableFile("memory/notes.md", ["md", "txt"])).toBe(true);
+    expect(isIndexableFile("memory/log.txt", ["md", "txt"])).toBe(true);
+    expect(isIndexableFile("memory/data.json", ["md", "txt"])).toBe(false);
+  });
+
+  test("handles nested paths", () => {
+    expect(isIndexableFile("memory/sub/deep/file.md")).toBe(true);
+    expect(isIndexableFile("memory/sub/deep/data.json")).toBe(false);
   });
 });
 
@@ -309,6 +357,7 @@ describe("upsertIndexEpisode", () => {
     expect(prov.plugin).toBe("openclaw-graphiti");
     expect(prov.event).toBe("memory_index");
     expect(prov.file).toBe("memory/test.md");
+    expect(prov.file_type).toBe(".md");
     expect(prov.group_id).toBe("test-group");
     expect(prov.ts).toBeTruthy();
     expect(req.messages[0].content).toContain("type: memory-index");

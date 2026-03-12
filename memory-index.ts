@@ -18,6 +18,28 @@ const WRITE_TOOLS = new Set(["Write", "Edit", "write", "edit", "write_file", "cr
 
 const PATH_KEYS = ["file_path", "path", "filePath", "target_file"];
 
+// ============================================================================
+// Extension filtering
+// ============================================================================
+
+export const DEFAULT_INDEX_EXTENSIONS = [".md", ".txt"] as const;
+
+/**
+ * Return true if the file extension is in the allowed set.
+ * Used to skip non-prose files (.json, .png, etc.) that create noise entities.
+ * Files without an extension (e.g. `Makefile`) are also rejected since
+ * `path.extname()` returns `""` which won't match any allowed entry.
+ */
+export function isIndexableFile(
+  filePath: string,
+  allowedExtensions: readonly string[] = DEFAULT_INDEX_EXTENSIONS,
+): boolean {
+  const ext = path.extname(filePath).toLowerCase();
+  return allowedExtensions.some(
+    (e) => (e.startsWith(".") ? e : `.${e}`).toLowerCase() === ext,
+  );
+}
+
 /**
  * If `toolName` is a write-like tool and the params reference a memory/ path,
  * return the relative memory path. Otherwise return null.
@@ -184,6 +206,7 @@ export async function upsertIndexEpisode(opts: UpsertOptions): Promise<boolean> 
       ts: new Date().toISOString(),
       group_id: groupId,
       file: filePath,
+      file_type: path.extname(filePath).toLowerCase() || "unknown", // safety net — isIndexableFile rejects extensionless files
     }),
   }]);
 

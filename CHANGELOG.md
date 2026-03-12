@@ -2,6 +2,37 @@
 
 ## [0.7.0] — 2026-03-12
 
+### Fixed
+
+- **`ownsCompaction` set to `false`**: The plugin no longer claims ownership of
+  compaction. With `ownsCompaction: true`, `compact()` was called without
+  `messages` — causing it to always return `{ compacted: false }` — and the
+  runtime trusted this, so sessions grew unbounded. Setting it to `false`
+  defers to Pi's built-in auto-compaction.
+
+- **`afterTurn` compaction sweep**: When Pi auto-compaction fires mid-prompt,
+  `prePromptMessageCount` becomes stale (pre-compaction count) while `messages`
+  is post-compaction. `messages.slice(prePromptMessageCount)` returned `[]`,
+  silently losing the current turn's content from the graph. `afterTurn` now
+  detects when `prePromptMessageCount > messages.length` and sweeps all current
+  messages. Sweep ingestions use `"after_turn_sweep"` event in provenance.
+  Sweep truncation keeps the tail so the newest messages survive when the
+  survivor set exceeds `maxEpisodeChars`.
+
+- **`autoCapture: false` honored in ContextEngine capture paths**: `afterTurn()`,
+  `ingest()`, and `ingestBatch()` now check `this.cfg.autoCapture` and return
+  early when disabled. Previously, setting `autoCapture: false` had no effect
+  on ContextEngine methods — every turn was still ingested into Graphiti.
+  `compact()` ingestion is intentionally not gated (preserving messages before
+  truncation is a safety mechanism, not ambient capture).
+
+- **autoIndex skips non-prose files** (#13): Memory file indexing now filters
+  by file extension before sending content to Graphiti. Only `.md` and `.txt`
+  files are indexed by default; `.json`, `.png`, and other structured/binary
+  files are skipped. This eliminates ~15% noise entities (file paths, dates,
+  metadata field names, URLs) and ~187 junk edges traced to non-prose files in
+  production graph audits.
+
 ### Changed
 
 - **Removed hardcoded truncation limits**: Episode content is no longer
@@ -10,6 +41,9 @@
   discarded content without warning. Episode truncation is now configurable
   via `maxEpisodeChars` (default: unlimited). Per-message truncation in
   `extractTextsFromMessages()` defaults to unlimited.
+- **`compact()` accepts `runtimeContext` and `customInstructions` params**:
+  Forward-compatible with a future OpenClaw `runtimeContext.compactBuiltIn`
+  callback. No logic changes — the params are accepted but unused.
 
 ### Added
 
@@ -24,6 +58,16 @@
 - **`ingestWithRetry` helper**: Wraps all `client.ingest()` calls in both
   `context-engine.ts` and `index.ts`. On failure, if `modelMaxContextChars`
   is configured, truncates and retries once.
+- **`autoIndexExtensions` config option**: User-configurable array of file
+  extensions to index (default: `[".md", ".txt"]`). Applies to both the
+  `after_tool_call` hook and the `backfill` CLI command.
+- **`file_type` in episode provenance**: Memory-index episodes now include the
+  file extension in `source_description` for traceability.
+- **`[filtered]` label in backfill dry-run**: `openclaw graphiti backfill --dry-run`
+  now shows which files would be skipped due to extension filtering.
+- **Separate `unreadable` counter in backfill**: `openclaw graphiti backfill` now
+  distinguishes files that couldn't be read (too large, missing, etc.) from files
+  that were simply unchanged. Non-zero counts are shown only when present.
 
 ## [0.6.0] — 2026-03-08
 

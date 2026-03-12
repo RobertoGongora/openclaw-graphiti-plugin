@@ -21,7 +21,7 @@ import path from "node:path";
 import os from "node:os";
 import { GraphitiClient } from "./client.js";
 import { DebugLog, NOOP_LOG } from "./debug-log.js";
-import { extractMemoryPath, upsertIndexEpisode, scanMemoryFiles, readIndexState, writeIndexState, readMemoryFileMeta, buildIndexContent, indexEpisodeName } from "./memory-index.js";
+import { extractMemoryPath, upsertIndexEpisode, scanMemoryFiles, readIndexState, writeIndexState, readMemoryFileMeta, buildIndexContent, indexEpisodeName, isIndexableFile, DEFAULT_INDEX_EXTENSIONS } from "./memory-index.js";
 import { buildProvenance, extractTextsFromMessages, buildEpisodeName, DEFAULT_MAX_EPISODE_CHARS, type SessionMeta } from "./shared.js";
 import { GraphitiContextEngine } from "./context-engine.js";
 
@@ -89,6 +89,8 @@ const graphitiPlugin = {
     const minPromptLength = cfg.minPromptLength ?? 10;
     const apiKey = cfg.apiKey;
     const autoIndex = cfg.autoIndex !== false;
+    const autoIndexExtensions = (cfg.autoIndexExtensions ?? [...DEFAULT_INDEX_EXTENSIONS])
+      .map((ext) => { const e = ext.toLowerCase(); return e.startsWith(".") ? e : `.${e}`; });
     const maxEpisodeChars = cfg.maxEpisodeChars ?? DEFAULT_MAX_EPISODE_CHARS;
     const modelMaxContextChars = cfg.modelMaxContextChars;
     const debugLog = cfg.debug !== false ? new DebugLog(cfg.logFile) : NOOP_LOG;
@@ -401,6 +403,11 @@ const graphitiPlugin = {
         const memPath = extractMemoryPath(event.toolName, event.params);
         if (!memPath) return;
 
+        if (!isIndexableFile(memPath, autoIndexExtensions)) {
+          debugLog.log("mem-index", { skipped: true, reason: "extension_filtered", file: memPath });
+          return;
+        }
+
         try {
           const healthy = await client.healthy();
           if (!healthy) return;
@@ -576,7 +583,13 @@ const graphitiPlugin = {
               let newCount = 0;
               let updatedCount = 0;
               let unchangedCount = 0;
+              let filteredCount = 0;
               for (const f of files) {
+                if (!isIndexableFile(f, autoIndexExtensions)) {
+                  filteredCount++;
+                  console.log(`  [filtered] ${f}`);
+                  continue;
+                }
                 const absPath = path.join(memoryDir, path.relative(prefix, f));
                 const meta = readMemoryFileMeta(absPath);
                 const existing = state[f];
@@ -584,7 +597,7 @@ const graphitiPlugin = {
                 else if (meta && existing.lastModified !== meta.lastModified) { updatedCount++; console.log(`  [updated] ${f}`); }
                 else { unchangedCount++; console.log(`  [unchanged] ${f}`); }
               }
-              console.log(`\nDry run: ${files.length} files (${newCount} new, ${updatedCount} updated, ${unchangedCount} unchanged)`);
+              console.log(`\nDry run: ${files.length} files (${newCount} new, ${updatedCount} updated, ${unchangedCount} unchanged, ${filteredCount} filtered)`);
               return;
             }
 
@@ -595,10 +608,13 @@ const graphitiPlugin = {
             const state = readIndexState(stateDir);
             let indexed = 0;
             let skipped = 0;
+            let unreadable = 0;
+            let filtered = 0;
             for (const f of files) {
+              if (!isIndexableFile(f, autoIndexExtensions)) { filtered++; continue; }
               const absPath = path.join(memoryDir, path.relative(prefix, f));
               const meta = readMemoryFileMeta(absPath);
-              if (!meta) { skipped++; continue; }
+              if (!meta) { unreadable++; continue; }
 
               const existing = state[f];
               if (existing && existing.lastModified === meta.lastModified) {
@@ -607,13 +623,14 @@ const graphitiPlugin = {
               }
 
               const episodeContent = buildIndexContent(f, meta.lastModified, meta.excerpt, meta.fileSize);
+              const fileType = path.extname(f).toLowerCase() || "unknown";
               await client.ingest([{
                 content: episodeContent,
                 role_type: "system",
                 role: "memory-index",
                 name: indexEpisodeName(f),
                 timestamp: meta.lastModified,
-                source_description: buildProvenance(groupId, { event: "memory_index", file: f }),
+                source_description: buildProvenance(groupId, { event: "memory_index", file: f, file_type: fileType }),
               }]);
 
               state[f] = {
@@ -623,7 +640,11 @@ const graphitiPlugin = {
               indexed++;
             }
             writeIndexState(stateDir, state);
-            console.log(`Indexed ${indexed} files (${skipped} unchanged)`);
+            const parts = [`Indexed ${indexed} files`];
+            if (skipped) parts.push(`${skipped} unchanged`);
+            if (unreadable) parts.push(`${unreadable} unreadable`);
+            if (filtered) parts.push(`${filtered} filtered`);
+            console.log(parts.length > 1 ? `${parts[0]} (${parts.slice(1).join(", ")})` : parts[0]);
           });
       },
       { commands: ["graphiti"] },

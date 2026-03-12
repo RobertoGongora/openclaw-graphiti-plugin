@@ -80,7 +80,7 @@ export class GraphitiContextEngine {
     id: "graphiti",
     name: "Graphiti Knowledge Graph",
     version: PLUGIN_VERSION,
-    ownsCompaction: true,
+    ownsCompaction: false,
   };
 
   /** Cached healthy() result with TTL to avoid redundant HTTP round-trips. */
@@ -142,6 +142,11 @@ export class GraphitiContextEngine {
     message: { role: string; content: unknown };
     isHeartbeat?: boolean;
   }): Promise<IngestResult> {
+    if (this.cfg.autoCapture === false) {
+      this.debugLog.log("ce-ingest", { skipped: true, reason: "autoCapture_disabled" });
+      return { ingested: false };
+    }
+
     if (params.isHeartbeat) {
       this.debugLog.log("ce-ingest", { skipped: true, reason: "heartbeat" });
       return { ingested: false };
@@ -260,6 +265,8 @@ export class GraphitiContextEngine {
     tokenBudget?: number;
     force?: boolean;
     messages?: unknown[];
+    customInstructions?: string; // reserved for future runtimeContext.compactBuiltIn callback
+    runtimeContext?: Record<string, unknown>; // reserved for future runtimeContext.compactBuiltIn callback
     legacyParams?: { bridge?: { compact: () => Promise<any> } };
   }): Promise<CompactResult> {
     try {
@@ -324,6 +331,11 @@ export class GraphitiContextEngine {
     messages: Array<{ role: string; content: unknown }>;
     isHeartbeat?: boolean;
   }): Promise<IngestBatchResult> {
+    if (this.cfg.autoCapture === false) {
+      this.debugLog.log("ce-ingestBatch", { skipped: true, reason: "autoCapture_disabled" });
+      return { ingestedCount: 0 };
+    }
+
     if (params.isHeartbeat) {
       this.debugLog.log("ce-ingestBatch", { skipped: true, reason: "heartbeat" });
       return { ingestedCount: 0 };
@@ -372,12 +384,32 @@ export class GraphitiContextEngine {
     isHeartbeat?: boolean;
     tokenBudget?: number;
   }): Promise<void> {
+    if (this.cfg.autoCapture === false) {
+      this.debugLog.log("ce-afterTurn", { skipped: true, reason: "autoCapture_disabled" });
+      return;
+    }
+
     if (params.isHeartbeat) {
       this.debugLog.log("ce-afterTurn", { skipped: true, reason: "heartbeat" });
       return;
     }
 
-    const newMessages = params.messages.slice(params.prePromptMessageCount);
+    // When Pi auto-compaction runs during a prompt, prePromptMessageCount
+    // reflects the pre-compaction count while messages is post-compaction.
+    // Detect this mismatch and sweep all messages to avoid losing the
+    // current turn's content from the graph.
+    // Note: when compaction removes exactly `turnMessageCount` messages,
+    // prePromptMessageCount === messages.length and this check is false.
+    // Using >= would cause false-positive sweeps on empty turns. The rare
+    // missed content is captured on the next afterTurn cycle.
+    const compactionOccurred = params.prePromptMessageCount > params.messages.length;
+    // Sweep may re-ingest messages already captured in a prior afterTurn call.
+    // Intentional: preventing data loss is more important than deduplication here.
+    // Use the "after_turn_sweep" provenance event to identify and filter these.
+    const newMessages = compactionOccurred
+      ? params.messages
+      : params.messages.slice(params.prePromptMessageCount);
+
     if (newMessages.length === 0) {
       this.debugLog.log("ce-afterTurn", { skipped: true, reason: "no_new_messages" });
       return;
@@ -389,9 +421,14 @@ export class GraphitiContextEngine {
       return;
     }
 
+    const event = compactionOccurred ? "after_turn_sweep" : "after_turn";
+
     try {
       const start = Date.now();
-      const episode = texts.join("\n\n").slice(0, this.maxEpisodeChars);
+      const joined = texts.join("\n\n");
+      const episode = compactionOccurred
+        ? joined.slice(-this.maxEpisodeChars)   // sweep: keep tail (newest messages)
+        : joined.slice(0, this.maxEpisodeChars);
 
       await this.ingestWithRetry([{
         content: episode,
@@ -400,13 +437,13 @@ export class GraphitiContextEngine {
         name: buildEpisodeName("turn", { sessionKey: params.sessionId }),
         timestamp: new Date().toISOString(),
         source_description: buildProvenance(this.groupId, {
-          event: "after_turn",
+          event,
           session_key: params.sessionId,
         }),
       }]);
 
       this.logger?.info?.(`graphiti: after-turn ingested ${texts.length} messages`);
-      this.debugLog.log("ce-afterTurn", { count: texts.length, ms: Date.now() - start });
+      this.debugLog.log("ce-afterTurn", { count: texts.length, sweep: compactionOccurred, ms: Date.now() - start });
     } catch (err) {
       this.logger?.warn(`graphiti: afterTurn failed: ${String(err)}`);
       this.debugLog.log("ce-afterTurn", { error: String(err) });
