@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.6.2] — 2026-03-12
+
+### Fixed
+
+- **`ownsCompaction` set to `false`**: The plugin no longer claims ownership of
+  compaction. With `ownsCompaction: true`, `compact()` was called without
+  `messages` — causing it to always return `{ compacted: false }` — and the
+  runtime trusted this, so sessions grew unbounded. Setting it to `false`
+  defers to Pi's built-in auto-compaction.
+
+- **`afterTurn` compaction sweep**: When Pi auto-compaction fires mid-prompt,
+  `prePromptMessageCount` becomes stale (pre-compaction count) while `messages`
+  is post-compaction. `messages.slice(prePromptMessageCount)` returned `[]`,
+  silently losing the current turn's content from the graph. `afterTurn` now
+  detects when `prePromptMessageCount > messages.length` and sweeps all current
+  messages. Sweep ingestions use `"after_turn_sweep"` event in provenance.
+
+### Changed
+
+- **`compact()` accepts `runtimeContext` and `customInstructions` params**:
+  Forward-compatible with a future OpenClaw `runtimeContext.compactBuiltIn`
+  callback. No logic changes — the params are accepted but unused.
+
 ## [0.6.1] — 2026-03-10
 
 ### Fixed
