@@ -25,7 +25,7 @@
       "autoCapture": {
         "type": "boolean",
         "default": true,
-        "description": "Automatically ingest conversations on compaction/reset events"
+        "description": "Automatically ingest conversation content into the graph"
       },
       "recallMaxFacts": {
         "type": "number",
@@ -80,7 +80,7 @@
     },
     "autoCapture": {
       "label": "Auto-Capture",
-      "help": "Ingest conversation content on compaction/reset"
+      "help": "Automatically ingest conversation content into the graph"
     },
     "recallMaxFacts": {
       "label": "Max Recall Facts",
