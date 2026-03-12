@@ -9,7 +9,7 @@
 import { createRequire } from "node:module";
 import type { GraphitiClient, GraphitiMessage } from "./client.js";
 import type { DebugLog } from "./debug-log.js";
-import { buildEpisodeName, buildProvenance, extractTextContent, extractTextsFromMessages, formatFactsAsContext } from "./shared.js";
+import { buildEpisodeName, buildProvenance, extractTextContent, extractTextsFromMessages, formatFactsAsContext, DEFAULT_MAX_EPISODE_CHARS } from "./shared.js";
 
 const _require = createRequire(import.meta.url);
 const PLUGIN_VERSION: string = (_require("./package.json") as any).version;
@@ -65,6 +65,8 @@ interface PluginConfig {
   autoRecall?: boolean;
   autoCapture?: boolean;
   debug?: boolean;
+  maxEpisodeChars?: number;
+  modelMaxContextChars?: number;
   /** Allow extension without breaking. */
   [key: string]: unknown;
 }
@@ -85,13 +87,19 @@ export class GraphitiContextEngine {
   private _healthCache: { result: boolean; ts: number } | null = null;
   private static readonly HEALTH_CACHE_TTL_MS = 15_000;
 
+  private maxEpisodeChars: number;
+  private modelMaxContextChars: number | undefined;
+
   constructor(
     private client: GraphitiClient,
     private cfg: PluginConfig,
     private groupId: string,
     private debugLog: DebugLog,
     private logger?: { info?: (...args: any[]) => void; warn: (...args: any[]) => void },
-  ) {}
+  ) {
+    this.maxEpisodeChars = cfg.maxEpisodeChars ?? DEFAULT_MAX_EPISODE_CHARS;
+    this.modelMaxContextChars = cfg.modelMaxContextChars;
+  }
 
   /** Health check with short TTL cache (15s). */
   private async cachedHealthy(): Promise<boolean> {
@@ -102,6 +110,24 @@ export class GraphitiContextEngine {
     const result = await this.client.healthy();
     this._healthCache = { result, ts: now };
     return result;
+  }
+
+  /**
+   * Ingest with a single retry: on failure, if modelMaxContextChars is set,
+   * truncate each episode's content and retry once.
+   */
+  private async ingestWithRetry(episodes: Parameters<GraphitiClient["ingest"]>[0]): Promise<void> {
+    try {
+      await this.client.ingest(episodes);
+    } catch (err) {
+      if (this.modelMaxContextChars == null) throw err;
+      const truncated = episodes.map((ep) => ({
+        ...ep,
+        content: ep.content.slice(0, this.modelMaxContextChars!),
+      }));
+      this.debugLog.log("ce-ingestRetry", { originalChars: episodes[0]?.content.length, truncatedTo: this.modelMaxContextChars });
+      await this.client.ingest(truncated);
+    }
   }
 
   // ========================================================================
@@ -135,8 +161,8 @@ export class GraphitiContextEngine {
 
     try {
       const start = Date.now();
-      await this.client.ingest([{
-        content: `${role}: ${text.slice(0, 2000)}`,
+      await this.ingestWithRetry([{
+        content: `${role}: ${text}`,
         role_type: role as "user" | "assistant",
         role,
         name: `ingest-${params.sessionId}-${Date.now()}`,
@@ -186,7 +212,7 @@ export class GraphitiContextEngine {
         if (!text) continue;
 
         graphitiMessages.push({
-          content: text.slice(0, 2000),
+          content: text,
           role_type: role as "user" | "assistant",
           role,
         });
@@ -257,8 +283,8 @@ export class GraphitiContextEngine {
           return { ok: true, compacted: true };
         }
 
-        const episode = texts.join("\n\n").slice(0, 12000);
-        await this.client.ingest([{
+        const episode = texts.join("\n\n").slice(0, this.maxEpisodeChars);
+        await this.ingestWithRetry([{
           content: episode,
           role_type: "user",
           role: "conversation",
@@ -311,9 +337,9 @@ export class GraphitiContextEngine {
 
     try {
       const start = Date.now();
-      const episode = texts.join("\n\n").slice(0, 12000);
+      const episode = texts.join("\n\n").slice(0, this.maxEpisodeChars);
 
-      await this.client.ingest([{
+      await this.ingestWithRetry([{
         content: episode,
         role_type: "user",
         role: "conversation",
@@ -365,9 +391,9 @@ export class GraphitiContextEngine {
 
     try {
       const start = Date.now();
-      const episode = texts.join("\n\n").slice(0, 12000);
+      const episode = texts.join("\n\n").slice(0, this.maxEpisodeChars);
 
-      await this.client.ingest([{
+      await this.ingestWithRetry([{
         content: episode,
         role_type: "user",
         role: "conversation",
@@ -440,17 +466,17 @@ export class GraphitiContextEngine {
 
       let episode: string;
       if (hasSummary) {
-        episode = params.summary!.slice(0, 12000);
+        episode = params.summary!.slice(0, this.maxEpisodeChars);
       } else {
         const texts = extractTextsFromMessages(params.messages!);
         if (texts.length === 0) {
           this.debugLog.log("ce-subagentEnded", { child: params.childSessionKey, action: "no_content" });
           return;
         }
-        episode = texts.join("\n\n").slice(0, 12000);
+        episode = texts.join("\n\n").slice(0, this.maxEpisodeChars);
       }
 
-      await this.client.ingest([{
+      await this.ingestWithRetry([{
         content: episode,
         // "system" is a valid GraphitiMessage.role_type — subagent results are
         // neither user nor assistant from the parent conversation's perspective.

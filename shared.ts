@@ -4,6 +4,9 @@
  * Extracted to avoid circular dependencies and reduce duplication.
  */
 
+/** Default episode truncation limit — unlimited (no truncation). */
+export const DEFAULT_MAX_EPISODE_CHARS = Infinity;
+
 /**
  * Session context embedded in episode provenance for traceability.
  * @exported - public API of this plugin
@@ -98,7 +101,7 @@ export function extractTextsFromMessages(
   messages: unknown[],
   opts: { maxPerMessage?: number; minLength?: number } = {},
 ): string[] {
-  const { maxPerMessage = 2000, minLength = 20 } = opts;
+  const { maxPerMessage = Infinity, minLength = 20 } = opts;
   const texts: string[] = [];
 
   for (const msg of messages) {

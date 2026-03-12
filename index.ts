@@ -22,7 +22,7 @@ import os from "node:os";
 import { GraphitiClient } from "./client.js";
 import { DebugLog, NOOP_LOG } from "./debug-log.js";
 import { extractMemoryPath, upsertIndexEpisode, scanMemoryFiles, readIndexState, writeIndexState, readMemoryFileMeta, buildIndexContent, indexEpisodeName } from "./memory-index.js";
-import { buildProvenance, extractTextsFromMessages, buildEpisodeName, type SessionMeta } from "./shared.js";
+import { buildProvenance, extractTextsFromMessages, buildEpisodeName, DEFAULT_MAX_EPISODE_CHARS, type SessionMeta } from "./shared.js";
 import { GraphitiContextEngine } from "./context-engine.js";
 
 // Re-export public types from shared.ts for backwards compatibility
@@ -67,6 +67,10 @@ interface PluginConfig {
   logFile?: string;
   /** Create index episodes when files are written to memory/ (default: true). */
   autoIndex?: boolean;
+  /** File extensions to index (default: [".md", ".txt"]). Only relevant when autoIndex is enabled. */
+  autoIndexExtensions?: string[];
+  maxEpisodeChars?: number;
+  modelMaxContextChars?: number;
 }
 
 const graphitiPlugin = {
@@ -85,10 +89,27 @@ const graphitiPlugin = {
     const minPromptLength = cfg.minPromptLength ?? 10;
     const apiKey = cfg.apiKey;
     const autoIndex = cfg.autoIndex !== false;
+    const maxEpisodeChars = cfg.maxEpisodeChars ?? DEFAULT_MAX_EPISODE_CHARS;
+    const modelMaxContextChars = cfg.modelMaxContextChars;
     const debugLog = cfg.debug !== false ? new DebugLog(cfg.logFile) : NOOP_LOG;
     const stateDir = path.join(os.homedir(), ".openclaw", "state", "graphiti");
 
     const client = new GraphitiClient(url, groupId, api.logger, apiKey, debugLog);
+
+    /** Ingest with retry: on failure, if modelMaxContextChars is set, truncate and retry once. */
+    async function ingestWithRetry(episodes: Parameters<typeof client.ingest>[0]): Promise<void> {
+      try {
+        await client.ingest(episodes);
+      } catch (err) {
+        if (modelMaxContextChars == null) throw err;
+        const truncated = episodes.map((ep) => ({
+          ...ep,
+          content: ep.content.slice(0, modelMaxContextChars),
+        }));
+        debugLog.log("ingestRetry", { originalChars: episodes[0]?.content.length, truncatedTo: modelMaxContextChars });
+        await client.ingest(truncated);
+      }
+    }
 
     // Session start timestamps keyed by sessionId for metadata enrichment.
     const sessionStarts = new Map<string, string>();
@@ -295,9 +316,9 @@ const graphitiPlugin = {
           const texts = extractTextsFromMessages(messages);
           if (texts.length < 2) return;
 
-          const episode = texts.join("\n\n").slice(0, 12000);
+          const episode = texts.join("\n\n").slice(0, maxEpisodeChars);
 
-          await client.ingest([{
+          await ingestWithRetry([{
             content: episode,
             role_type: "user",
             role: "conversation",
@@ -334,14 +355,14 @@ const graphitiPlugin = {
           const healthy = await client.healthy();
           if (!healthy) return;
 
-          const texts = extractTextsFromMessages(event.messages, { maxPerMessage: 1000 });
+          const texts = extractTextsFromMessages(event.messages);
           if (texts.length < 2) return;
 
           // Take a sample — last 20 exchanges max
           const sample = texts.slice(-20).join("\n\n");
 
-          await client.ingest([{
-            content: sample.slice(0, 12000),
+          await ingestWithRetry([{
+            content: sample.slice(0, maxEpisodeChars),
             role_type: "user",
             role: "conversation",
             name: buildEpisodeName("session-reset", meta),
@@ -503,16 +524,15 @@ const graphitiPlugin = {
                 const { readFile } = await import("node:fs/promises");
                 filePath = resolve(opts.sourceFile);
                 content = await readFile(filePath, "utf-8");
-                const MAX_FILE_CHARS = 12_000;
-                if (content.length > MAX_FILE_CHARS) {
-                  console.warn("File content truncated to 12,000 characters");
-                  content = content.slice(0, MAX_FILE_CHARS);
+                if (content.length > maxEpisodeChars) {
+                  console.warn(`File content truncated to ${maxEpisodeChars} characters`);
+                  content = content.slice(0, maxEpisodeChars);
                 }
               } else {
                 content = opts.content!;
               }
               const label = opts.name ?? (filePath ? basename(filePath) : `cli-${Date.now()}`);
-              await client.ingest([{
+              await ingestWithRetry([{
                 content,
                 role_type: "system",
                 role: "shiba",

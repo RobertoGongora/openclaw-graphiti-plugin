@@ -37,9 +37,9 @@ describe("CLI ingest command", () => {
    * Register the plugin and extract the ingest CLI action handler.
    * Returns a function that invokes the handler with the given opts.
    */
-  async function getIngestAction() {
+  async function getIngestAction(configOverrides: Record<string, unknown> = {}) {
     const { default: plugin } = await import("../index.js");
-    const { api, clis } = createMockApi();
+    const { api, clis } = createMockApi(configOverrides);
     plugin.register(api as any);
 
     const graphitiCli = clis.find((c) => c.opts.commands.includes("graphiti"));
@@ -191,8 +191,36 @@ describe("CLI ingest command", () => {
     process.exitCode = origExitCode;
   });
 
-  test("--source-file truncates content exceeding 12,000 chars", async () => {
+  test("--source-file does not truncate by default (unlimited)", async () => {
     const action = await getIngestAction();
+
+    const largeContent = "x".repeat(15_000);
+    const testFile = path.join(tmpDir, "large-file-unlimited.txt");
+    fs.writeFileSync(testFile, largeContent);
+
+    const warns: string[] = [];
+    const origLog = console.log;
+    const origWarn = console.warn;
+    console.log = () => {};
+    console.warn = (...args: any[]) => warns.push(args.join(" "));
+    try {
+      await action({ sourceFile: testFile });
+    } finally {
+      console.log = origLog;
+      console.warn = origWarn;
+    }
+
+    // Should NOT warn about truncation
+    expect(warns.length).toBe(0);
+
+    // Full content should be sent
+    const req = lastRequest["/messages"] as any;
+    expect(req).toBeDefined();
+    expect(req.messages[0].content.length).toBe(15_000);
+  });
+
+  test("--source-file truncates content exceeding maxEpisodeChars", async () => {
+    const action = await getIngestAction({ maxEpisodeChars: 12_000 });
 
     const largeContent = "x".repeat(15_000);
     const testFile = path.join(tmpDir, "large-file.txt");
@@ -212,7 +240,7 @@ describe("CLI ingest command", () => {
     }
 
     // Should warn about truncation
-    expect(warns.some((w) => w.includes("truncated to 12,000 characters"))).toBe(true);
+    expect(warns.some((w) => w.includes("truncated to 12000 characters"))).toBe(true);
 
     // Content sent to server should be capped at 12,000
     const req = lastRequest["/messages"] as any;

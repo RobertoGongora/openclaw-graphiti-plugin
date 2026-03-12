@@ -29,6 +29,12 @@ function createEngine() {
   return new GraphitiContextEngine(client, { recallMaxFacts: 10 }, "test-group", NOOP_LOG);
 }
 
+function createEngineWithConfig(cfg: Record<string, unknown>) {
+  const port = getMockPort();
+  const client = new GraphitiClient(`http://127.0.0.1:${port}`, "test-group", undefined, undefined, NOOP_LOG);
+  return new GraphitiContextEngine(client, { recallMaxFacts: 10, ...cfg }, "test-group", NOOP_LOG);
+}
+
 describe("GraphitiContextEngine", () => {
   beforeAll(startMockServer);
   afterAll(stopMockServer);
@@ -696,6 +702,79 @@ describe("GraphitiContextEngine", () => {
       });
 
       expect(result).toBeUndefined();
+    });
+  });
+
+  // ========================================================================
+  // maxEpisodeChars
+  // ========================================================================
+
+  describe("maxEpisodeChars", () => {
+    test("default engine does not truncate episodes", async () => {
+      const engine = createEngine();
+      const longContent = "x".repeat(20000);
+      await engine.afterTurn({
+        sessionId: "sess-1",
+        messages: [
+          { role: "user", content: `Long message with content: ${longContent}` },
+        ],
+        prePromptMessageCount: 0,
+      });
+
+      const req = lastRequest["/messages"] as any;
+      expect(req).toBeDefined();
+      // Content should be > 12000 since no truncation is applied
+      expect(req.messages[0].content.length).toBeGreaterThan(12000);
+    });
+
+    test("explicit maxEpisodeChars truncates episodes", async () => {
+      const engine = createEngineWithConfig({ maxEpisodeChars: 500 });
+      const longContent = "x".repeat(2000);
+      await engine.afterTurn({
+        sessionId: "sess-1",
+        messages: [
+          { role: "user", content: `Long message with content: ${longContent}` },
+        ],
+        prePromptMessageCount: 0,
+      });
+
+      const req = lastRequest["/messages"] as any;
+      expect(req).toBeDefined();
+      expect(req.messages[0].content.length).toBeLessThanOrEqual(500);
+    });
+  });
+
+  // ========================================================================
+  // ingestWithRetry
+  // ========================================================================
+
+  describe("ingestWithRetry", () => {
+    test("retries with truncated content when modelMaxContextChars is set", async () => {
+      mockOverrides.ingestFailCount = 1;
+      const engine = createEngineWithConfig({ modelMaxContextChars: 50 });
+      const result = await engine.ingest({
+        sessionId: "sess-1",
+        message: { role: "user", content: "Tell me about the project architecture and design patterns used in production" },
+      });
+
+      // First call fails (ingestFailCount=1), retry with truncated content succeeds
+      expect(result.ingested).toBe(true);
+      const req = lastRequest["/messages"] as any;
+      expect(req).toBeDefined();
+      // The retried content should be truncated to modelMaxContextChars
+      expect(req.messages[0].content.length).toBeLessThanOrEqual(50);
+    });
+
+    test("does not retry when modelMaxContextChars is not set", async () => {
+      mockOverrides.ingestFailCount = 1;
+      const engine = createEngine();
+      const result = await engine.ingest({
+        sessionId: "sess-1",
+        message: { role: "user", content: "Tell me about the project architecture and design patterns used in production" },
+      });
+
+      // Without modelMaxContextChars, the error propagates and ingest returns false
+      expect(result.ingested).toBe(false);
     });
   });
 

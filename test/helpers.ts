@@ -62,6 +62,8 @@ export type MockOverrides = {
   ingestBody?: Record<string, unknown>;
   searchStatus?: number;
   searchErrorBody?: string;
+  /** When > 0, /messages returns 500 and decrements. When 0, normal behavior resumes. */
+  ingestFailCount?: number;
 };
 
 let server: http.Server;
@@ -141,6 +143,12 @@ export function startMockServer(): Promise<void> {
       if (req.method === "POST" && url.pathname === "/messages") {
         const body = await readBody(req);
         lastRequest["/messages"] = JSON.parse(body);
+        if (mockOverrides.ingestFailCount != null && mockOverrides.ingestFailCount > 0) {
+          mockOverrides.ingestFailCount--;
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ detail: "transient failure" }));
+          return;
+        }
         const status = mockOverrides.ingestStatus ?? 202;
         res.writeHead(status, { "Content-Type": "application/json" });
         res.end(

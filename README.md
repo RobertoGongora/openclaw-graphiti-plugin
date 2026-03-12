@@ -94,6 +94,8 @@ knowledge graph, operating independently on different data.
 | `autoIndex` | boolean | `true` | Create index episodes when files are written to `memory/` |
 | `recallMaxFacts` | number | `1` | Max facts to inject per turn when auto-recall is on |
 | `minPromptLength` | number | `10` | Min prompt length to trigger auto-recall |
+| `maxEpisodeChars` | number | _(unlimited)_ | Max characters per episode sent to Graphiti |
+| `modelMaxContextChars` | number | _(none)_ | When set, failed ingestions are retried once with content truncated to this length |
 | `debug` | boolean | `true` | Enable structured debug log file |
 | `logFile` | string | `~/.openclaw/logs/graphiti-plugin.log` | Custom debug log file path |
 
@@ -130,7 +132,7 @@ Session compacts or resets
   -> before_compaction / before_reset fires
   -> Plugin extracts user+assistant messages (min 4)
   -> Session metadata (session key, agent, channel) embedded in source_description
-  -> POSTs up to 12,000 chars to Graphiti /messages
+  -> POSTs episode to Graphiti /messages (truncated to maxEpisodeChars if configured)
   -> Graphiti extracts entities + relationships async (gpt-5-nano or configured model)
   -> Facts become queryable via graphiti_search
 ```

@@ -54,6 +54,14 @@
       "logFile": {
         "type": "string",
         "description": "Debug log file path (default: ~/.openclaw/logs/graphiti-plugin.log)"
+      },
+      "maxEpisodeChars": {
+        "type": "number",
+        "description": "Max characters per episode (default: unlimited). Set to limit episode size sent to Graphiti."
+      },
+      "modelMaxContextChars": {
+        "type": "number",
+        "description": "When set, failed ingestions are retried once with content truncated to this length."
       }
     }
   },
@@ -104,6 +112,16 @@
       "label": "Debug Log Path",
       "advanced": true,
       "help": "Custom path for the debug log file"
+    },
+    "maxEpisodeChars": {
+      "label": "Max Episode Characters",
+      "advanced": true,
+      "help": "Limit episode size sent to Graphiti (default: unlimited)"
+    },
+    "modelMaxContextChars": {
+      "label": "Model Max Context Characters",
+      "advanced": true,
+      "help": "Retry failed ingestions with content truncated to this length"
     }
   }
 }

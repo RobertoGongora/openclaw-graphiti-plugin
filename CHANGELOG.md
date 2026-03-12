@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.7.0] — 2026-03-12
+
+### Changed
+
+- **Removed hardcoded truncation limits**: Episode content is no longer
+  silently truncated to 12,000 characters, and per-message content is no
+  longer capped at 2,000 characters. Both limits were undocumented and
+  discarded content without warning. Episode truncation is now configurable
+  via `maxEpisodeChars` (default: unlimited). Per-message truncation in
+  `extractTextsFromMessages()` defaults to unlimited.
+
+### Added
+
+- **`maxEpisodeChars` config option**: Set the maximum character count per
+  episode sent to Graphiti. When omitted, episodes are sent at full length.
+  Applies to all ingestion paths: `afterTurn`, `compact`, `ingestBatch`,
+  `onSubagentEnded`, `before_compaction`, `before_reset`, and CLI ingest.
+- **`modelMaxContextChars` config option**: When set, failed ingestion
+  requests are retried once with each episode's content truncated to this
+  length. Useful when Graphiti's extraction model has a smaller context
+  window than the content being ingested.
+- **`ingestWithRetry` helper**: Wraps all `client.ingest()` calls in both
+  `context-engine.ts` and `index.ts`. On failure, if `modelMaxContextChars`
+  is configured, truncates and retries once.
+
 ## [0.6.0] — 2026-03-08
 
 ### Added
