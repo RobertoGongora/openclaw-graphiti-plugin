@@ -116,6 +116,11 @@ export class GraphitiContextEngine {
     message: { role: string; content: unknown };
     isHeartbeat?: boolean;
   }): Promise<IngestResult> {
+    if (this.cfg.autoCapture === false) {
+      this.debugLog.log("ce-ingest", { skipped: true, reason: "autoCapture_disabled" });
+      return { ingested: false };
+    }
+
     if (params.isHeartbeat) {
       this.debugLog.log("ce-ingest", { skipped: true, reason: "heartbeat" });
       return { ingested: false };
@@ -234,8 +239,8 @@ export class GraphitiContextEngine {
     tokenBudget?: number;
     force?: boolean;
     messages?: unknown[];
-    customInstructions?: string;
-    runtimeContext?: Record<string, unknown>;
+    customInstructions?: string; // reserved for future runtimeContext.compactBuiltIn callback
+    runtimeContext?: Record<string, unknown>; // reserved for future runtimeContext.compactBuiltIn callback
     legacyParams?: { bridge?: { compact: () => Promise<any> } };
   }): Promise<CompactResult> {
     try {
@@ -300,6 +305,11 @@ export class GraphitiContextEngine {
     messages: Array<{ role: string; content: unknown }>;
     isHeartbeat?: boolean;
   }): Promise<IngestBatchResult> {
+    if (this.cfg.autoCapture === false) {
+      this.debugLog.log("ce-ingestBatch", { skipped: true, reason: "autoCapture_disabled" });
+      return { ingestedCount: 0 };
+    }
+
     if (params.isHeartbeat) {
       this.debugLog.log("ce-ingestBatch", { skipped: true, reason: "heartbeat" });
       return { ingestedCount: 0 };
@@ -348,6 +358,11 @@ export class GraphitiContextEngine {
     isHeartbeat?: boolean;
     tokenBudget?: number;
   }): Promise<void> {
+    if (this.cfg.autoCapture === false) {
+      this.debugLog.log("ce-afterTurn", { skipped: true, reason: "autoCapture_disabled" });
+      return;
+    }
+
     if (params.isHeartbeat) {
       this.debugLog.log("ce-afterTurn", { skipped: true, reason: "heartbeat" });
       return;
@@ -357,7 +372,14 @@ export class GraphitiContextEngine {
     // reflects the pre-compaction count while messages is post-compaction.
     // Detect this mismatch and sweep all messages to avoid losing the
     // current turn's content from the graph.
+    // Note: when compaction removes exactly `turnMessageCount` messages,
+    // prePromptMessageCount === messages.length and this check is false.
+    // Using >= would cause false-positive sweeps on empty turns. The rare
+    // missed content is captured on the next afterTurn cycle.
     const compactionOccurred = params.prePromptMessageCount > params.messages.length;
+    // Sweep may re-ingest messages already captured in a prior afterTurn call.
+    // Intentional: preventing data loss is more important than deduplication here.
+    // Use the "after_turn_sweep" provenance event to identify and filter these.
     const newMessages = compactionOccurred
       ? params.messages
       : params.messages.slice(params.prePromptMessageCount);
@@ -377,7 +399,10 @@ export class GraphitiContextEngine {
 
     try {
       const start = Date.now();
-      const episode = texts.join("\n\n").slice(0, 12000);
+      const joined = texts.join("\n\n");
+      const episode = compactionOccurred
+        ? joined.slice(-12000)   // sweep: keep tail (newest messages)
+        : joined.slice(0, 12000);
 
       await this.client.ingest([{
         content: episode,

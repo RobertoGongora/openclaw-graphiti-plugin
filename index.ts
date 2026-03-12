@@ -605,13 +605,14 @@ const graphitiPlugin = {
               }
 
               const episodeContent = buildIndexContent(f, meta.lastModified, meta.excerpt, meta.fileSize);
+              const fileType = path.extname(f).toLowerCase() || "unknown";
               await client.ingest([{
                 content: episodeContent,
                 role_type: "system",
                 role: "memory-index",
                 name: indexEpisodeName(f),
                 timestamp: meta.lastModified,
-                source_description: buildProvenance(groupId, { event: "memory_index", file: f, file_type: path.extname(f).toLowerCase() || "unknown" /* safety net — isIndexableFile rejects extensionless files */ }),
+                source_description: buildProvenance(groupId, { event: "memory_index", file: f, file_type: fileType }),
               }]);
 
               state[f] = {
