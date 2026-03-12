@@ -78,7 +78,7 @@ export class GraphitiContextEngine {
     id: "graphiti",
     name: "Graphiti Knowledge Graph",
     version: PLUGIN_VERSION,
-    ownsCompaction: true,
+    ownsCompaction: false,
   };
 
   /** Cached healthy() result with TTL to avoid redundant HTTP round-trips. */
@@ -234,6 +234,8 @@ export class GraphitiContextEngine {
     tokenBudget?: number;
     force?: boolean;
     messages?: unknown[];
+    customInstructions?: string;
+    runtimeContext?: Record<string, unknown>;
     legacyParams?: { bridge?: { compact: () => Promise<any> } };
   }): Promise<CompactResult> {
     try {
@@ -351,7 +353,15 @@ export class GraphitiContextEngine {
       return;
     }
 
-    const newMessages = params.messages.slice(params.prePromptMessageCount);
+    // When Pi auto-compaction runs during a prompt, prePromptMessageCount
+    // reflects the pre-compaction count while messages is post-compaction.
+    // Detect this mismatch and sweep all messages to avoid losing the
+    // current turn's content from the graph.
+    const compactionOccurred = params.prePromptMessageCount > params.messages.length;
+    const newMessages = compactionOccurred
+      ? params.messages
+      : params.messages.slice(params.prePromptMessageCount);
+
     if (newMessages.length === 0) {
       this.debugLog.log("ce-afterTurn", { skipped: true, reason: "no_new_messages" });
       return;
@@ -362,6 +372,8 @@ export class GraphitiContextEngine {
       this.debugLog.log("ce-afterTurn", { skipped: true, reason: "no_content" });
       return;
     }
+
+    const event = compactionOccurred ? "after_turn_sweep" : "after_turn";
 
     try {
       const start = Date.now();
@@ -374,13 +386,13 @@ export class GraphitiContextEngine {
         name: buildEpisodeName("turn", { sessionKey: params.sessionId }),
         timestamp: new Date().toISOString(),
         source_description: buildProvenance(this.groupId, {
-          event: "after_turn",
+          event,
           session_key: params.sessionId,
         }),
       }]);
 
       this.logger?.info?.(`graphiti: after-turn ingested ${texts.length} messages`);
-      this.debugLog.log("ce-afterTurn", { count: texts.length, ms: Date.now() - start });
+      this.debugLog.log("ce-afterTurn", { count: texts.length, sweep: compactionOccurred, ms: Date.now() - start });
     } catch (err) {
       this.logger?.warn(`graphiti: afterTurn failed: ${String(err)}`);
       this.debugLog.log("ce-afterTurn", { error: String(err) });

@@ -160,9 +160,10 @@ methods that the runtime calls directly:
 | `onSubagentEnded()` | _(new)_ | Ingest a subagent's findings into the parent graph scope |
 | `prepareSubagentSpawn()` | _(new)_ | Inject relevant facts into a spawning subagent's context |
 
-The engine declares `ownsCompaction: true`, meaning it controls the compaction strategy.
-During compaction, messages being discarded are first ingested into the knowledge graph,
-so long-term memory is preserved even after the context window is truncated.
+The engine declares `ownsCompaction: false`, deferring session truncation to OpenClaw's
+built-in auto-compaction. The plugin captures conversation knowledge into the graph via
+`afterTurn()` after every turn, so long-term memory is preserved even after the context
+window is truncated by the runtime.
 
 ### Backwards compatibility
 
@@ -196,6 +197,7 @@ Every ingested episode carries a JSON-encoded provenance object in `source_descr
 | `ingest` | ContextEngine single-message ingestion |
 | `ingest_batch` | ContextEngine batch ingestion |
 | `after_turn` | ContextEngine after-turn ingestion |
+| `after_turn_sweep` | ContextEngine after-turn sweep (post-compaction safety re-ingest) |
 | `compact` | ContextEngine graph-aware compaction |
 | `subagent_ended` | ContextEngine subagent result ingestion |
 

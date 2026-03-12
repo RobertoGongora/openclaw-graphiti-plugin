@@ -186,7 +186,7 @@ describe("registration", () => {
     // Factory should produce a GraphitiContextEngine
     const engine = contextEngines[0].factory();
     expect(engine.info.id).toBe("graphiti");
-    expect(engine.info.ownsCompaction).toBe(true);
+    expect(engine.info.ownsCompaction).toBe(false);
   });
 
   test("skips recall/capture hooks when context engine is registered", async () => {
