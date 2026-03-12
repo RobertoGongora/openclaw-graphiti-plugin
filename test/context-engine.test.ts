@@ -29,6 +29,12 @@ function createEngine() {
   return new GraphitiContextEngine(client, { recallMaxFacts: 10 }, "test-group", NOOP_LOG);
 }
 
+function createEngineWithConfig(cfg: Record<string, unknown>) {
+  const port = getMockPort();
+  const client = new GraphitiClient(`http://127.0.0.1:${port}`, "test-group", undefined, undefined, NOOP_LOG);
+  return new GraphitiContextEngine(client, { recallMaxFacts: 10, ...cfg }, "test-group", NOOP_LOG);
+}
+
 describe("GraphitiContextEngine", () => {
   beforeAll(startMockServer);
   afterAll(stopMockServer);
@@ -754,6 +760,118 @@ describe("GraphitiContextEngine", () => {
       });
 
       expect(result).toBeUndefined();
+    });
+  });
+
+  // ========================================================================
+  // autoCapture: false
+  // ========================================================================
+
+  describe("autoCapture: false", () => {
+    test("afterTurn skips ingestion", async () => {
+      const engine = createEngineWithConfig({ autoCapture: false });
+      await engine.afterTurn({
+        sessionId: "sess-1",
+        messages: [
+          { role: "user", content: "New question about the project architecture" },
+          { role: "assistant", content: "New answer about the system design patterns" },
+        ],
+        prePromptMessageCount: 0,
+      });
+
+      expect(lastRequest["/messages"]).toBeUndefined();
+    });
+
+    test("ingest skips ingestion", async () => {
+      const engine = createEngineWithConfig({ autoCapture: false });
+      const result = await engine.ingest({
+        sessionId: "sess-1",
+        message: { role: "user", content: "Tell me about the project architecture and design patterns" },
+      });
+
+      expect(result.ingested).toBe(false);
+      expect(lastRequest["/messages"]).toBeUndefined();
+    });
+
+    test("ingestBatch skips ingestion", async () => {
+      const engine = createEngineWithConfig({ autoCapture: false });
+      const result = await engine.ingestBatch({
+        sessionId: "sess-1",
+        messages: [
+          { role: "user", content: "What is the architecture of our system?" },
+          { role: "assistant", content: "The system uses a microservices architecture with Neo4j." },
+        ],
+      });
+
+      expect(result.ingestedCount).toBe(0);
+      expect(lastRequest["/messages"]).toBeUndefined();
+    });
+
+    test("compact still works (not gated by autoCapture)", async () => {
+      const engine = createEngineWithConfig({ autoCapture: false });
+      const result = await engine.compact({
+        sessionId: "sess-1",
+        messages: [
+          { role: "user", content: "Tell me about the project architecture and design patterns" },
+          { role: "assistant", content: "The project uses a modular architecture with clean separation" },
+        ],
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.compacted).toBe(true);
+      const req = lastRequest["/messages"] as any;
+      expect(req).toBeDefined();
+      expect(req.messages[0].content).toContain("architecture");
+    });
+  });
+
+  // ========================================================================
+  // compact params
+  // ========================================================================
+
+  describe("compact params", () => {
+    test("accepts customInstructions and runtimeContext without error", async () => {
+      const engine = createEngine();
+      const result = await engine.compact({
+        sessionId: "sess-1",
+        messages: [
+          { role: "user", content: "Tell me about the project architecture and design patterns" },
+          { role: "assistant", content: "The project uses a modular architecture with clean separation" },
+        ],
+        customInstructions: "Summarize concisely",
+        runtimeContext: { compactBuiltIn: true },
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.compacted).toBe(true);
+    });
+  });
+
+  // ========================================================================
+  // sweep tail truncation
+  // ========================================================================
+
+  describe("sweep tail truncation", () => {
+    test("preserves newest messages when sweep content exceeds 12k chars", async () => {
+      // Build messages where the total joined text exceeds 12000 chars.
+      // The last message should be at the tail and must survive truncation.
+      const filler = "x".repeat(6000);
+      const engine = createEngine();
+      await engine.afterTurn({
+        sessionId: "sess-1",
+        messages: [
+          { role: "user", content: `First old message with filler: ${filler}` },
+          { role: "assistant", content: `Second old message with filler: ${filler}` },
+          { role: "user", content: `Third old message with filler: ${filler}` },
+          { role: "assistant", content: "UNIQUE_TAIL_MARKER: this is the newest turn response" },
+        ],
+        prePromptMessageCount: 10, // trigger sweep
+      });
+
+      const req = lastRequest["/messages"] as any;
+      expect(req).toBeDefined();
+      // The tail marker must survive because sweep uses slice(-12000)
+      expect(req.messages[0].content).toContain("UNIQUE_TAIL_MARKER");
     });
   });
 
