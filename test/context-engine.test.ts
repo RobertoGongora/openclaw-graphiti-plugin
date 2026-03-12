@@ -44,7 +44,7 @@ describe("GraphitiContextEngine", () => {
       expect(engine.info.id).toBe("graphiti");
       expect(engine.info.name).toBe("Graphiti Knowledge Graph");
       expect(engine.info.version).toBe(PKG_VERSION);
-      expect(engine.info.ownsCompaction).toBe(true);
+      expect(engine.info.ownsCompaction).toBe(false);
     });
   });
 
@@ -279,6 +279,64 @@ describe("GraphitiContextEngine", () => {
       });
 
       expect(lastRequest["/messages"]).toBeUndefined();
+    });
+
+    test("sweeps all messages when compaction shrinks array (prePromptMessageCount > messages.length)", async () => {
+      const engine = createEngine();
+      await engine.afterTurn({
+        sessionId: "sess-1",
+        messages: [
+          { role: "user", content: "Surviving message after compaction about architecture" },
+          { role: "assistant", content: "Response about the system design patterns used" },
+          { role: "user", content: "Follow-up question about deployment strategies" },
+          { role: "assistant", content: "Details about the CI/CD pipeline configuration" },
+          { role: "user", content: "Current turn question about testing approach" },
+        ],
+        prePromptMessageCount: 10, // pre-compaction count, now only 5 messages remain
+      });
+
+      const req = lastRequest["/messages"] as any;
+      expect(req).toBeDefined();
+      // All 5 messages should be considered — 4 are user/assistant with enough text
+      expect(req.messages[0].content).toContain("architecture");
+      expect(req.messages[0].content).toContain("design patterns");
+      expect(req.messages[0].content).toContain("deployment");
+      expect(req.messages[0].content).toContain("CI/CD");
+      expect(req.messages[0].content).toContain("testing approach");
+    });
+
+    test("sweep uses after_turn_sweep event in provenance", async () => {
+      const engine = createEngine();
+      await engine.afterTurn({
+        sessionId: "sess-1",
+        messages: [
+          { role: "user", content: "Message surviving compaction about architecture" },
+          { role: "assistant", content: "Response about the system design and patterns" },
+        ],
+        prePromptMessageCount: 8, // compaction occurred
+      });
+
+      const req = lastRequest["/messages"] as any;
+      expect(req).toBeDefined();
+      expect(req.messages[0].source_description).toContain("after_turn_sweep");
+    });
+
+    test("normal turn uses after_turn event (not sweep)", async () => {
+      const engine = createEngine();
+      await engine.afterTurn({
+        sessionId: "sess-1",
+        messages: [
+          { role: "user", content: "Old message before this turn was started" },
+          { role: "user", content: "New question about the project architecture" },
+          { role: "assistant", content: "New answer about the system design patterns" },
+        ],
+        prePromptMessageCount: 1,
+      });
+
+      const req = lastRequest["/messages"] as any;
+      expect(req).toBeDefined();
+      expect(req.messages[0].source_description).toContain('"event":"after_turn"');
+      expect(req.messages[0].source_description).not.toContain("after_turn_sweep");
     });
   });
 
