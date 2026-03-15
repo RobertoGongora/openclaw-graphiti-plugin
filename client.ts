@@ -67,6 +67,28 @@ export class GraphitiClient {
     }
   }
 
+  private async fetchDelete(path: string): Promise<void> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
+    const start = Date.now();
+
+    try {
+      const res = await fetch(`${this.url}${path}`, {
+        method: "DELETE",
+        headers: this.headers(),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        this.debugLog.log(path.slice(1), { status: res.status, group: this.groupId, error: "HTTP error", ms: Date.now() - start });
+        throw new Error(`Graphiti DELETE ${path} returned ${res.status}: ${text}`);
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   /**
    * Search for facts by query.
    */
@@ -179,5 +201,23 @@ export class GraphitiClient {
       this.debugLog.log("episodes", { group: this.groupId, error: "unreachable", ms: Date.now() - start });
       return [];
     }
+  }
+
+  /**
+   * Delete a fact/edge by UUID.
+   */
+  async deleteEdge(uuid: string): Promise<void> {
+    const start = Date.now();
+    await this.fetchDelete(`/entity-edge/${uuid}`);
+    this.debugLog.log("deleteEdge", { status: 200, group: this.groupId, uuid, ms: Date.now() - start });
+  }
+
+  /**
+   * Delete an episode by UUID.
+   */
+  async deleteEpisode(uuid: string): Promise<void> {
+    const start = Date.now();
+    await this.fetchDelete(`/episode/${uuid}`);
+    this.debugLog.log("deleteEpisode", { status: 200, group: this.groupId, uuid, ms: Date.now() - start });
   }
 }

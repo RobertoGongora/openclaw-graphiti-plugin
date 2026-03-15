@@ -178,6 +178,24 @@ export function startMockServer(): Promise<void> {
         return;
       }
 
+      // DELETE /entity-edge/:uuid
+      if (req.method === "DELETE" && url.pathname.startsWith("/entity-edge/")) {
+        const uuid = url.pathname.split("/")[2];
+        lastRequest["/entity-edge"] = { uuid };
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ status: "ok" }));
+        return;
+      }
+
+      // DELETE /episode/:uuid
+      if (req.method === "DELETE" && url.pathname.startsWith("/episode/")) {
+        const uuid = url.pathname.split("/")[2];
+        lastRequest["/episode"] = { uuid };
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ status: "ok" }));
+        return;
+      }
+
       res.writeHead(404);
       res.end(JSON.stringify({ detail: "Not Found" }));
     });

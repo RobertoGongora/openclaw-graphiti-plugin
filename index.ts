@@ -219,6 +219,89 @@ const graphitiPlugin = {
       { name: "graphiti_ingest" },
     );
 
+    api.registerTool(
+      {
+        name: "graphiti_forget",
+        label: "Graphiti Forget",
+        description:
+          "Delete a fact or episode from the knowledge graph. " +
+          "Search by query to find and remove, or delete directly by UUID.",
+        parameters: Type.Object({
+          query: Type.Optional(Type.String({ description: "Search query to find the fact/episode to delete" })),
+          uuid: Type.Optional(Type.String({ description: "Direct UUID of the fact/episode to delete" })),
+          type: Type.Optional(
+            Type.Union([Type.Literal("fact"), Type.Literal("episode")], {
+              description: "Type of entity to delete (default: fact)",
+              default: "fact",
+            })
+          ),
+        }),
+        async execute(_toolCallId, params) {
+          const { query, uuid, type = "fact" } = params as {
+            query?: string; uuid?: string; type?: "fact" | "episode";
+          };
+
+          if (!query && !uuid) {
+            return {
+              content: [{ type: "text", text: "Please provide either a query or uuid parameter." }],
+            };
+          }
+
+          try {
+            if (uuid) {
+              if (type === "episode") {
+                await client.deleteEpisode(uuid);
+              } else {
+                await client.deleteEdge(uuid);
+              }
+              return {
+                content: [{ type: "text", text: `Deleted ${type} ${uuid}.` }],
+                details: { deleted: true, uuid, type },
+              };
+            }
+
+            const facts = await client.search(query!, 10);
+            if (facts.length === 0) {
+              return {
+                content: [{ type: "text", text: `No matching facts found for "${query}".` }],
+                details: { deleted: false, reason: "no_matches" },
+              };
+            }
+
+            if (facts.length === 1) {
+              await client.deleteEdge(facts[0].uuid);
+              return {
+                content: [{
+                  type: "text",
+                  text: `Deleted fact: "${facts[0].name}: ${facts[0].fact}" (${facts[0].uuid}).`,
+                }],
+                details: { deleted: true, uuid: facts[0].uuid, type: "fact" },
+              };
+            }
+
+            const list = facts
+              .map((f, i) => `${i + 1}. [${f.uuid}] **${f.name}**: ${f.fact}`)
+              .join("\n");
+            return {
+              content: [{
+                type: "text",
+                text: `Found ${facts.length} matching facts. Please specify a UUID to delete:\n\n${list}`,
+              }],
+              details: { deleted: false, reason: "multiple_matches", count: facts.length },
+            };
+          } catch (err) {
+            return {
+              content: [{
+                type: "text",
+                text: `Graphiti forget failed: ${err instanceof Error ? err.message : String(err)}`,
+              }],
+            };
+          }
+        },
+      },
+      { name: "graphiti_forget" },
+    );
+
     // ========================================================================
     // ContextEngine registration (OpenClaw v2026.3.7+)
     // ========================================================================

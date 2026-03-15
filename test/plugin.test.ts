@@ -44,10 +44,10 @@ describe("registration", () => {
 
     plugin.register(api as any);
 
-    // 2 tools: graphiti_search, graphiti_ingest
-    expect(tools).toHaveLength(2);
+    // 3 tools: graphiti_search, graphiti_ingest, graphiti_forget
+    expect(tools).toHaveLength(3);
     expect(tools.map((t) => t.opts.name)).toEqual(
-      expect.arrayContaining(["graphiti_search", "graphiti_ingest"]),
+      expect.arrayContaining(["graphiti_search", "graphiti_ingest", "graphiti_forget"]),
     );
 
     // 4 hooks by default (autoRecall=false, autoCapture=true, autoIndex=true):

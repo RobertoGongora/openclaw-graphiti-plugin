@@ -13,6 +13,7 @@ import {
   createMockApi,
   mockOverrides,
   lastRequest,
+  SAMPLE_FACTS,
 } from "./helpers.js";
 
 describe("tool execution", () => {
@@ -123,5 +124,71 @@ describe("tool execution", () => {
     const result = await tool.execute("call-5", { content: "test" });
 
     expect(result.content[0].text).toContain("Graphiti ingest failed");
+  });
+
+  // -- graphiti_forget --
+
+  test("graphiti_forget deletes fact by UUID", async () => {
+    const { default: plugin } = await import("../index.js");
+    const { api, tools } = createMockApi();
+    plugin.register(api as any);
+
+    const tool = tools.find((t) => t.opts.name === "graphiti_forget")!.tool;
+    const result = await tool.execute("call-f1", { uuid: "fact-001", type: "fact" });
+
+    expect(result.content[0].text).toContain("Deleted fact fact-001");
+    expect(result.details.deleted).toBe(true);
+    expect(lastRequest["/entity-edge"]).toEqual({ uuid: "fact-001" });
+  });
+
+  test("graphiti_forget deletes episode by UUID", async () => {
+    const { default: plugin } = await import("../index.js");
+    const { api, tools } = createMockApi();
+    plugin.register(api as any);
+
+    const tool = tools.find((t) => t.opts.name === "graphiti_forget")!.tool;
+    const result = await tool.execute("call-f2", { uuid: "ep-001", type: "episode" });
+
+    expect(result.content[0].text).toContain("Deleted episode ep-001");
+    expect(result.details.deleted).toBe(true);
+    expect(lastRequest["/episode"]).toEqual({ uuid: "ep-001" });
+  });
+
+  test("graphiti_forget auto-deletes single search match", async () => {
+    mockOverrides.searchFacts = [SAMPLE_FACTS[0]];
+    const { default: plugin } = await import("../index.js");
+    const { api, tools } = createMockApi();
+    plugin.register(api as any);
+
+    const tool = tools.find((t) => t.opts.name === "graphiti_forget")!.tool;
+    const result = await tool.execute("call-f3", { query: "Alice" });
+
+    expect(result.details.deleted).toBe(true);
+    expect(result.details.uuid).toBe("fact-001");
+    expect(lastRequest["/entity-edge"]).toEqual({ uuid: "fact-001" });
+  });
+
+  test("graphiti_forget lists multiple matches without deleting", async () => {
+    const { default: plugin } = await import("../index.js");
+    const { api, tools } = createMockApi();
+    plugin.register(api as any);
+
+    const tool = tools.find((t) => t.opts.name === "graphiti_forget")!.tool;
+    const result = await tool.execute("call-f4", { query: "test" });
+
+    expect(result.details.deleted).toBe(false);
+    expect(result.details.reason).toBe("multiple_matches");
+    expect(result.content[0].text).toContain("specify a UUID");
+  });
+
+  test("graphiti_forget returns error when neither query nor uuid provided", async () => {
+    const { default: plugin } = await import("../index.js");
+    const { api, tools } = createMockApi();
+    plugin.register(api as any);
+
+    const tool = tools.find((t) => t.opts.name === "graphiti_forget")!.tool;
+    const result = await tool.execute("call-f5", {});
+
+    expect(result.content[0].text).toContain("provide either");
   });
 });
