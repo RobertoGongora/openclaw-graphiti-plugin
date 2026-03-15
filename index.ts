@@ -131,12 +131,15 @@ const graphitiPlugin = {
           limit: Type.Optional(
             Type.Number({ description: "Max results (default: 10)", minimum: 1, maximum: 50 })
           ),
+          groupIds: Type.Optional(
+            Type.Array(Type.String(), { description: "Search across specific group IDs (default: current group)" })
+          ),
         }),
         async execute(_toolCallId, params) {
-          const { query, limit = 10 } = params as { query: string; limit?: number };
+          const { query, limit = 10, groupIds } = params as { query: string; limit?: number; groupIds?: string[] };
 
           try {
-            const facts = await client.search(query, limit);
+            const facts = await client.search(query, limit, groupIds);
 
             if (facts.length === 0) {
               return {

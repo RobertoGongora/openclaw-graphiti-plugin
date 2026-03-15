@@ -203,6 +203,7 @@ export class GraphitiContextEngine {
         return passThrough;
       }
 
+      // TODO: /get-memory only accepts single group_id — multi-group recall needs server changes
       const maxFacts = this.cfg.recallMaxFacts ?? 10;
       const facts = await this.client.getMemory(graphitiMessages, maxFacts);
 

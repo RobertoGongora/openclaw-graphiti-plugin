@@ -194,4 +194,20 @@ describe("GraphitiClient", () => {
     await clientWithKey().search("test");
     expect(lastHeaders["/search"]?.["authorization"]).toBeUndefined();
   });
+
+  // -- multi-group search --
+
+  test("search() sends custom group_ids when provided", async () => {
+    await client().search("test", 5, ["group-a", "group-b"]);
+    expect(lastRequest["/search"]).toEqual({
+      query: "test",
+      group_ids: ["group-a", "group-b"],
+      max_facts: 5,
+    });
+  });
+
+  test("search() falls back to default groupId when groupIds omitted", async () => {
+    await client().search("test", 5);
+    expect((lastRequest["/search"] as any).group_ids).toEqual(["test-group"]);
+  });
 });

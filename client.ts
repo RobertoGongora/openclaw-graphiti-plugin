@@ -92,11 +92,11 @@ export class GraphitiClient {
   /**
    * Search for facts by query.
    */
-  async search(query: string, maxFacts = 10): Promise<GraphitiFact[]> {
+  async search(query: string, maxFacts = 10, groupIds?: string[]): Promise<GraphitiFact[]> {
     const start = Date.now();
     const data = await this.fetch("/search", {
       query,
-      group_ids: [this.groupId],
+      group_ids: groupIds ?? [this.groupId],
       max_facts: maxFacts,
     });
     const facts = data.facts ?? [];
