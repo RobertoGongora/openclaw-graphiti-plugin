@@ -69,6 +69,7 @@ describe("CLI search command", () => {
 
     expect(logs.some((l) => l.includes("WORKS_AT"))).toBe(true);
     expect(logs.some((l) => l.includes("Alice works at Acme Corp"))).toBe(true);
+    expect(logs.some((l) => l.includes("2024-01-15"))).toBe(true);
   });
 
   test("no results prints message", async () => {

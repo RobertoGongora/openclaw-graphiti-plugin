@@ -602,7 +602,11 @@ const graphitiPlugin = {
             try {
               const facts = await client.search(query, parseInt(opts.limit));
               if (facts.length === 0) { console.log("No facts found."); return; }
-              for (const f of facts) { console.log(`• ${f.name}: ${f.fact}`); }
+              for (const f of facts) {
+                const valid = f.valid_at ?? "ongoing";
+                const invalid = f.invalid_at ? ` \u2192 ${f.invalid_at}` : "";
+                console.log(`\u2022 ${f.name}: ${f.fact}  [${valid}${invalid}]`);
+              }
             } catch (err) {
               console.error(`Search failed: ${err instanceof Error ? err.message : String(err)}`);
               process.exitCode = 1;
