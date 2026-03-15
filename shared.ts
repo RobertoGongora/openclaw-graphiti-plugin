@@ -61,6 +61,40 @@ export function buildProvenance(
 }
 
 /**
+ * Strip plugin-injected metadata and noise from text before graph ingestion.
+ * Prevents feedback loops where recalled context is re-ingested as new knowledge.
+ */
+export function sanitizeForCapture(text: string): string {
+  let t = text;
+
+  // Strip <graphiti-context>...</graphiti-context> blocks (multiline)
+  t = t.replace(/<graphiti-context>[\s\S]*?<\/graphiti-context>/g, "");
+
+  // Strip <relevant-memories>...</relevant-memories> blocks (multiline)
+  t = t.replace(/<relevant-memories>[\s\S]*?<\/relevant-memories>/g, "");
+
+  // Strip conversation metadata JSON blocks: ```json\n{"schema":"openclaw.inbound_meta...}```
+  t = t.replace(/```json\s*\n\s*\{["\s]*schema["\s]*:\s*"openclaw\.inbound_meta[\s\S]*?```/g, "");
+
+  // Strip sender metadata JSON blocks: ```json\n{"label":...,"id":...,"sender":...}```
+  t = t.replace(/```json\s*\n\s*\{["\s]*label[\s\S]*?sender[\s\S]*?```/g, "");
+
+  // Strip [Subagent Context] prefixed lines
+  t = t.replace(/^\[Subagent Context\].*$/gm, "");
+
+  // Strip leading timestamps like [Mon 2026-03-15 14:00 UTC]
+  t = t.replace(/^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+\w+\][ \t]*/gm, "");
+
+  // Strip null bytes
+  t = t.replace(/\u0000/g, "");
+
+  // Collapse multiple blank lines to max 2
+  t = t.replace(/\n{3,}/g, "\n\n");
+
+  return t.trim();
+}
+
+/**
  * Extract text content from a message's content field.
  * Handles both string content and content-block-array format.
  * Returns null if no usable text found or text is below minLength.

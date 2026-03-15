@@ -9,7 +9,7 @@
 import { createRequire } from "node:module";
 import type { GraphitiClient, GraphitiMessage } from "./client.js";
 import type { DebugLog } from "./debug-log.js";
-import { buildEpisodeName, buildProvenance, extractTextContent, extractTextsFromMessages, formatFactsAsContext } from "./shared.js";
+import { buildEpisodeName, buildProvenance, extractTextContent, extractTextsFromMessages, formatFactsAsContext, sanitizeForCapture } from "./shared.js";
 
 const _require = createRequire(import.meta.url);
 const PLUGIN_VERSION: string = (_require("./package.json") as any).version;
@@ -132,9 +132,10 @@ export class GraphitiContextEngine {
       return { ingested: false };
     }
 
-    const text = extractTextContent(content);
-    if (!text) {
-      this.debugLog.log("ce-ingest", { skipped: true, reason: "short_content" });
+    const rawText = extractTextContent(content);
+    const text = rawText ? sanitizeForCapture(rawText) : null;
+    if (!text || text.length < 20) {
+      this.debugLog.log("ce-ingest", { skipped: true, reason: text ? "sanitized_short" : "short_content" });
       return { ingested: false };
     }
 
@@ -264,7 +265,7 @@ export class GraphitiContextEngine {
           return { ok: true, compacted: true };
         }
 
-        const episode = texts.join("\n\n").slice(0, 12000);
+        const episode = sanitizeForCapture(texts.join("\n\n")).slice(0, 12000);
         await this.client.ingest([{
           content: episode,
           role_type: "user",
@@ -315,7 +316,8 @@ export class GraphitiContextEngine {
       return { ingestedCount: 0 };
     }
 
-    const texts = extractTextsFromMessages(params.messages);
+    const rawTexts = extractTextsFromMessages(params.messages);
+    const texts = rawTexts.map(sanitizeForCapture).filter(t => t.length > 0);
     if (texts.length === 0) {
       this.debugLog.log("ce-ingestBatch", { skipped: true, reason: "no_content" });
       return { ingestedCount: 0 };
@@ -399,7 +401,11 @@ export class GraphitiContextEngine {
 
     try {
       const start = Date.now();
-      const joined = texts.join("\n\n");
+      const joined = sanitizeForCapture(texts.join("\n\n"));
+      if (!joined) {
+        this.debugLog.log("ce-afterTurn", { skipped: true, reason: "sanitized_empty" });
+        return;
+      }
       const episode = compactionOccurred
         ? joined.slice(-12000)   // sweep: keep tail (newest messages)
         : joined.slice(0, 12000);
