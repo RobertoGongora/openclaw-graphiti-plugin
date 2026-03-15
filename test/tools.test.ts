@@ -191,4 +191,30 @@ describe("tool execution", () => {
 
     expect(result.content[0].text).toContain("provide either");
   });
+
+  // -- graphiti_episodes --
+
+  test("graphiti_episodes returns formatted list", async () => {
+    const { default: plugin } = await import("../index.js");
+    const { api, tools } = createMockApi();
+    plugin.register(api as any);
+
+    const tool = tools.find((t) => t.opts.name === "graphiti_episodes")!.tool;
+    const result = await tool.execute("call-ep1", {});
+
+    expect(result.content[0].text).toContain("1 episode(s)");
+    expect(result.details.count).toBe(1);
+  });
+
+  test("graphiti_episodes filters by sessionKey", async () => {
+    const { default: plugin } = await import("../index.js");
+    const { api, tools } = createMockApi();
+    plugin.register(api as any);
+
+    const tool = tools.find((t) => t.opts.name === "graphiti_episodes")!.tool;
+    const result = await tool.execute("call-ep2", { sessionKey: "nonexistent" });
+
+    expect(result.content[0].text).toContain("No episodes found");
+    expect(result.details.count).toBe(0);
+  });
 });

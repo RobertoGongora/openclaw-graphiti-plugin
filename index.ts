@@ -302,6 +302,77 @@ const graphitiPlugin = {
       { name: "graphiti_forget" },
     );
 
+    api.registerTool(
+      {
+        name: "graphiti_episodes",
+        label: "Graphiti Episodes",
+        description:
+          "List recent episodes (ingestion records) from the knowledge graph. " +
+          "Useful for understanding what has been captured and when.",
+        parameters: Type.Object({
+          limit: Type.Optional(
+            Type.Number({ description: "Max episodes to return (default: 10, max: 50)", minimum: 1, maximum: 50 })
+          ),
+          sessionKey: Type.Optional(
+            Type.String({ description: "Filter episodes by session key" })
+          ),
+        }),
+        async execute(_toolCallId, params) {
+          const { limit = 10, sessionKey } = params as { limit?: number; sessionKey?: string };
+
+          try {
+            let eps = await client.episodes(limit);
+
+            if (sessionKey) {
+              eps = eps.filter((ep: any) => {
+                try {
+                  const prov = JSON.parse(ep.source_description ?? "");
+                  return prov.session_key === sessionKey;
+                } catch {
+                  return ep.source_description?.includes(`session=${sessionKey}`) ||
+                    ep.name?.includes(sessionKey);
+                }
+              });
+            }
+
+            if (eps.length === 0) {
+              return {
+                content: [{ type: "text", text: "No episodes found." }],
+                details: { count: 0 },
+              };
+            }
+
+            const lines = eps.map((ep: any, i: number) => {
+              let desc = "";
+              try {
+                const prov = JSON.parse(ep.source_description ?? "");
+                const parts: string[] = [];
+                if (prov.event) parts.push(`event=${prov.event}`);
+                if (prov.session_key) parts.push(`session=${prov.session_key}`);
+                if (prov.file) parts.push(`file=${prov.file}`);
+                desc = parts.join(" ");
+              } catch {
+                desc = ep.source_description ?? "";
+              }
+              const age = ep.created_at ? formatTimeAgo(ep.created_at) : "";
+              const content = ep.content ? ep.content.slice(0, 100) : "";
+              return `${i + 1}. **${ep.name ?? ep.uuid}** ${desc} (${age})${content ? `\n   ${content}` : ""}`;
+            });
+
+            return {
+              content: [{ type: "text", text: `${eps.length} episode(s):\n\n${lines.join("\n")}` }],
+              details: { count: eps.length },
+            };
+          } catch (err) {
+            return {
+              content: [{ type: "text", text: `Graphiti episodes failed: ${err instanceof Error ? err.message : String(err)}` }],
+            };
+          }
+        },
+      },
+      { name: "graphiti_episodes" },
+    );
+
     // ========================================================================
     // ContextEngine registration (OpenClaw v2026.3.7+)
     // ========================================================================
