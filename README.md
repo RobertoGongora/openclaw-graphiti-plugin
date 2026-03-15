@@ -7,7 +7,7 @@ Temporal knowledge graph plugin for [OpenClaw](https://github.com/openclaw/openc
 
 ## What it does
 
-- **Knowledge graph tools**: `graphiti_search` and `graphiti_ingest` available as agent tools for on-demand entity/relationship queries and manual ingestion
+- **Knowledge graph tools**: `graphiti_search`, `graphiti_ingest`, `graphiti_forget`, and `graphiti_episodes` available as agent tools for on-demand entity/relationship queries, manual ingestion, fact deletion, and episode browsing
 - **Auto-capture**: Automatically ingests conversation content into the knowledge graph (per-turn in ContextEngine mode, on compaction/reset in hooks mode) for entity/relationship extraction (async, via Graphiti's LLM pipeline)
 - **Auto-index**: Automatically creates index episodes in Graphiti when files are written to `memory/`, bridging file-based memory with the knowledge graph
 - **Auto-recall**: Optionally injects relevant facts before each turn — off by default, see [Auto-recall vs on-demand search](#auto-recall-vs-on-demand-search)
@@ -81,6 +81,8 @@ knowledge graph, operating independently on different data.
 | "What's the relationship between X and Y?" | `graphiti_search` |
 | "What was the history of project X?" | `graphiti_search` (temporal queries) |
 | "Remember this fact long-term" | `graphiti_ingest` |
+| "Forget this outdated fact" | `graphiti_forget` |
+| "What was captured recently?" | `graphiti_episodes` |
 
 ## Configuration
 
@@ -93,7 +95,7 @@ knowledge graph, operating independently on different data.
 | `autoCapture` | boolean | `true` | Automatically ingest conversation content into the graph |
 | `autoIndex` | boolean | `true` | Create index episodes when files are written to `memory/` |
 | `autoIndexExtensions` | string[] | `[".md", ".txt"]` | File extensions to index (non-matching files are skipped) |
-| `recallMaxFacts` | number | `1` | Max facts to inject per turn when auto-recall is on |
+| `recallMaxFacts` | number | `10` | Max facts to inject per turn when auto-recall is on |
 | `minPromptLength` | number | `10` | Min prompt length to trigger auto-recall |
 | `debug` | boolean | `true` | Enable structured debug log file |
 | `logFile` | string | `~/.openclaw/logs/graphiti-plugin.log` | Custom debug log file path |

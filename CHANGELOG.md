@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.7.0] — 2026-03-15
+
+### Added
+
+- **`graphiti_forget` tool**: Delete facts or episodes from the knowledge graph.
+  Supports direct deletion by UUID (`type: "fact" | "episode"`) or search-then-delete
+  by query (auto-deletes single matches, lists candidates for multiple matches).
+  New client methods: `deleteEdge(uuid)` and `deleteEpisode(uuid)`.
+
+- **`graphiti_episodes` tool**: List recent ingestion records as an agent tool.
+  Accepts `limit` (max 50) and optional `sessionKey` filter. Reuses the same
+  session-key filtering logic as the CLI `episodes` command.
+
+- **Multi-group search**: `graphiti_search` tool and `client.search()` now accept
+  an optional `groupIds` parameter to search across multiple graph groups in a
+  single call. Falls back to the configured `groupId` when omitted.
+
+- **Input sanitization**: New `sanitizeForCapture()` function strips plugin-injected
+  metadata before graph ingestion, preventing feedback loops where recalled context
+  (`<graphiti-context>` blocks), conversation metadata JSON, `[Subagent Context]`
+  lines, and timestamps are re-ingested as new knowledge. Applied at all 4
+  ContextEngine ingestion points (`ingest`, `ingestBatch`, `afterTurn`, `compact`).
+
+- **Temporal info in CLI search**: `openclaw graphiti search` now displays
+  `valid_at` and `invalid_at` alongside each fact.
+
+### Changed
+
+- **`recallMaxFacts` default raised from 1 to 10**: Aligns `openclaw.plugin.json`
+  and the `index.ts` fallback with the ContextEngine default (which already used
+  10). When auto-recall is enabled, the agent now receives a useful amount of
+  context by default.
+
 ## [0.6.2] — 2026-03-12
 
 ### Fixed
