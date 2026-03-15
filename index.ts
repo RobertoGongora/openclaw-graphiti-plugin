@@ -83,7 +83,7 @@ const graphitiPlugin = {
     const groupId = cfg.groupId ?? "core";
     const autoRecall = cfg.autoRecall === true;
     const autoCapture = cfg.autoCapture !== false;
-    const recallMaxFacts = cfg.recallMaxFacts ?? 1;
+    const recallMaxFacts = cfg.recallMaxFacts ?? 10;
     const minPromptLength = cfg.minPromptLength ?? 10;
     const apiKey = cfg.apiKey;
     const autoIndex = cfg.autoIndex !== false;
