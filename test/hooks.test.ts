@@ -260,6 +260,46 @@ describe("hooks", () => {
       expect(req.messages[0].content).toContain("event-driven");
     });
 
+    test("sanitizes captured content (strips graphiti-context blocks)", async () => {
+      const { default: plugin } = await import("../index.js");
+      const { api, hooks } = createMockApi();
+      plugin.register(api as any);
+
+      const handler = hooks["before_compaction"][0];
+      await handler({
+        messages: [
+          {
+            role: "user",
+            content: "What is the architecture of our system?",
+          },
+          {
+            role: "assistant",
+            content:
+              "<graphiti-context>\nRecalled facts\n</graphiti-context>\nThe system uses microservices.",
+          },
+          {
+            role: "user",
+            content: "Tell me more about the graph database.",
+          },
+          {
+            role: "assistant",
+            content:
+              "Neo4j stores entities and relationships as a knowledge graph.",
+          },
+        ],
+        messageCount: 4,
+      }, createMockHookCtx());
+
+      const req = lastRequest["/messages"] as any;
+      expect(req).toBeDefined();
+      // graphiti-context block should be stripped by sanitizeForCapture
+      expect(req.messages[0].content).not.toContain("<graphiti-context>");
+      expect(req.messages[0].content).not.toContain("Recalled facts");
+      // Actual content should remain
+      expect(req.messages[0].content).toContain("microservices");
+      expect(req.messages[0].content).toContain("Neo4j");
+    });
+
     test("sessionKey from event propagates into provenance", async () => {
       const { default: plugin } = await import("../index.js");
       const { api, hooks } = createMockApi();
@@ -461,6 +501,43 @@ describe("hooks", () => {
       expect(prov.agent).toBe("test-agent");
       expect(prov.channel).toBe("test-channel");
       expect(req.messages[0].name).toContain("session-reset-test-session-key-");
+    });
+
+    test("sanitizes captured content in reset hook", async () => {
+      const { default: plugin } = await import("../index.js");
+      const { api, hooks } = createMockApi();
+      plugin.register(api as any);
+
+      const handler = hooks["before_reset"][0];
+      await handler({
+        messages: [
+          {
+            role: "user",
+            content: "Let me tell you about our deployment setup.",
+          },
+          {
+            role: "assistant",
+            content:
+              "<graphiti-context>\nOld recalled data\n</graphiti-context>\nWe use Kubernetes.",
+          },
+          {
+            role: "user",
+            content: "How does the rollback work?",
+          },
+          {
+            role: "assistant",
+            content:
+              "ArgoCD supports automatic rollback on health check failure.",
+          },
+        ],
+      }, createMockHookCtx());
+
+      const req = lastRequest["/messages"] as any;
+      expect(req).toBeDefined();
+      expect(req.messages[0].content).not.toContain("<graphiti-context>");
+      expect(req.messages[0].content).not.toContain("Old recalled data");
+      expect(req.messages[0].content).toContain("Kubernetes");
+      expect(req.messages[0].content).toContain("ArgoCD");
     });
 
     test("skips when fewer than 4 messages", async () => {

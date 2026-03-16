@@ -31,6 +31,11 @@ describe("sanitizeForCapture", () => {
     expect(sanitizeForCapture(input)).toBe("before\n\nafter");
   });
 
+  test("strips sender metadata JSON blocks with reversed key order", () => {
+    const input = 'before\n```json\n{"sender":"alice","id":"u1","label":"User"}\n```\nafter';
+    expect(sanitizeForCapture(input)).toBe("before\n\nafter");
+  });
+
   test("strips [Subagent Context] prefixed lines", () => {
     const input = "line1\n[Subagent Context] some context here\nline2";
     expect(sanitizeForCapture(input)).toBe("line1\n\nline2");
@@ -44,6 +49,17 @@ describe("sanitizeForCapture", () => {
   test("strips timestamps on multiple lines", () => {
     const input = "[Tue 2026-03-15 09:30 PST] First\n[Wed 2026-03-16 10:00 EST] Second";
     expect(sanitizeForCapture(input)).toBe("First\nSecond");
+  });
+
+  test("does not strip timestamps with overly long timezone strings", () => {
+    const input = "[Mon 2026-03-15 14:00 TOOLONG] Hello there";
+    // "TOOLONG" is 7 chars — exceeds the [A-Za-z]{2,5} limit, should NOT match
+    expect(sanitizeForCapture(input)).toBe(input);
+  });
+
+  test("strips timestamps with short timezone abbreviations (2-5 chars)", () => {
+    const input = "[Mon 2026-03-15 14:00 CET] Hello\n[Tue 2026-03-16 09:00 CEST] World";
+    expect(sanitizeForCapture(input)).toBe("Hello\nWorld");
   });
 
   test("strips null bytes", () => {

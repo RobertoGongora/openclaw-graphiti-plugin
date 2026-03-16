@@ -14,6 +14,19 @@ export interface GraphitiFact {
   expired_at: string | null;
 }
 
+export interface GraphitiEpisode {
+  uuid: string;
+  name?: string;
+  group_id?: string;
+  labels?: string[];
+  created_at?: string;
+  source?: string;
+  source_description?: string;
+  content?: string;
+  valid_at?: string;
+  entity_edges?: string[];
+}
+
 export interface GraphitiMessage {
   content: string;
   role_type: "user" | "assistant" | "system";
@@ -84,6 +97,9 @@ export class GraphitiClient {
         this.debugLog.log(path.slice(1), { status: res.status, group: this.groupId, error: "HTTP error", ms: Date.now() - start });
         throw new Error(`Graphiti DELETE ${path} returned ${res.status}: ${text}`);
       }
+
+      // Consume the response body to allow connection reuse (HTTP keep-alive)
+      await res.text().catch(() => {});
     } finally {
       clearTimeout(timeout);
     }
@@ -177,7 +193,7 @@ export class GraphitiClient {
    *
    * Note: The server returns a bare JSON array, not a wrapped object.
    */
-  async episodes(lastN = 10): Promise<any[]> {
+  async episodes(lastN = 10): Promise<GraphitiEpisode[]> {
     const start = Date.now();
     try {
       const controller = new AbortController();

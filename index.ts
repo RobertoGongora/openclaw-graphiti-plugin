@@ -19,10 +19,10 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { Type } from "@sinclair/typebox";
 import path from "node:path";
 import os from "node:os";
-import { GraphitiClient } from "./client.js";
+import { GraphitiClient, type GraphitiEpisode } from "./client.js";
 import { DebugLog, NOOP_LOG } from "./debug-log.js";
 import { extractMemoryPath, upsertIndexEpisode, scanMemoryFiles, readIndexState, writeIndexState, readMemoryFileMeta, buildIndexContent, indexEpisodeName, isIndexableFile, DEFAULT_INDEX_EXTENSIONS } from "./memory-index.js";
-import { buildProvenance, extractTextsFromMessages, buildEpisodeName, type SessionMeta } from "./shared.js";
+import { buildProvenance, extractTextsFromMessages, buildEpisodeName, sanitizeForCapture, type SessionMeta } from "./shared.js";
 import { GraphitiContextEngine } from "./context-engine.js";
 
 // Re-export public types from shared.ts for backwards compatibility
@@ -228,7 +228,8 @@ const graphitiPlugin = {
         label: "Graphiti Forget",
         description:
           "Delete a fact or episode from the knowledge graph. " +
-          "Search by query to find and remove, or delete directly by UUID.",
+          "Delete directly by UUID (supports both facts and episodes), or search by query to find and remove. " +
+          "Note: query-based search only supports facts — to delete an episode, use its UUID directly.",
         parameters: Type.Object({
           query: Type.Optional(Type.String({ description: "Search query to find the fact/episode to delete" })),
           uuid: Type.Optional(Type.String({ description: "Direct UUID of the fact/episode to delete" })),
@@ -260,6 +261,17 @@ const graphitiPlugin = {
               return {
                 content: [{ type: "text", text: `Deleted ${type} ${uuid}.` }],
                 details: { deleted: true, uuid, type },
+              };
+            }
+
+            // Query-based search only supports facts — episode-by-query is not yet implemented
+            if (type === "episode") {
+              return {
+                content: [{
+                  type: "text",
+                  text: `Query-based episode deletion is not supported. Use a UUID to delete an episode directly, or use graphiti_episodes to find the episode UUID first.`,
+                }],
+                details: { deleted: false, reason: "episode_query_not_supported" },
               };
             }
 
@@ -298,6 +310,7 @@ const graphitiPlugin = {
                 type: "text",
                 text: `Graphiti forget failed: ${err instanceof Error ? err.message : String(err)}`,
               }],
+              details: { deleted: false, reason: "error", error: err instanceof Error ? err.message : String(err) },
             };
           }
         },
@@ -311,7 +324,8 @@ const graphitiPlugin = {
         label: "Graphiti Episodes",
         description:
           "List recent episodes (ingestion records) from the knowledge graph. " +
-          "Useful for understanding what has been captured and when.",
+          "Useful for understanding what has been captured and when. " +
+          "When filtering by sessionKey, more episodes are fetched server-side to compensate for client-side filtering.",
         parameters: Type.Object({
           limit: Type.Optional(
             Type.Number({ description: "Max episodes to return (default: 10, max: 50)", minimum: 1, maximum: 50 })
@@ -324,10 +338,13 @@ const graphitiPlugin = {
           const { limit = 10, sessionKey } = params as { limit?: number; sessionKey?: string };
 
           try {
-            let eps = await client.episodes(limit);
+            // When filtering by sessionKey, fetch more episodes server-side to
+            // compensate for the client-side filter reducing the result set.
+            const fetchLimit = sessionKey ? Math.min(limit * 5, 250) : limit;
+            let eps = await client.episodes(fetchLimit);
 
             if (sessionKey) {
-              eps = eps.filter((ep: any) => {
+              eps = eps.filter((ep: GraphitiEpisode) => {
                 try {
                   const prov = JSON.parse(ep.source_description ?? "");
                   return prov.session_key === sessionKey;
@@ -335,7 +352,7 @@ const graphitiPlugin = {
                   return ep.source_description?.includes(`session=${sessionKey}`) ||
                     ep.name?.includes(sessionKey);
                 }
-              });
+              }).slice(0, limit);
             }
 
             if (eps.length === 0) {
@@ -345,7 +362,7 @@ const graphitiPlugin = {
               };
             }
 
-            const lines = eps.map((ep: any, i: number) => {
+            const lines = eps.map((ep: GraphitiEpisode, i: number) => {
               let desc = "";
               try {
                 const prov = JSON.parse(ep.source_description ?? "");
@@ -456,7 +473,7 @@ const graphitiPlugin = {
           const texts = extractTextsFromMessages(messages);
           if (texts.length < 2) return;
 
-          const episode = texts.join("\n\n").slice(0, 12000);
+          const episode = sanitizeForCapture(texts.join("\n\n")).slice(0, 12000);
 
           await client.ingest([{
             content: episode,
@@ -499,7 +516,7 @@ const graphitiPlugin = {
           if (texts.length < 2) return;
 
           // Take a sample — last 20 exchanges max
-          const sample = texts.slice(-20).join("\n\n");
+          const sample = sanitizeForCapture(texts.slice(-20).join("\n\n"));
 
           await client.ingest([{
             content: sample.slice(0, 12000),
@@ -623,7 +640,7 @@ const graphitiPlugin = {
             // If your session has many episodes and --limit is low, increase
             // --limit or use --json to retrieve all and filter externally.
             if (opts.sessionKey) {
-              eps = eps.filter((ep: any) => {
+              eps = eps.filter((ep: GraphitiEpisode) => {
                 try {
                   const prov = JSON.parse(ep.source_description ?? "");
                   return prov.session_key === opts.sessionKey;

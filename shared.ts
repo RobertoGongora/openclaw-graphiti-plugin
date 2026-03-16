@@ -76,14 +76,14 @@ export function sanitizeForCapture(text: string): string {
   // Strip conversation metadata JSON blocks: ```json\n{"schema":"openclaw.inbound_meta...}```
   t = t.replace(/```json\s*\n\s*\{["\s]*schema["\s]*:\s*"openclaw\.inbound_meta[\s\S]*?```/g, "");
 
-  // Strip sender metadata JSON blocks: ```json\n{"label":...,"id":...,"sender":...}```
-  t = t.replace(/```json\s*\n\s*\{["\s]*label[\s\S]*?sender[\s\S]*?```/g, "");
+  // Strip sender metadata JSON blocks containing both "label" and "sender" keys (order-independent)
+  t = t.replace(/```json\s*\n\s*\{(?=[\s\S]*?"label")(?=[\s\S]*?"sender")[\s\S]*?```/g, "");
 
   // Strip [Subagent Context] prefixed lines
   t = t.replace(/^\[Subagent Context\].*$/gm, "");
 
   // Strip leading timestamps like [Mon 2026-03-15 14:00 UTC]
-  t = t.replace(/^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+\w+\][ \t]*/gm, "");
+  t = t.replace(/^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+[A-Za-z]{2,5}\][ \t]*/gm, "");
 
   // Strip null bytes
   t = t.replace(/\u0000/g, "");

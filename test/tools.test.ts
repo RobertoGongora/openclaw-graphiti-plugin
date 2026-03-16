@@ -181,6 +181,38 @@ describe("tool execution", () => {
     expect(result.content[0].text).toContain("specify a UUID");
   });
 
+  test("graphiti_forget rejects query mode with type=episode", async () => {
+    const { default: plugin } = await import("../index.js");
+    const { api, tools } = createMockApi();
+    plugin.register(api as any);
+
+    const tool = tools.find((t) => t.opts.name === "graphiti_forget")!.tool;
+    const result = await tool.execute("call-f-ep-query", { query: "some episode", type: "episode" });
+
+    expect(result.details.deleted).toBe(false);
+    expect(result.details.reason).toBe("episode_query_not_supported");
+    expect(result.content[0].text).toContain("not supported");
+    expect(result.content[0].text).toContain("UUID");
+    // Should NOT have attempted a search
+    expect(lastRequest["/search"]).toBeUndefined();
+  });
+
+  test("graphiti_forget error response includes details object", async () => {
+    mockOverrides.searchStatus = 500;
+    const { default: plugin } = await import("../index.js");
+    const { api, tools } = createMockApi();
+    plugin.register(api as any);
+
+    const tool = tools.find((t) => t.opts.name === "graphiti_forget")!.tool;
+    const result = await tool.execute("call-f-err", { query: "test" });
+
+    expect(result.content[0].text).toContain("Graphiti forget failed");
+    expect(result.details).toBeDefined();
+    expect(result.details.deleted).toBe(false);
+    expect(result.details.reason).toBe("error");
+    expect(result.details.error).toBeDefined();
+  });
+
   test("graphiti_forget returns error when neither query nor uuid provided", async () => {
     const { default: plugin } = await import("../index.js");
     const { api, tools } = createMockApi();
