@@ -62,6 +62,8 @@ export type MockOverrides = {
   ingestBody?: Record<string, unknown>;
   searchStatus?: number;
   searchErrorBody?: string;
+  episodes?: any[];
+  episodesStatus?: number;
 };
 
 let server: http.Server;
@@ -173,8 +175,14 @@ export function startMockServer(): Promise<void> {
           group_id: url.pathname.split("/")[2],
           last_n: url.searchParams.get("last_n"),
         };
+        const epStatus = mockOverrides.episodesStatus ?? 200;
+        if (epStatus !== 200) {
+          res.writeHead(epStatus);
+          res.end(JSON.stringify({ detail: "episodes error" }));
+          return;
+        }
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify(SAMPLE_EPISODES));
+        res.end(JSON.stringify(mockOverrides.episodes ?? SAMPLE_EPISODES));
         return;
       }
 

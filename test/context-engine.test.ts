@@ -620,6 +620,49 @@ describe("GraphitiContextEngine", () => {
 
       expect(lastRequest["/messages"]).toBeUndefined();
     });
+
+    test("sanitizes summary content before ingestion", async () => {
+      const engine = createEngine();
+      const summaryWithNoise = [
+        "<graphiti-context>Recalled facts that should be stripped</graphiti-context>",
+        "[Mon 2026-03-15 14:00 UTC] Timestamped line that should be stripped",
+        "[Subagent Context] This metadata line should be stripped",
+        "The actual subagent finding about architecture and design patterns",
+      ].join("\n");
+
+      await engine.onSubagentEnded({
+        childSessionKey: "child-sanitize",
+        reason: "completed",
+        summary: summaryWithNoise,
+      });
+
+      const req = lastRequest["/messages"] as any;
+      expect(req).toBeDefined();
+      // Noise should be stripped
+      expect(req.messages[0].content).not.toContain("<graphiti-context>");
+      expect(req.messages[0].content).not.toContain("[Subagent Context]");
+      expect(req.messages[0].content).not.toContain("[Mon 2026-03-15");
+      // Actual content should survive
+      expect(req.messages[0].content).toContain("actual subagent finding");
+    });
+
+    test("sanitizes messages content before ingestion", async () => {
+      const engine = createEngine();
+      await engine.onSubagentEnded({
+        childSessionKey: "child-sanitize-msgs",
+        reason: "completed",
+        messages: [
+          { role: "user", content: "<graphiti-context>Old recalled facts</graphiti-context>\nInvestigate the performance issue in the API" },
+          { role: "assistant", content: "The bottleneck is in the database query layer due to missing indexes" },
+        ],
+      });
+
+      const req = lastRequest["/messages"] as any;
+      expect(req).toBeDefined();
+      expect(req.messages[0].content).not.toContain("<graphiti-context>");
+      expect(req.messages[0].content).toContain("performance issue");
+      expect(req.messages[0].content).toContain("bottleneck");
+    });
   });
 
   // ========================================================================

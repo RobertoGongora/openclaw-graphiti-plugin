@@ -248,11 +248,20 @@ const graphitiPlugin = {
           if (!query && !uuid) {
             return {
               content: [{ type: "text", text: "Please provide either a query or uuid parameter." }],
+              details: { deleted: false, reason: "missing_params" },
             };
           }
 
           try {
             if (uuid) {
+              // Validate UUID format before sending to the server (defense-in-depth for destructive endpoint)
+              const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+              if (!UUID_RE.test(uuid)) {
+                return {
+                  content: [{ type: "text", text: `Invalid UUID format: "${uuid}". Expected format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` }],
+                  details: { deleted: false, reason: "invalid_uuid", uuid },
+                };
+              }
               if (type === "episode") {
                 await client.deleteEpisode(uuid);
               } else {
@@ -386,6 +395,7 @@ const graphitiPlugin = {
           } catch (err) {
             return {
               content: [{ type: "text", text: `Graphiti episodes failed: ${err instanceof Error ? err.message : String(err)}` }],
+              details: { count: 0, reason: "error", error: err instanceof Error ? err.message : String(err) },
             };
           }
         },

@@ -484,14 +484,14 @@ export class GraphitiContextEngine {
 
       let episode: string;
       if (hasSummary) {
-        episode = params.summary!.slice(0, 12000);
+        episode = sanitizeForCapture(params.summary!).slice(0, 12000);
       } else {
         const texts = extractTextsFromMessages(params.messages!);
         if (texts.length === 0) {
           this.debugLog.log("ce-subagentEnded", { child: params.childSessionKey, action: "no_content" });
           return;
         }
-        episode = texts.join("\n\n").slice(0, 12000);
+        episode = sanitizeForCapture(texts.join("\n\n")).slice(0, 12000);
       }
 
       await this.client.ingest([{

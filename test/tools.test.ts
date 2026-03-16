@@ -133,12 +133,13 @@ describe("tool execution", () => {
     const { api, tools } = createMockApi();
     plugin.register(api as any);
 
+    const validUuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
     const tool = tools.find((t) => t.opts.name === "graphiti_forget")!.tool;
-    const result = await tool.execute("call-f1", { uuid: "fact-001", type: "fact" });
+    const result = await tool.execute("call-f1", { uuid: validUuid, type: "fact" });
 
-    expect(result.content[0].text).toContain("Deleted fact fact-001");
+    expect(result.content[0].text).toContain(`Deleted fact ${validUuid}`);
     expect(result.details.deleted).toBe(true);
-    expect(lastRequest["/entity-edge"]).toEqual({ uuid: "fact-001" });
+    expect(lastRequest["/entity-edge"]).toEqual({ uuid: validUuid });
   });
 
   test("graphiti_forget deletes episode by UUID", async () => {
@@ -146,12 +147,13 @@ describe("tool execution", () => {
     const { api, tools } = createMockApi();
     plugin.register(api as any);
 
+    const validUuid = "b2c3d4e5-f6a7-8901-bcde-f12345678901";
     const tool = tools.find((t) => t.opts.name === "graphiti_forget")!.tool;
-    const result = await tool.execute("call-f2", { uuid: "ep-001", type: "episode" });
+    const result = await tool.execute("call-f2", { uuid: validUuid, type: "episode" });
 
-    expect(result.content[0].text).toContain("Deleted episode ep-001");
+    expect(result.content[0].text).toContain(`Deleted episode ${validUuid}`);
     expect(result.details.deleted).toBe(true);
-    expect(lastRequest["/episode"]).toEqual({ uuid: "ep-001" });
+    expect(lastRequest["/episode"]).toEqual({ uuid: validUuid });
   });
 
   test("graphiti_forget auto-deletes single search match", async () => {
@@ -222,6 +224,36 @@ describe("tool execution", () => {
     const result = await tool.execute("call-f5", {});
 
     expect(result.content[0].text).toContain("provide either");
+    expect(result.details).toBeDefined();
+    expect(result.details.deleted).toBe(false);
+    expect(result.details.reason).toBe("missing_params");
+  });
+
+  test("graphiti_forget rejects invalid UUID format", async () => {
+    const { default: plugin } = await import("../index.js");
+    const { api, tools } = createMockApi();
+    plugin.register(api as any);
+
+    const tool = tools.find((t) => t.opts.name === "graphiti_forget")!.tool;
+    const result = await tool.execute("call-f-bad-uuid", { uuid: "../admin", type: "fact" });
+
+    expect(result.content[0].text).toContain("Invalid UUID format");
+    expect(result.details.deleted).toBe(false);
+    expect(result.details.reason).toBe("invalid_uuid");
+    // Should NOT have sent a DELETE request
+    expect(lastRequest["/entity-edge"]).toBeUndefined();
+  });
+
+  test("graphiti_forget accepts valid UUID format", async () => {
+    const { default: plugin } = await import("../index.js");
+    const { api, tools } = createMockApi();
+    plugin.register(api as any);
+
+    const tool = tools.find((t) => t.opts.name === "graphiti_forget")!.tool;
+    const result = await tool.execute("call-f-good-uuid", { uuid: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", type: "fact" });
+
+    expect(result.details.deleted).toBe(true);
+    expect(lastRequest["/entity-edge"]).toEqual({ uuid: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" });
   });
 
   // -- graphiti_episodes --
@@ -238,6 +270,30 @@ describe("tool execution", () => {
     expect(result.details.count).toBe(1);
   });
 
+  test("graphiti_episodes error response includes details object", async () => {
+    // Force the episodes endpoint to return 500 — the client returns []
+    // for HTTP errors, so the tool returns "No episodes found" (the empty path).
+    // This verifies the error path IS reachable by using a non-iterable value.
+    // Set episodes to an object (not array) — client passes it through, then
+    // eps.filter() throws because a plain object has no .filter method.
+    mockOverrides.episodes = { broken: true } as any;
+
+    const { default: plugin } = await import("../index.js");
+    const { api, tools } = createMockApi();
+    plugin.register(api as any);
+
+    const tool = tools.find((t) => t.opts.name === "graphiti_episodes")!.tool;
+    // Use sessionKey to trigger the filter path which calls .filter() on the object
+    const result = await tool.execute("call-ep-err", { sessionKey: "trigger-error" });
+
+    // The error should be caught and return a details object
+    expect(result.content[0].text).toContain("Graphiti episodes failed");
+    expect(result.details).toBeDefined();
+    expect(result.details.count).toBe(0);
+    expect(result.details.reason).toBe("error");
+    expect(result.details.error).toBeDefined();
+  });
+
   test("graphiti_episodes filters by sessionKey", async () => {
     const { default: plugin } = await import("../index.js");
     const { api, tools } = createMockApi();
@@ -248,5 +304,54 @@ describe("tool execution", () => {
 
     expect(result.content[0].text).toContain("No episodes found");
     expect(result.details.count).toBe(0);
+  });
+
+  test("graphiti_episodes sessionKey compensation preserves matching episodes beyond initial limit", async () => {
+    // Simulate: limit=2, but the matching episode is at position 4 (beyond limit).
+    // The fetch-more heuristic (limit * 5 = 10) should fetch enough to find it.
+    const targetSessionKey = "target-session-abc";
+    mockOverrides.episodes = [
+      {
+        uuid: "ep-unrelated-1", name: "unrelated-1", created_at: "2024-01-15T10:30:00+00:00",
+        source_description: JSON.stringify({ event: "after_turn", session_key: "other-session-1" }),
+        content: "Unrelated episode 1",
+      },
+      {
+        uuid: "ep-unrelated-2", name: "unrelated-2", created_at: "2024-01-15T10:31:00+00:00",
+        source_description: JSON.stringify({ event: "after_turn", session_key: "other-session-2" }),
+        content: "Unrelated episode 2",
+      },
+      {
+        uuid: "ep-unrelated-3", name: "unrelated-3", created_at: "2024-01-15T10:32:00+00:00",
+        source_description: JSON.stringify({ event: "after_turn", session_key: "other-session-3" }),
+        content: "Unrelated episode 3",
+      },
+      {
+        uuid: "ep-target-1", name: "target-episode", created_at: "2024-01-15T10:33:00+00:00",
+        source_description: JSON.stringify({ event: "after_turn", session_key: targetSessionKey }),
+        content: "This is the matching episode beyond initial limit",
+      },
+      {
+        uuid: "ep-target-2", name: "target-episode-2", created_at: "2024-01-15T10:34:00+00:00",
+        source_description: JSON.stringify({ event: "compact", session_key: targetSessionKey }),
+        content: "Second matching episode",
+      },
+    ];
+
+    const { default: plugin } = await import("../index.js");
+    const { api, tools } = createMockApi();
+    plugin.register(api as any);
+
+    const tool = tools.find((t) => t.opts.name === "graphiti_episodes")!.tool;
+    const result = await tool.execute("call-ep-compensation", { limit: 2, sessionKey: targetSessionKey });
+
+    // Both matching episodes should be found (compensation fetched more than limit)
+    expect(result.details.count).toBe(2);
+    expect(result.content[0].text).toContain("2 episode(s)");
+    expect(result.content[0].text).toContain("target-episode");
+
+    // Verify the server was asked for more than limit (limit * 5 = 10)
+    const episodesReq = lastRequest["/episodes"] as any;
+    expect(Number(episodesReq.last_n)).toBe(10); // limit * 5
   });
 });

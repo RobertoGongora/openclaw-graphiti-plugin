@@ -6,7 +6,9 @@
 
 - **`graphiti_forget` tool**: Delete facts or episodes from the knowledge graph.
   Supports direct deletion by UUID (`type: "fact" | "episode"`) or search-then-delete
-  by query (auto-deletes single matches, lists candidates for multiple matches).
+  by query. Note: query-based search currently supports facts only — to delete an
+  episode, use its UUID directly. Auto-deletes single fact matches and lists
+  candidates for multiple matches. Includes UUID format validation for defense-in-depth.
   New client methods: `deleteEdge(uuid)` and `deleteEpisode(uuid)`.
 
 - **`graphiti_episodes` tool**: List recent ingestion records as an agent tool.
