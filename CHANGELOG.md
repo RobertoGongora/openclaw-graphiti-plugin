@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **`graphiti_episodes` UUID display**: Episode output now includes `**uuid: ...**`
+  prefix for each episode, making it easier to use with `graphiti_forget`. Unnamed
+  episodes show `(unnamed)` instead of duplicating the UUID.
+
 ## [0.7.0-beta.1] — 2026-03-22
 
 > Beta release for P1 quick wins.
