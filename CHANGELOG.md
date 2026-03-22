@@ -1,6 +1,8 @@
 # Changelog
 
-## [Unreleased]
+## [0.7.0-beta.1] — 2026-03-22
+
+> Beta release for P1 quick wins.
 
 ### Added
 
