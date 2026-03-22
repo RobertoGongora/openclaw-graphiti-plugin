@@ -385,7 +385,7 @@ const graphitiPlugin = {
               }
               const age = ep.created_at ? formatTimeAgo(ep.created_at) : "";
               const content = ep.content ? ep.content.slice(0, 100) : "";
-              return `${i + 1}. **${ep.name ?? ep.uuid}** ${desc} (${age})${content ? `\n   ${content}` : ""}`;
+              return `${i + 1}. **uuid: ${ep.uuid}** ${ep.name ?? ep.uuid} ${desc} (${age})${content ? `\n   ${content}` : ""}`;
             });
 
             return {

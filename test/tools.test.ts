@@ -267,6 +267,7 @@ describe("tool execution", () => {
     const result = await tool.execute("call-ep1", {});
 
     expect(result.content[0].text).toContain("1 episode(s)");
+    expect(result.content[0].text).toContain("**uuid: ep-001**");
     expect(result.details.count).toBe(1);
   });
 
@@ -348,6 +349,8 @@ describe("tool execution", () => {
     // Both matching episodes should be found (compensation fetched more than limit)
     expect(result.details.count).toBe(2);
     expect(result.content[0].text).toContain("2 episode(s)");
+    expect(result.content[0].text).toContain("**uuid: ep-target-1**");
+    expect(result.content[0].text).toContain("**uuid: ep-target-2**");
     expect(result.content[0].text).toContain("target-episode");
 
     // Verify the server was asked for more than limit (limit * 5 = 10)
