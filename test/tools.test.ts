@@ -268,6 +268,33 @@ describe("tool execution", () => {
 
     expect(result.content[0].text).toContain("1 episode(s)");
     expect(result.content[0].text).toContain("**uuid: ep-001**");
+    expect(result.content[0].text).toContain("**session-reset-1700000000000**");
+    expect(result.details.count).toBe(1);
+  });
+
+  test("graphiti_episodes unnamed episode does not duplicate UUID", async () => {
+    mockOverrides.episodes = [
+      {
+        uuid: "ep-unnamed-1",
+        created_at: "2024-01-15T10:30:00+00:00",
+        source_description: JSON.stringify({ event: "after_turn", session_key: "sess-1" }),
+        content: "Some content",
+      },
+    ];
+
+    const { default: plugin } = await import("../index.js");
+    const { api, tools } = createMockApi();
+    plugin.register(api as any);
+
+    const tool = tools.find((t) => t.opts.name === "graphiti_episodes")!.tool;
+    const result = await tool.execute("call-ep-unnamed", {});
+
+    expect(result.content[0].text).toContain("**uuid: ep-unnamed-1**");
+    expect(result.content[0].text).toContain("(unnamed)");
+    // UUID should NOT appear twice (once in prefix, once as name fallback)
+    const text = result.content[0].text;
+    const uuidOccurrences = text.split("ep-unnamed-1").length - 1;
+    expect(uuidOccurrences).toBe(1);
     expect(result.details.count).toBe(1);
   });
 
