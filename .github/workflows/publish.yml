@@ -31,6 +31,14 @@ jobs:
         run: npm test
 
       - name: Publish to npm
-        run: npm publish --access public
+        run: |
+          VERSION=$(node -e "console.log(require('./package.json').version)")
+          if [[ "$VERSION" =~ -(beta|alpha|rc|next) ]]; then
+            # Prerelease versions need an explicit tag
+            TAG=$(echo "$VERSION" | sed -E 's/.*-([a-z]+).*/\1/')
+            npm publish --access public --tag "$TAG"
+          else
+            npm publish --access public
+          fi
         # --provenance is automatic with Trusted Publishing from GHA
         # No NODE_AUTH_TOKEN needed — OIDC handles auth
