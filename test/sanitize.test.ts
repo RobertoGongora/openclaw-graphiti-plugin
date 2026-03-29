@@ -106,4 +106,14 @@ describe("sanitizeForCapture", () => {
     const input = "  \n\nhello\n\n  ";
     expect(sanitizeForCapture(input)).toBe("hello");
   });
+
+  test("strips <graphiti-continuity> blocks", () => {
+    const input = "before\n<graphiti-continuity>\nRecent session context:\nUser: hello\nAssistant: hi\n</graphiti-continuity>\nafter";
+    expect(sanitizeForCapture(input)).toBe("before\n\nafter");
+  });
+
+  test("strips multiline <graphiti-continuity> blocks", () => {
+    const input = "<graphiti-continuity>\nRecent session context (recovered from transcript):\nUser: What about the plan?\nAssistant: We discussed the architecture.\n</graphiti-continuity>";
+    expect(sanitizeForCapture(input)).toBe("");
+  });
 });

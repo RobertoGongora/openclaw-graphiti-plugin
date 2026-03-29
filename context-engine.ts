@@ -9,7 +9,7 @@
 import { createRequire } from "node:module";
 import type { GraphitiClient, GraphitiMessage } from "./client.js";
 import type { DebugLog } from "./debug-log.js";
-import { buildEpisodeName, buildProvenance, extractTextContent, extractTextsFromMessages, formatFactsAsContext, sanitizeForCapture } from "./shared.js";
+import { buildEpisodeName, buildProvenance, extractTextContent, extractTextsFromMessages, formatContinuityBlock, formatFactsAsContext, hasDeicticReferences, isContinuityGap, readSessionFileTail, sanitizeForCapture } from "./shared.js";
 
 const _require = createRequire(import.meta.url);
 const PLUGIN_VERSION: string = (_require("./package.json") as any).version;
@@ -84,6 +84,10 @@ export class GraphitiContextEngine {
   /** Cached healthy() result with TTL to avoid redundant HTTP round-trips. */
   private _healthCache: { result: boolean; ts: number } | null = null;
   private static readonly HEALTH_CACHE_TTL_MS = 15_000;
+
+  /** Smart autoRecall state — tracks lifecycle events for continuity gap detection. */
+  private _lastEvent: string | null = null;
+  private _sessionFile: string | null = null;
 
   constructor(
     private client: GraphitiClient,
@@ -160,8 +164,15 @@ export class GraphitiContextEngine {
   }
 
   /**
-   * Assemble context for the agent by recalling relevant facts.
-   * Uses the richer /get-memory endpoint with the full message array.
+   * Assemble context for the agent via Smart autoRecall.
+   *
+   * Only fires when a continuity gap is detected (bootstrap, compaction,
+   * few messages) or the user prompt contains deictic references to prior
+   * context. Normal turns with sufficient history get no injection.
+   *
+   * Two-stage pipeline:
+   *   A. Continuity recovery from session transcript (JSONL file tail)
+   *   B. Targeted semantic recall via /get-memory
    */
   async assemble(params: {
     sessionId: string;
@@ -178,57 +189,113 @@ export class GraphitiContextEngine {
         return passThrough;
       }
 
-      // Convert the last N messages to GraphitiMessage format for /get-memory
-      const recentMessages = params.messages.slice(-10);
-      const graphitiMessages: GraphitiMessage[] = [];
+      const lastUserText = this.extractLastUserText(params.messages);
+      const gapDetected = isContinuityGap(params.messages.length, { recentEvent: this._lastEvent });
+      const deicticDetected = !!lastUserText && hasDeicticReferences(lastUserText);
 
-      for (const msg of recentMessages) {
-        if (!msg || typeof msg !== "object") continue;
-        const m = msg as Record<string, unknown>;
-        const role = m.role as string;
-        if (role !== "user" && role !== "assistant") continue;
-
-        const text = extractTextContent(m.content, 1);
-        if (!text) continue;
-
-        graphitiMessages.push({
-          content: text.slice(0, 2000),
-          role_type: role as "user" | "assistant",
-          role,
-        });
-      }
-
-      if (graphitiMessages.length === 0) {
-        this.debugLog.log("ce-assemble", { skipped: true, reason: "no_messages" });
+      if (!gapDetected && !deicticDetected) {
+        this.debugLog.log("ce-assemble", { skipped: true, reason: "no_recovery_needed" });
         return passThrough;
       }
 
-      // TODO: /get-memory only accepts single group_id — multi-group recall needs server changes
+      // Consume the one-shot event flag
+      const triggerEvent = this._lastEvent;
+      this._lastEvent = null;
       const maxFacts = this.cfg.recallMaxFacts ?? 10;
-      const facts = await this.client.getMemory(graphitiMessages, maxFacts);
 
-      if (facts.length === 0) {
-        this.debugLog.log("ce-assemble", { count: 0, ms: Date.now() - start });
+      // Stage A: recover continuity from session transcript
+      let continuityBlock: string | null = null;
+      let continuityTail: string | null = null;
+      if (this._sessionFile) {
+        continuityTail = await readSessionFileTail(this._sessionFile);
+        if (continuityTail) {
+          continuityBlock = formatContinuityBlock(continuityTail);
+        }
+      }
+
+      // Stage B: semantic recall — use recovered continuity as the query
+      // so facts are relevant to what was actually discussed, not to the
+      // possibly-empty current message window
+      let semanticBlock: string | null = null;
+      if (continuityTail) {
+        const query = continuityTail.slice(-2000);
+        const facts = await this.client.search(query, maxFacts);
+        if (facts.length > 0) {
+          semanticBlock = formatFactsAsContext(facts);
+        }
+      } else {
+        const graphitiMessages = this.buildGraphitiMessages(params.messages);
+        if (graphitiMessages.length > 0) {
+          const facts = await this.client.getMemory(graphitiMessages, maxFacts);
+          if (facts.length > 0) {
+            semanticBlock = formatFactsAsContext(facts);
+          }
+        }
+      }
+
+      // --- Combine ---
+      const parts = [continuityBlock, semanticBlock].filter(Boolean) as string[];
+      if (parts.length === 0) {
+        this.debugLog.log("ce-assemble", { recovery: true, trigger: triggerEvent ?? "deictic", empty: true, ms: Date.now() - start });
         return passThrough;
       }
 
-      const systemPromptAddition = formatFactsAsContext(facts);
-
+      const systemPromptAddition = parts.join("\n\n");
       const estimatedTokens = Math.ceil(systemPromptAddition.length / 4);
+      const trigger = triggerEvent ?? (deicticDetected ? "deictic" : "gap");
 
-      this.logger?.info?.(`graphiti: assembled ${facts.length} facts for context`);
-      this.debugLog.log("ce-assemble", { count: facts.length, tokens: estimatedTokens, ms: Date.now() - start });
+      this.logger?.info?.(`graphiti: smart autoRecall fired (trigger=${trigger}, continuity=${!!continuityBlock}, facts=${semanticBlock ? "yes" : "none"})`);
+      this.debugLog.log("ce-assemble", {
+        recovery: true,
+        trigger,
+        hasContinuity: !!continuityBlock,
+        factCount: semanticBlock ? (semanticBlock.match(/^- \*\*/gm)?.length ?? 0) : 0,
+        tokens: estimatedTokens,
+        ms: Date.now() - start,
+      });
 
-      return {
-        messages: params.messages,
-        systemPromptAddition,
-        estimatedTokens,
-      };
+      return { messages: params.messages, systemPromptAddition, estimatedTokens };
     } catch (err) {
       this.logger?.warn(`graphiti: assemble failed: ${String(err)}`);
       this.debugLog.log("ce-assemble", { error: String(err), ms: Date.now() - start });
       return passThrough;
     }
+  }
+
+  /** Convert raw messages to GraphitiMessage format for /get-memory. */
+  private buildGraphitiMessages(messages: unknown[]): GraphitiMessage[] {
+    const recentMessages = messages.slice(-10);
+    const graphitiMessages: GraphitiMessage[] = [];
+
+    for (const msg of recentMessages) {
+      if (!msg || typeof msg !== "object") continue;
+      const m = msg as Record<string, unknown>;
+      const role = m.role as string;
+      if (role !== "user" && role !== "assistant") continue;
+
+      const text = extractTextContent(m.content, 1);
+      if (!text) continue;
+
+      graphitiMessages.push({
+        content: text.slice(0, 2000),
+        role_type: role as "user" | "assistant",
+        role,
+      });
+    }
+
+    return graphitiMessages;
+  }
+
+  /** Extract the text of the last user message for deictic reference detection. */
+  private extractLastUserText(messages: unknown[]): string | null {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (!msg || typeof msg !== "object") continue;
+      const m = msg as Record<string, unknown>;
+      if (m.role !== "user") continue;
+      return extractTextContent(m.content, 1);
+    }
+    return null;
   }
 
   /**
@@ -276,11 +343,13 @@ export class GraphitiContextEngine {
           source_description: buildProvenance(this.groupId, { event: "compact", session_key: params.sessionId }),
         }]);
 
+        this._lastEvent = "compact";
         this.debugLog.log("ce-compact", { action: "ingested", texts: texts.length, compacted: true });
         return { ok: true, compacted: true };
       }
 
       if (params.legacyParams?.bridge) {
+        this._lastEvent = "compact";
         this.debugLog.log("ce-compact", { action: "legacy_bridge" });
         await params.legacyParams.bridge.compact();
         return { ok: true, compacted: true };
@@ -361,6 +430,9 @@ export class GraphitiContextEngine {
     isHeartbeat?: boolean;
     tokenBudget?: number;
   }): Promise<void> {
+    // Keep session file reference fresh for Smart autoRecall
+    if (params.sessionFile) this._sessionFile = params.sessionFile;
+
     if (this.cfg.autoCapture === false) {
       this.debugLog.log("ce-afterTurn", { skipped: true, reason: "autoCapture_disabled" });
       return;
@@ -432,18 +504,23 @@ export class GraphitiContextEngine {
   }
 
   /**
-   * Bootstrap: health-check the server and report graph population.
+   * Bootstrap: health-check the server, report graph population,
+   * and prime Smart autoRecall state for continuity recovery.
    */
-  async bootstrap(_params: {
+  async bootstrap(params: {
     sessionId: string;
     sessionFile?: string;
   }): Promise<BootstrapResult> {
     try {
+      this._sessionFile = params.sessionFile ?? null;
+
       const healthy = await this.cachedHealthy();
       if (!healthy) {
         this.debugLog.log("ce-bootstrap", { healthy: false });
         return { bootstrapped: false, reason: "server-unhealthy" };
       }
+
+      this._lastEvent = "bootstrap";
 
       const stats = await this.client.episodeCount();
       this.debugLog.log("ce-bootstrap", { healthy: true, episodes: stats.count });

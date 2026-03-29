@@ -5,7 +5,10 @@
  * and verifies each method against the mock HTTP server.
  */
 
-import { describe, test, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { describe, test, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import {
   startMockServer,
   stopMockServer,
@@ -17,7 +20,7 @@ import {
 import { GraphitiClient } from "../client.js";
 import { NOOP_LOG } from "../debug-log.js";
 import { GraphitiContextEngine } from "../context-engine.js";
-import { formatFactsAsContext } from "../shared.js";
+import { formatFactsAsContext, isContinuityGap, hasDeicticReferences, readSessionFileTail, formatContinuityBlock } from "../shared.js";
 import { createRequire } from "node:module";
 
 const _require = createRequire(import.meta.url);
@@ -946,6 +949,439 @@ describe("GraphitiContextEngine", () => {
       expect(result).toContain("</graphiti-context>");
       expect(result).toContain("- **WORKS_AT**: Alice works at Acme Corp");
       expect(result).toContain("- **PREFERS**: User prefers dark mode");
+    });
+  });
+
+  // ========================================================================
+  // Smart autoRecall
+  // ========================================================================
+
+  describe("Smart autoRecall", () => {
+    let tmpDir: string;
+
+    beforeEach(async () => {
+      tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "graphiti-smart-recall-"));
+    });
+
+    afterEach(async () => {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    });
+
+    function createSessionFile(messages: Array<{ role: string; content: string }>): string {
+      const filePath = path.join(tmpDir, "session.jsonl");
+      const lines = [
+        JSON.stringify({ type: "session", version: 2, id: "test-session", timestamp: new Date().toISOString() }),
+        ...messages.map((m) => JSON.stringify({ type: "message", message: { role: m.role, content: m.content } })),
+      ];
+      // Write synchronously for simplicity in tests — file is small
+      require("node:fs").writeFileSync(filePath, lines.join("\n"));
+      return filePath;
+    }
+
+    test("fires after bootstrap with session file — produces both continuity and semantic blocks", async () => {
+      const sessionFile = createSessionFile([
+        { role: "user", content: "What is the architecture of the new feature?" },
+        { role: "assistant", content: "The feature uses a modular plugin architecture with event-driven communication." },
+        { role: "user", content: "How does the session file work?" },
+        { role: "assistant", content: "The session file is a JSONL format that records all conversation history." },
+      ]);
+
+      const engine = createEngine();
+      await engine.bootstrap({ sessionId: "sess-1", sessionFile });
+
+      const result = await engine.assemble({
+        sessionId: "sess-1",
+        messages: [{ role: "user", content: "Tell me about Alice" }],
+      });
+
+      expect(result.systemPromptAddition).toBeDefined();
+      expect(result.systemPromptAddition).toContain("<graphiti-continuity>");
+      expect(result.systemPromptAddition).toContain("</graphiti-continuity>");
+      expect(result.systemPromptAddition).toContain("architecture");
+      expect(result.systemPromptAddition).toContain("JSONL format");
+      // Semantic block should also be present
+      expect(result.systemPromptAddition).toContain("<graphiti-context>");
+      expect(result.systemPromptAddition).toContain("</graphiti-context>");
+    });
+
+    test("does not fire when many messages and no deictic refs", async () => {
+      const sessionFile = createSessionFile([
+        { role: "user", content: "Old conversation about something" },
+        { role: "assistant", content: "Old response about the topic" },
+      ]);
+
+      const engine = createEngine();
+      await engine.bootstrap({ sessionId: "sess-1", sessionFile });
+
+      // Clear the bootstrap event by consuming it
+      await engine.assemble({
+        sessionId: "sess-1",
+        messages: [{ role: "user", content: "First question after bootstrap" }],
+      });
+
+      // Now a normal turn with many messages — should NOT fire
+      const result = await engine.assemble({
+        sessionId: "sess-1",
+        messages: [
+          { role: "user", content: "First message in the conversation about testing" },
+          { role: "assistant", content: "Response about testing methodology and best practices" },
+          { role: "user", content: "Second question about the deployment pipeline" },
+          { role: "assistant", content: "Response about the CI/CD pipeline configuration" },
+          { role: "user", content: "What tools do we use for monitoring?" },
+        ],
+      });
+
+      expect(result.systemPromptAddition).toBeUndefined();
+    });
+
+    test("fires on deictic references even with sufficient messages", async () => {
+      const sessionFile = createSessionFile([
+        { role: "user", content: "We were discussing the migration strategy for the database" },
+        { role: "assistant", content: "The migration plan involves three phases with rollback support" },
+      ]);
+
+      const engine = createEngine();
+      await engine.bootstrap({ sessionId: "sess-1", sessionFile });
+
+      // Consume bootstrap event
+      await engine.assemble({
+        sessionId: "sess-1",
+        messages: [{ role: "user", content: "First question after bootstrap" }],
+      });
+
+      // Many messages but deictic reference — should fire
+      const result = await engine.assemble({
+        sessionId: "sess-1",
+        messages: [
+          { role: "user", content: "First message about the project setup" },
+          { role: "assistant", content: "The project uses TypeScript with vitest for testing" },
+          { role: "user", content: "Second question about dependencies" },
+          { role: "assistant", content: "We use Neo4j for the graph database backend" },
+          { role: "user", content: "Continue where we left off with the migration plan" },
+        ],
+      });
+
+      expect(result.systemPromptAddition).toBeDefined();
+      expect(result.systemPromptAddition).toContain("<graphiti-continuity>");
+      expect(result.systemPromptAddition).toContain("migration");
+    });
+
+    test("no session file — skips continuity block, still runs semantic", async () => {
+      const engine = createEngine();
+      // Bootstrap WITHOUT session file
+      await engine.bootstrap({ sessionId: "sess-1" });
+
+      const result = await engine.assemble({
+        sessionId: "sess-1",
+        messages: [{ role: "user", content: "Tell me about Alice" }],
+      });
+
+      expect(result.systemPromptAddition).toBeDefined();
+      // No continuity block since no session file
+      expect(result.systemPromptAddition).not.toContain("<graphiti-continuity>");
+      // Semantic block should still be present
+      expect(result.systemPromptAddition).toContain("<graphiti-context>");
+    });
+
+    test("one-shot: _lastEvent cleared after first recovery", async () => {
+      const sessionFile = createSessionFile([
+        { role: "user", content: "Previous conversation about the system design" },
+        { role: "assistant", content: "The system uses event-driven architecture with plugins" },
+      ]);
+
+      const engine = createEngine();
+      await engine.bootstrap({ sessionId: "sess-1", sessionFile });
+
+      // First assemble — bootstrap event triggers recovery
+      const result1 = await engine.assemble({
+        sessionId: "sess-1",
+        messages: [{ role: "user", content: "Tell me about Alice" }],
+      });
+      expect(result1.systemPromptAddition).toBeDefined();
+      expect(result1.systemPromptAddition).toContain("<graphiti-continuity>");
+
+      // Second assemble with few messages but no event — gap by message count still works
+      const result2 = await engine.assemble({
+        sessionId: "sess-1",
+        messages: [{ role: "user", content: "What else is there?" }],
+      });
+      // Still fires because messageCount <= 3 (gap heuristic), but no event flag
+      expect(result2.systemPromptAddition).toBeDefined();
+    });
+
+    test("fires after compact", async () => {
+      const sessionFile = createSessionFile([
+        { role: "user", content: "Discussion about the authentication system redesign" },
+        { role: "assistant", content: "The new auth system will use JWT with refresh tokens" },
+      ]);
+
+      const engine = createEngine();
+      await engine.bootstrap({ sessionId: "sess-1", sessionFile });
+
+      // Consume bootstrap event
+      await engine.assemble({
+        sessionId: "sess-1",
+        messages: [{ role: "user", content: "First question after bootstrap" }],
+      });
+
+      // Compact
+      await engine.compact({
+        sessionId: "sess-1",
+        messages: [
+          { role: "user", content: "Some messages being compacted from the conversation" },
+          { role: "assistant", content: "Responses that were part of the compacted segment" },
+        ],
+      });
+
+      // Next assemble after compact should trigger recovery
+      const result = await engine.assemble({
+        sessionId: "sess-1",
+        messages: [{ role: "user", content: "What were we discussing about auth?" }],
+      });
+
+      expect(result.systemPromptAddition).toBeDefined();
+      expect(result.systemPromptAddition).toContain("<graphiti-continuity>");
+      expect(result.systemPromptAddition).toContain("authentication");
+    });
+
+    test("afterTurn keeps session file reference fresh", async () => {
+      const engine = createEngine();
+      await engine.bootstrap({ sessionId: "sess-1" });
+
+      // Consume bootstrap event
+      await engine.assemble({
+        sessionId: "sess-1",
+        messages: [{ role: "user", content: "First question after bootstrap" }],
+      });
+
+      // afterTurn provides the session file
+      const sessionFile = createSessionFile([
+        { role: "user", content: "Important context about the API redesign project" },
+        { role: "assistant", content: "The API will use GraphQL instead of REST endpoints" },
+      ]);
+
+      await engine.afterTurn({
+        sessionId: "sess-1",
+        sessionFile,
+        messages: [
+          { role: "user", content: "New question about the project architecture and design" },
+          { role: "assistant", content: "New answer about the system patterns and conventions" },
+        ],
+        prePromptMessageCount: 0,
+      });
+
+      // Compact to trigger recovery on next assemble
+      await engine.compact({
+        sessionId: "sess-1",
+        messages: [
+          { role: "user", content: "Messages being compacted from the session history" },
+          { role: "assistant", content: "Responses included in the compaction cycle" },
+        ],
+      });
+
+      const result = await engine.assemble({
+        sessionId: "sess-1",
+        messages: [{ role: "user", content: "What about the API?" }],
+      });
+
+      expect(result.systemPromptAddition).toBeDefined();
+      expect(result.systemPromptAddition).toContain("<graphiti-continuity>");
+      expect(result.systemPromptAddition).toContain("GraphQL");
+    });
+
+    test("session file with only metadata and no messages returns semantic-only", async () => {
+      const filePath = path.join(tmpDir, "empty-session.jsonl");
+      const lines = [
+        JSON.stringify({ type: "session", version: 2, id: "test" }),
+        JSON.stringify({ type: "custom", customType: "model-snapshot", data: {} }),
+      ];
+      require("node:fs").writeFileSync(filePath, lines.join("\n"));
+
+      const engine = createEngine();
+      await engine.bootstrap({ sessionId: "sess-1", sessionFile: filePath });
+
+      const result = await engine.assemble({
+        sessionId: "sess-1",
+        messages: [{ role: "user", content: "Tell me about Alice" }],
+      });
+
+      expect(result.systemPromptAddition).toBeDefined();
+      expect(result.systemPromptAddition).not.toContain("<graphiti-continuity>");
+      expect(result.systemPromptAddition).toContain("<graphiti-context>");
+    });
+  });
+
+  // ========================================================================
+  // isContinuityGap (unit tests)
+  // ========================================================================
+
+  describe("isContinuityGap", () => {
+    test("returns true for messageCount below threshold", () => {
+      expect(isContinuityGap(0)).toBe(true);
+      expect(isContinuityGap(1)).toBe(true);
+      expect(isContinuityGap(2)).toBe(true);
+      expect(isContinuityGap(3)).toBe(true);
+    });
+
+    test("returns false for messageCount above threshold", () => {
+      expect(isContinuityGap(4)).toBe(false);
+      expect(isContinuityGap(10)).toBe(false);
+    });
+
+    test("returns true for bootstrap event regardless of count", () => {
+      expect(isContinuityGap(100, { recentEvent: "bootstrap" })).toBe(true);
+    });
+
+    test("returns true for compact event regardless of count", () => {
+      expect(isContinuityGap(100, { recentEvent: "compact" })).toBe(true);
+    });
+
+    test("respects custom threshold", () => {
+      expect(isContinuityGap(5, { threshold: 5 })).toBe(true);
+      expect(isContinuityGap(6, { threshold: 5 })).toBe(false);
+    });
+
+    test("null recentEvent does not trigger", () => {
+      expect(isContinuityGap(10, { recentEvent: null })).toBe(false);
+    });
+  });
+
+  // ========================================================================
+  // hasDeicticReferences (unit tests)
+  // ========================================================================
+
+  describe("hasDeicticReferences", () => {
+    test("detects 'as I mentioned'", () => {
+      expect(hasDeicticReferences("As I mentioned earlier, the API needs refactoring")).toBe(true);
+    });
+
+    test("detects 'continue'", () => {
+      expect(hasDeicticReferences("continue with the implementation")).toBe(true);
+    });
+
+    test("detects 'where we left off'", () => {
+      expect(hasDeicticReferences("pick up where we left off")).toBe(true);
+    });
+
+    test("detects 'that approach'", () => {
+      expect(hasDeicticReferences("let's use that approach")).toBe(true);
+    });
+
+    test("detects 'go on'", () => {
+      expect(hasDeicticReferences("go on with the plan")).toBe(true);
+    });
+
+    test("detects 'back to the'", () => {
+      expect(hasDeicticReferences("back to the original question")).toBe(true);
+    });
+
+    test("does not match normal prompts", () => {
+      expect(hasDeicticReferences("What is the architecture of this system?")).toBe(false);
+      expect(hasDeicticReferences("Write a function to parse JSON")).toBe(false);
+      expect(hasDeicticReferences("How do I deploy to production?")).toBe(false);
+    });
+  });
+
+  // ========================================================================
+  // readSessionFileTail (unit tests)
+  // ========================================================================
+
+  describe("readSessionFileTail", () => {
+    let tmpDir: string;
+
+    beforeEach(async () => {
+      tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "graphiti-session-tail-"));
+    });
+
+    afterEach(async () => {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    });
+
+    test("reads user and assistant messages from JSONL", async () => {
+      const filePath = path.join(tmpDir, "session.jsonl");
+      const lines = [
+        JSON.stringify({ type: "session", version: 2, id: "test" }),
+        JSON.stringify({ type: "message", message: { role: "user", content: "Hello world" } }),
+        JSON.stringify({ type: "message", message: { role: "assistant", content: "Hi there, how can I help?" } }),
+      ];
+      await fs.writeFile(filePath, lines.join("\n"));
+
+      const result = await readSessionFileTail(filePath);
+      expect(result).toBe("User: Hello world\nAssistant: Hi there, how can I help?");
+    });
+
+    test("skips non-message entries", async () => {
+      const filePath = path.join(tmpDir, "session.jsonl");
+      const lines = [
+        JSON.stringify({ type: "session", version: 2, id: "test" }),
+        JSON.stringify({ type: "custom", customType: "model-snapshot", data: {} }),
+        JSON.stringify({ type: "message", message: { role: "user", content: "What about the plan?" } }),
+        JSON.stringify({ type: "custom", customType: "tool-result", data: {} }),
+        JSON.stringify({ type: "message", message: { role: "assistant", content: "Here is the plan overview." } }),
+      ];
+      await fs.writeFile(filePath, lines.join("\n"));
+
+      const result = await readSessionFileTail(filePath);
+      expect(result).toBe("User: What about the plan?\nAssistant: Here is the plan overview.");
+    });
+
+    test("respects maxChars budget", async () => {
+      const filePath = path.join(tmpDir, "session.jsonl");
+      const lines = [
+        JSON.stringify({ type: "session", version: 2, id: "test" }),
+        JSON.stringify({ type: "message", message: { role: "user", content: "First message ".repeat(100) } }),
+        JSON.stringify({ type: "message", message: { role: "assistant", content: "Second message ".repeat(100) } }),
+        JSON.stringify({ type: "message", message: { role: "user", content: "Last message" } }),
+      ];
+      await fs.writeFile(filePath, lines.join("\n"));
+
+      const result = await readSessionFileTail(filePath, 100);
+      expect(result).not.toBeNull();
+      // Should only contain the last message(s) that fit within budget
+      expect(result!).toContain("Last message");
+      expect(result!.length).toBeLessThanOrEqual(200); // some slack for formatting
+    });
+
+    test("returns null for missing file", async () => {
+      const result = await readSessionFileTail("/nonexistent/path/session.jsonl");
+      expect(result).toBeNull();
+    });
+
+    test("returns null for file with no messages", async () => {
+      const filePath = path.join(tmpDir, "empty.jsonl");
+      const lines = [
+        JSON.stringify({ type: "session", version: 2, id: "test" }),
+        JSON.stringify({ type: "custom", customType: "model-snapshot", data: {} }),
+      ];
+      await fs.writeFile(filePath, lines.join("\n"));
+
+      const result = await readSessionFileTail(filePath);
+      expect(result).toBeNull();
+    });
+
+    test("skips system and tool role messages", async () => {
+      const filePath = path.join(tmpDir, "session.jsonl");
+      const lines = [
+        JSON.stringify({ type: "message", message: { role: "system", content: "You are a helpful assistant" } }),
+        JSON.stringify({ type: "message", message: { role: "user", content: "Hello world friend" } }),
+        JSON.stringify({ type: "message", message: { role: "tool", content: "Tool output result" } }),
+        JSON.stringify({ type: "message", message: { role: "assistant", content: "Hi there, how can I help you?" } }),
+      ];
+      await fs.writeFile(filePath, lines.join("\n"));
+
+      const result = await readSessionFileTail(filePath);
+      expect(result).toBe("User: Hello world friend\nAssistant: Hi there, how can I help you?");
+    });
+  });
+
+  // ========================================================================
+  // formatContinuityBlock (unit tests)
+  // ========================================================================
+
+  describe("formatContinuityBlock", () => {
+    test("wraps text in graphiti-continuity tags", () => {
+      const result = formatContinuityBlock("User: Hello\nAssistant: Hi");
+      expect(result).toBe("<graphiti-continuity>\nRecent session context (recovered from transcript):\nUser: Hello\nAssistant: Hi\n</graphiti-continuity>");
     });
   });
 });
