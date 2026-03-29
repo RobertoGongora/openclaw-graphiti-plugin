@@ -1,5 +1,33 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Smart autoRecall** (#164): `assemble()` is now a two-stage continuity-aware
+  pipeline that only fires when context loss is detected — not every turn.
+  - **Stage A** reads the tail of the JSONL session transcript (bounded 128KB chunk)
+    to recover what was actually discussed.
+  - **Stage B** uses the recovered continuity text as the `/search` query for
+    targeted semantic fact retrieval. Falls back to `/get-memory` with the current
+    message window when no session file is available.
+  - **Trigger conditions**: continuity gaps (bootstrap, compaction, ≤3 messages)
+    and deictic references ("continue", "as I mentioned", "where we left off").
+    Normal turns with sufficient message history get zero auto-injection.
+  - **Output**: separate `<graphiti-continuity>` and `<graphiti-context>` blocks
+    for clear debugging and feedback-loop prevention via `sanitizeForCapture()`.
+  - **Limitation**: after `/new` or session reset, the new session file is empty
+    so Stage A cannot recover prior context. Cross-session episode recovery
+    requires session lineage metadata tracked in #155.
+
+- **Provenance scaffolding**: `thread_id` field added to `SessionMeta` and
+  `buildProvenance()` for future saga/thread support (#155).
+
+### Changed
+
+- Legacy hooks `before_agent_start` now uses shared `formatFactsAsContext()`
+  instead of inline fact formatting.
+
 ## [0.7.0-beta.2] — 2026-03-22
 
 > Beta release with fix for episode UUID display.

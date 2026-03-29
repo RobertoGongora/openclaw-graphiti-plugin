@@ -1209,6 +1209,31 @@ describe("GraphitiContextEngine", () => {
       expect(result.systemPromptAddition).not.toContain("<graphiti-continuity>");
       expect(result.systemPromptAddition).toContain("<graphiti-context>");
     });
+
+    test("reset with new/empty session file — no continuity, falls back to semantic only", async () => {
+      // Simulates /new or session reset: bootstrap receives a fresh empty transcript.
+      // Stage A has nothing to recover. Stage B falls back to getMemory on the
+      // current (shallow) message window. Cross-session episode recovery requires
+      // session lineage metadata (#155).
+      const emptySessionFile = path.join(tmpDir, "new-session.jsonl");
+      require("node:fs").writeFileSync(emptySessionFile, JSON.stringify({
+        type: "session", version: 2, id: "new-session", timestamp: new Date().toISOString(),
+      }));
+
+      const engine = createEngine();
+      await engine.bootstrap({ sessionId: "new-sess", sessionFile: emptySessionFile });
+
+      const result = await engine.assemble({
+        sessionId: "new-sess",
+        messages: [{ role: "user", content: "What were we just talking about?" }],
+      });
+
+      // No continuity block — empty session file has no messages
+      expect(result.systemPromptAddition).toBeDefined();
+      expect(result.systemPromptAddition).not.toContain("<graphiti-continuity>");
+      // Semantic recall still fires via getMemory fallback
+      expect(result.systemPromptAddition).toContain("<graphiti-context>");
+    });
   });
 
   // ========================================================================
