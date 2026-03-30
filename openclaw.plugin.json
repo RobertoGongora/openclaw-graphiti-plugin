@@ -1,6 +1,7 @@
 {
   "kind": "context-engine",
   "id": "graphiti",
+  "skills": ["./skills"],
   "name": "Graphiti Knowledge Graph",
   "description": "Temporal knowledge graph for persistent agent memory. Auto-recalls relevant facts before each conversation and captures knowledge after.",
   "configSchema": {

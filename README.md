@@ -37,6 +37,24 @@ ln -s /path/to/openclaw-graphiti-plugin ~/.openclaw/extensions/graphiti
 
 The plugin declares `openclaw.extensions` in `package.json`, so OpenClaw discovers it automatically from `~/.openclaw/extensions/`.
 
+### Stable vs beta
+
+For production use, pin to an exact version:
+
+```bash
+openclaw plugins install @robertogongora/graphiti@0.7.0
+```
+
+For development or early access to unreleased features:
+
+```bash
+openclaw plugins install @robertogongora/graphiti@beta
+```
+
+The `@beta` tag resolves to the latest pre-release at install time. The resolved
+version is locked, but future `openclaw plugins update` runs will pull the newest
+beta. For reproducible deployments, always use an exact version.
+
 ## Recommended setup
 
 As of v0.3.0, Graphiti does **not** claim the exclusive memory slot. The recommended
