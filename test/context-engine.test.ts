@@ -30,7 +30,7 @@ const PKG_VERSION: string = (_require("../package.json") as any).version;
 function createEngine() {
   const port = getMockPort();
   const client = new GraphitiClient(`http://127.0.0.1:${port}`, "test-group", undefined, undefined, NOOP_LOG);
-  return new GraphitiContextEngine(client, { recallMaxFacts: 10 }, "test-group", NOOP_LOG);
+  return new GraphitiContextEngine(client, { recallMaxFacts: 10, autoRecall: true }, "test-group", NOOP_LOG);
 }
 
 function createEngineWithConfig(cfg: Record<string, unknown>) {
@@ -1352,6 +1352,37 @@ describe("GraphitiContextEngine", () => {
       // /search should be used (driven by episode content), not /get-memory
       expect(lastRequest["/search"]).toBeDefined();
     });
+
+    test("autoRecall: false disables recall in assemble but engine still works", async () => {
+      const engine = createEngineWithConfig({ autoRecall: false });
+      await engine.bootstrap({ sessionId: "sess-1" });
+
+      const result = await engine.assemble({
+        sessionId: "sess-1",
+        messages: [{ role: "user", content: "Where were we?" }],
+      });
+
+      // assemble should return pass-through — no recall injection
+      expect(result.systemPromptAddition).toBeUndefined();
+      expect(lastRequest["/search"]).toBeUndefined();
+      expect(lastRequest["/get-memory"]).toBeUndefined();
+    });
+
+    test("autoRecall: false still allows capture via afterTurn", async () => {
+      const engine = createEngineWithConfig({ autoRecall: false, autoCapture: true });
+      await engine.bootstrap({ sessionId: "sess-1" });
+
+      await engine.afterTurn({
+        sessionId: "sess-1",
+        messages: [
+          { role: "user", content: "Tell me about the deployment pipeline and its stages" },
+          { role: "assistant", content: "The pipeline uses Docker containers with GitHub Actions for CI/CD" },
+        ],
+      });
+
+      // Capture should still work even with recall disabled
+      expect(lastRequest["/messages"]).toBeDefined();
+    });
   });
 
   // ========================================================================
@@ -1587,6 +1618,18 @@ describe("GraphitiContextEngine", () => {
       ];
       const result = extractEpisodeContinuity(episodes, "s1");
       expect(result).toBe("valid content");
+    });
+
+    test("cross-session thread_id does not leak content", () => {
+      const episodes = [
+        // Different session but same thread_id — should NOT be included
+        { source_description: JSON.stringify({ session_key: "other-session", thread_id: "t1" }), content: "secret from other session", created_at: "2024-01-15T12:00:00Z" },
+        // Matching session, no thread_id — should be included
+        { source_description: JSON.stringify({ session_key: "my-session" }), content: "my session content", created_at: "2024-01-15T11:00:00Z" },
+      ];
+      const result = extractEpisodeContinuity(episodes, "my-session", { threadId: "t1" });
+      expect(result).toBe("my session content");
+      expect(result).not.toContain("secret from other session");
     });
   });
 

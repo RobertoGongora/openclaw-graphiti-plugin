@@ -327,8 +327,10 @@ export function extractEpisodeContinuity(
 
     let score = 0;
     if (prov) {
-      if (prov.session_key === sessionKey) score = 1;
-      if (threadId && prov.thread_id === threadId) score = 2;
+      if (prov.session_key === sessionKey) {
+        score = 1;
+        if (threadId && prov.thread_id === threadId) score = 2;
+      }
     }
     if (score >= 1) {
       scored.push({ content: ep.content, score, created_at: ep.created_at ?? "" });

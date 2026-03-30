@@ -192,6 +192,13 @@ export class GraphitiContextEngine {
         return passThrough;
       }
 
+      // Respect opt-in config — engine still registers for capture/compaction
+      // but recall injection requires explicit autoRecall: true
+      if (!this.cfg.autoRecall) {
+        this.debugLog.log("ce-assemble", { skipped: true, reason: "autoRecall_disabled" });
+        return passThrough;
+      }
+
       if (params.threadId) this._threadId = params.threadId;
 
       const lastUserText = this.extractLastUserText(params.messages);

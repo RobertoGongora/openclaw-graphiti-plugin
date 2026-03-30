@@ -27,6 +27,15 @@
   capture paths (ingest, afterTurn, compact, ingestBatch, onSubagentEnded), and
   used by episode-based continuity recovery to prefer same-thread episodes.
 
+### Fixed
+
+- **`autoRecall: false` now honored in ContextEngine mode**: `assemble()` returns
+  a pass-through when `autoRecall` is not explicitly `true`, matching the
+  documented opt-in default. Capture and compaction still work regardless.
+- **Session-scoped `thread_id` scoring**: `extractEpisodeContinuity()` now
+  requires a `session_key` match before considering `thread_id` as a tiebreaker,
+  preventing cross-session content leakage via reused thread IDs.
+
 ### Changed
 
 - Legacy hooks `before_agent_start` now uses shared `formatFactsAsContext()`
