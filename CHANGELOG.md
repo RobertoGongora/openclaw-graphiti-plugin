@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **SDK import modernisation**: migrated type import from root `openclaw/plugin-sdk`
+  to narrow subpath `openclaw/plugin-sdk/plugin-entry`; removed `(api as any)` casts
+  on `registerContextEngine` (now typed on `OpenClawPluginApi`).
+- **Published package metadata**: `README.md` and `skills/` are now included in the
+  npm tarball via the `files[]` array.
+- **Plugin manifest**: added `"skills": ["./skills"]` for agent skill discovery.
+
+### Added
+
+- **SKILL.md**: new `skills/graphiti/SKILL.md` with tool reference table, usage
+  guidance, and memory-core complementarity notes.
+- **Install guidance**: README now documents stable (pinned version) vs beta
+  (`@beta` tag) install paths.
+
 ### Added
 
 - **Smart autoRecall** (#164): `assemble()` is now a two-stage continuity-aware

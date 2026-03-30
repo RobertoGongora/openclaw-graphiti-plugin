@@ -1,6 +1,7 @@
 ---
 name: graphiti
 description: Temporal knowledge graph — search facts and relationships, ingest knowledge, manage episodes, and forget outdated information.
+trigger: graphiti, knowledge graph, graph memory, ingest episodes, search facts, remember this, what do we know about, relationship between
 ---
 
 # Graphiti Knowledge Graph

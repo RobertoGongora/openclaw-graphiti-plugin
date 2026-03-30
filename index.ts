@@ -415,6 +415,8 @@ const graphitiPlugin = {
       api.registerContextEngine("graphiti", () =>
         new GraphitiContextEngine(client, cfg, groupId, debugLog, api.logger),
       );
+    } else {
+      debugLog.log("register", { contextEngine: false, reason: "api_version" });
     }
 
     // ========================================================================

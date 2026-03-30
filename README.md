@@ -39,10 +39,10 @@ The plugin declares `openclaw.extensions` in `package.json`, so OpenClaw discove
 
 ### Stable vs beta
 
-For production use, pin to an exact version:
+For production use, pin to an exact stable version:
 
 ```bash
-openclaw plugins install @robertogongora/graphiti@0.7.0
+openclaw plugins install @robertogongora/graphiti@<stable-version>
 ```
 
 For development or early access to unreleased features:
