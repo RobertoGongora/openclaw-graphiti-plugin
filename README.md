@@ -106,10 +106,14 @@ By default, `autoRecall` is **off**. The agent can search the knowledge graph at
 time using the `graphiti_search` tool — this is the recommended approach. The agent
 decides when graph context is relevant rather than injecting facts on every turn.
 
-When `autoRecall: true`, the plugin fires `before_agent_start`, searches Graphiti with
-the incoming prompt, and injects matching facts as a `<graphiti-context>` block. This
-adds latency and token cost to every message. Useful when you want persistent background
-context without explicitly calling `graphiti_search`.
+When `autoRecall: true`, the plugin injects relevant knowledge graph facts before
+turns that need them. In **ContextEngine mode** (v0.7.0+), this uses Smart autoRecall —
+a two-stage pipeline that only fires on continuity gaps (bootstrap, compaction, reset,
+few messages) or when the user references prior context. Stage A recovers continuity
+from the session transcript or recent episodes; Stage B runs a targeted semantic recall
+(`/search` against recovered continuity, or `/get-memory` on the current window as
+fallback). In **hooks mode**, it fires `before_agent_start` on every turn. Useful when
+you want persistent background context without explicitly calling `graphiti_search`.
 
 ```json
 {
@@ -157,7 +161,7 @@ methods that the runtime calls directly:
 
 | Lifecycle method | Replaces hook | Purpose |
 |------------------|---------------|---------|
-| `assemble()` | `before_agent_start` | Recall relevant facts into the system prompt |
+| `assemble()` | `before_agent_start` | Smart autoRecall — conditionally inject continuity and facts |
 | `ingest()` | _(new)_ | Ingest a single message into the graph |
 | `ingestBatch()` | _(new)_ | Batch-ingest multiple messages |
 | `afterTurn()` | _(new)_ | Ingest new messages after each turn (replaces batch fallback) |
@@ -188,6 +192,7 @@ Every ingested episode carries a JSON-encoded provenance object in `source_descr
   "ts": "2026-03-05T10:30:00.000Z",
   "group_id": "core",
   "session_key": "sess-abc-123",
+  "thread_id": "thread-xyz",
   "agent": "main",
   "channel": "slack",
   "session_start": "2026-03-06T10:00:00.000Z"
@@ -207,8 +212,8 @@ Every ingested episode carries a JSON-encoded provenance object in `source_descr
 | `compact` | ContextEngine graph-aware compaction |
 | `subagent_ended` | ContextEngine subagent result ingestion |
 
-Session fields (`session_key`, `agent`, `channel`, `session_start`) are included
-when available and omitted otherwise. The `openclaw graphiti episodes` command
+Session fields (`session_key`, `thread_id`, `agent`, `channel`, `session_start`) are
+included when available and omitted otherwise. The `openclaw graphiti episodes` command
 parses this automatically and shows a human-readable summary. Legacy episodes
 with plain-text `source_description` still display gracefully.
 

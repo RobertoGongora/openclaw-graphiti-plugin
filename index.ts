@@ -22,7 +22,7 @@ import os from "node:os";
 import { GraphitiClient, type GraphitiEpisode } from "./client.js";
 import { DebugLog, NOOP_LOG } from "./debug-log.js";
 import { extractMemoryPath, upsertIndexEpisode, scanMemoryFiles, readIndexState, writeIndexState, readMemoryFileMeta, buildIndexContent, indexEpisodeName, isIndexableFile, DEFAULT_INDEX_EXTENSIONS } from "./memory-index.js";
-import { buildProvenance, extractTextsFromMessages, buildEpisodeName, sanitizeForCapture, type SessionMeta } from "./shared.js";
+import { buildProvenance, extractTextsFromMessages, buildEpisodeName, formatFactsAsContext, sanitizeForCapture, type SessionMeta } from "./shared.js";
 import { GraphitiContextEngine } from "./context-engine.js";
 
 // Re-export public types from shared.ts for backwards compatibility
@@ -49,6 +49,7 @@ interface HookContext {
   agentId?: string;
   messageProvider?: string;
   messageChannel?: string;
+  threadId?: string;
   [key: string]: unknown; // allow extension without breaking
 }
 
@@ -108,6 +109,7 @@ const graphitiPlugin = {
       if (ctx.agentId) meta.agent = ctx.agentId;
       if (ctx.messageProvider) meta.channel = ctx.messageProvider;
       else if (ctx.messageChannel) meta.channel = ctx.messageChannel;
+      if (ctx.threadId) meta.threadId = ctx.threadId;
       if (ctx.sessionId && sessionStarts.has(ctx.sessionId)) {
         meta.sessionStart = sessionStarts.get(ctx.sessionId);
       }
@@ -444,14 +446,10 @@ const graphitiPlugin = {
           const facts = await client.search(event.prompt, recallMaxFacts);
           if (facts.length === 0) return;
 
-          const context = facts.map((f) => `- **${f.name}**: ${f.fact}`).join("\n");
           api.logger.info?.(`graphiti: recalled ${facts.length} facts for context injection`);
           debugLog.log("recall", { group: groupId, count: facts.length, ms: Date.now() - start });
 
-          return {
-            prependContext:
-              `<graphiti-context>\nRelevant knowledge graph facts (auto-recalled):\n${context}\n</graphiti-context>`,
-          };
+          return { prependContext: formatFactsAsContext(facts) };
         } catch (err) {
           api.logger.warn(`graphiti: recall failed: ${String(err)}`);
         }
@@ -494,6 +492,7 @@ const graphitiPlugin = {
             source_description: buildProvenance(groupId, {
               event: "before_compaction",
               session_key: meta.sessionKey,
+              thread_id: meta.threadId,
               agent: meta.agent,
               channel: meta.channel,
               session_start: meta.sessionStart,
@@ -537,6 +536,7 @@ const graphitiPlugin = {
             source_description: buildProvenance(groupId, {
               event: "before_reset",
               session_key: meta.sessionKey,
+              thread_id: meta.threadId,
               agent: meta.agent,
               channel: meta.channel,
               session_start: meta.sessionStart,

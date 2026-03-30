@@ -1,5 +1,46 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Smart autoRecall** (#164): `assemble()` is now a two-stage continuity-aware
+  pipeline that only fires when context loss is detected — not every turn.
+  - **Stage A** reads the tail of the JSONL session transcript (bounded 128KB chunk)
+    to recover what was actually discussed.
+  - **Stage B** uses the recovered continuity text as the `/search` query for
+    targeted semantic fact retrieval. Falls back to `/get-memory` with the current
+    message window when no session file is available.
+  - **Trigger conditions**: continuity gaps (bootstrap, compaction, ≤3 messages)
+    and deictic references ("continue", "as I mentioned", "where we left off").
+    Normal turns with sufficient message history get zero auto-injection.
+  - **Output**: separate `<graphiti-continuity>` and `<graphiti-context>` blocks
+    for clear debugging and feedback-loop prevention via `sanitizeForCapture()`.
+  - **Episode-based fallback** (Stage A.5): when the session file is empty or
+    missing (after `/new`, timeout, or resume), `assemble()` now queries recent
+    episodes from the knowledge graph and filters by `session_key` provenance to
+    recover what was discussed in the same session. This closes the reset/timeout
+    gap where Stage A had nothing to recover.
+
+- **`thread_id` wired end-to-end**: `thread_id` is now populated from runtime
+  context (`HookContext.threadId`), stored in episode provenance across all
+  capture paths (ingest, afterTurn, compact, ingestBatch, onSubagentEnded), and
+  used by episode-based continuity recovery to prefer same-thread episodes.
+
+### Fixed
+
+- **`autoRecall: false` now honored in ContextEngine mode**: `assemble()` returns
+  a pass-through when `autoRecall` is not explicitly `true`, matching the
+  documented opt-in default. Capture and compaction still work regardless.
+- **Session-scoped `thread_id` scoring**: `extractEpisodeContinuity()` now
+  requires a `session_key` match before considering `thread_id` as a tiebreaker,
+  preventing cross-session content leakage via reused thread IDs.
+
+### Changed
+
+- Legacy hooks `before_agent_start` now uses shared `formatFactsAsContext()`
+  instead of inline fact formatting.
+
 ## [0.7.0-beta.2] — 2026-03-22
 
 > Beta release with fix for episode UUID display.

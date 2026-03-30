@@ -4,6 +4,8 @@
  * Extracted to avoid circular dependencies and reduce duplication.
  */
 
+import fs from "node:fs/promises";
+
 /**
  * Session context embedded in episode provenance for traceability.
  * @exported - public API of this plugin
@@ -13,6 +15,7 @@ export interface SessionMeta {
   sessionStart?: string;
   agent?: string;
   channel?: string;
+  threadId?: string;
 }
 
 /**
@@ -36,6 +39,7 @@ export function buildProvenance(
   fields: {
     event: string;
     session_key?: string;
+    thread_id?: string;
     file?: string;
     file_type?: string;
     source?: string;
@@ -51,6 +55,7 @@ export function buildProvenance(
     group_id: groupId,
   };
   if (fields.session_key) prov.session_key = fields.session_key;
+  if (fields.thread_id) prov.thread_id = fields.thread_id;
   if (fields.file) prov.file = fields.file;
   if (fields.file_type) prov.file_type = fields.file_type;
   if (fields.source) prov.source = fields.source;
@@ -69,6 +74,9 @@ export function sanitizeForCapture(text: string): string {
 
   // Strip <graphiti-context>...</graphiti-context> blocks (multiline)
   t = t.replace(/<graphiti-context>[\s\S]*?<\/graphiti-context>/g, "");
+
+  // Strip <graphiti-continuity>...</graphiti-continuity> blocks (multiline)
+  t = t.replace(/<graphiti-continuity>[\s\S]*?<\/graphiti-continuity>/g, "");
 
   // Strip <relevant-memories>...</relevant-memories> blocks (multiline)
   t = t.replace(/<relevant-memories>[\s\S]*?<\/relevant-memories>/g, "");
@@ -173,4 +181,180 @@ export function extractTextsFromMessages(
 export function formatFactsAsContext(facts: { name: string; fact: string }[]): string {
   const context = facts.map((f) => `- **${f.name}**: ${f.fact}`).join("\n");
   return `<graphiti-context>\nRelevant knowledge graph facts (auto-recalled):\n${context}\n</graphiti-context>`;
+}
+
+// ---------------------------------------------------------------------------
+// Smart autoRecall helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Detect whether the current turn is likely a continuity gap —
+ * the runtime has lost recent conversational context.
+ */
+export function isContinuityGap(
+  messageCount: number,
+  opts?: { recentEvent?: string | null; threshold?: number },
+): boolean {
+  const threshold = opts?.threshold ?? 3;
+  const event = opts?.recentEvent;
+  if (event === "bootstrap" || event === "compact") return true;
+  return messageCount <= threshold;
+}
+
+/**
+ * Deictic patterns that signal the user expects continuity with prior context.
+ * Kept intentionally conservative to avoid false positives on normal prompts.
+ */
+const DEICTIC_PATTERNS = [
+  /\bas (?:I|we) (?:mentioned|said|discussed|talked about)\b/i,
+  /\bwhat we (?:just|were) (?:discussing|talking about)\b/i,
+  /\b(?:continue|go on|keep going|pick up where)\b/i,
+  /\bthat (?:thing|idea|approach|plan|issue|bug|feature|task)\b/i,
+  /\blike (?:I|we) said\b/i,
+  /\bremember when\b/i,
+  /\bback to (?:the|that|what)\b/i,
+  /\bwhere (?:we|I) left off\b/i,
+];
+
+/**
+ * Returns true if text contains references to prior conversational context
+ * that the model may not have in its current message window.
+ */
+export function hasDeicticReferences(text: string): boolean {
+  return DEICTIC_PATTERNS.some((p) => p.test(text));
+}
+
+/**
+ * Read the tail of a JSONL session file, returning the most recent
+ * user/assistant messages up to `maxChars` of formatted text.
+ *
+ * JSONL format (from OpenClaw):
+ *   { "type": "message", "message": { "role": "user"|"assistant", "content": ... } }
+ *
+ * Returns null if the file is missing, empty, or has no usable messages.
+ */
+export async function readSessionFileTail(
+  sessionFile: string,
+  maxChars = 8000,
+): Promise<string | null> {
+  // Read only a bounded tail chunk to avoid loading arbitrarily large session files.
+  // 128KB is generous headroom for the default 8000-char output budget.
+  const TAIL_BYTES = 128 * 1024;
+
+  let raw: string;
+  try {
+    const fh = await fs.open(sessionFile, "r");
+    try {
+      const stat = await fh.stat();
+      const readSize = Math.min(stat.size, TAIL_BYTES);
+      const buf = Buffer.alloc(readSize);
+      await fh.read(buf, 0, readSize, stat.size - readSize);
+      raw = buf.toString("utf-8");
+    } finally {
+      await fh.close();
+    }
+  } catch {
+    return null;
+  }
+
+  const lines = raw.split("\n");
+
+  const collected: string[] = [];
+  let totalChars = 0;
+
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (!line) continue;
+
+    let record: any;
+    try {
+      record = JSON.parse(line);
+    } catch {
+      continue;
+    }
+
+    if (record?.type !== "message") continue;
+    const msg = record.message;
+    if (!msg || (msg.role !== "user" && msg.role !== "assistant")) continue;
+
+    const text = typeof msg.content === "string"
+      ? msg.content
+      : extractTextContent(msg.content, 1);
+    if (!text) continue;
+
+    const label = msg.role === "user" ? "User" : "Assistant";
+    const formatted = `${label}: ${text}`;
+
+    if (totalChars + formatted.length > maxChars && collected.length > 0) break;
+    collected.push(formatted);
+    totalChars += formatted.length;
+  }
+
+  if (collected.length === 0) return null;
+
+  collected.reverse();
+  return collected.join("\n");
+}
+
+/**
+ * Wrap recovered session transcript in a `<graphiti-continuity>` block.
+ */
+export function formatContinuityBlock(text: string): string {
+  return `<graphiti-continuity>\nRecent session context (recovered from transcript):\n${text}\n</graphiti-continuity>`;
+}
+
+/**
+ * Extract continuity text from recent episodes that share the same session/thread.
+ * Used as a fallback when the session JSONL file is empty or missing (e.g. after
+ * `/new` reset or timeout resume).
+ */
+export function extractEpisodeContinuity(
+  episodes: Array<{ source_description?: string; content?: string; created_at?: string }>,
+  sessionKey: string,
+  opts?: { threadId?: string; maxChars?: number },
+): string | null {
+  const maxChars = opts?.maxChars ?? 8000;
+  const threadId = opts?.threadId;
+
+  // Score and filter episodes by provenance match
+  const scored: Array<{ content: string; score: number; created_at: string }> = [];
+  for (const ep of episodes) {
+    if (!ep.content) continue;
+    let prov: Record<string, unknown> | null = null;
+    try {
+      if (ep.source_description) prov = JSON.parse(ep.source_description);
+    } catch { /* skip unparseable provenance */ }
+
+    let score = 0;
+    if (prov) {
+      if (prov.session_key === sessionKey) {
+        score = 1;
+        if (threadId && prov.thread_id === threadId) score = 2;
+      }
+    }
+    if (score >= 1) {
+      scored.push({ content: ep.content, score, created_at: ep.created_at ?? "" });
+    }
+  }
+
+  if (scored.length === 0) return null;
+
+  // Sort: highest score first, then newest first
+  scored.sort((a, b) => b.score - a.score || b.created_at.localeCompare(a.created_at));
+
+  // Collect content up to budget (account for \n\n joiner between parts)
+  const parts: string[] = [];
+  let chars = 0;
+  for (const ep of scored) {
+    const joinerCost = parts.length > 0 ? 2 : 0; // \n\n between parts
+    if (chars + joinerCost + ep.content.length > maxChars) {
+      const remaining = maxChars - chars - joinerCost;
+      if (remaining > 100) parts.push(ep.content.slice(0, remaining));
+      break;
+    }
+    parts.push(ep.content);
+    chars += joinerCost + ep.content.length;
+  }
+
+  return parts.length > 0 ? parts.join("\n\n") : null;
 }
