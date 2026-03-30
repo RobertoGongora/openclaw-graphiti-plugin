@@ -9,7 +9,7 @@
 import { createRequire } from "node:module";
 import type { GraphitiClient, GraphitiMessage } from "./client.js";
 import type { DebugLog } from "./debug-log.js";
-import { buildEpisodeName, buildProvenance, extractTextContent, extractTextsFromMessages, formatContinuityBlock, formatFactsAsContext, hasDeicticReferences, isContinuityGap, readSessionFileTail, sanitizeForCapture } from "./shared.js";
+import { buildEpisodeName, buildProvenance, extractEpisodeContinuity, extractTextContent, extractTextsFromMessages, formatContinuityBlock, formatFactsAsContext, hasDeicticReferences, isContinuityGap, readSessionFileTail, sanitizeForCapture } from "./shared.js";
 
 const _require = createRequire(import.meta.url);
 const PLUGIN_VERSION: string = (_require("./package.json") as any).version;
@@ -88,6 +88,8 @@ export class GraphitiContextEngine {
   /** Smart autoRecall state — tracks lifecycle events for continuity gap detection. */
   private _lastEvent: string | null = null;
   private _sessionFile: string | null = null;
+  private _sessionId: string | null = null;
+  private _threadId: string | null = null;
 
   constructor(
     private client: GraphitiClient,
@@ -151,7 +153,7 @@ export class GraphitiContextEngine {
         role,
         name: `ingest-${params.sessionId}-${Date.now()}`,
         timestamp: new Date().toISOString(),
-        source_description: buildProvenance(this.groupId, { event: "ingest" }),
+        source_description: buildProvenance(this.groupId, { event: "ingest", session_key: params.sessionId, thread_id: this._threadId ?? undefined }),
       }]);
 
       this.debugLog.log("ce-ingest", { ingested: true, role, ms: Date.now() - start });
@@ -178,6 +180,7 @@ export class GraphitiContextEngine {
     sessionId: string;
     messages: unknown[];
     tokenBudget?: number;
+    threadId?: string;
   }): Promise<AssembleResult> {
     const passThrough: AssembleResult = { messages: params.messages };
     const start = Date.now();
@@ -188,6 +191,8 @@ export class GraphitiContextEngine {
         this.debugLog.log("ce-assemble", { skipped: true, reason: "unhealthy" });
         return passThrough;
       }
+
+      if (params.threadId) this._threadId = params.threadId;
 
       const lastUserText = this.extractLastUserText(params.messages);
       const gapDetected = isContinuityGap(params.messages.length, { recentEvent: this._lastEvent });
@@ -210,6 +215,18 @@ export class GraphitiContextEngine {
         continuityTail = await readSessionFileTail(this._sessionFile);
         if (continuityTail) {
           continuityBlock = formatContinuityBlock(continuityTail);
+        }
+      }
+
+      // Stage A fallback: episode-based recovery when session file is empty/missing
+      if (!continuityTail && this._sessionId) {
+        const episodes = await this.client.episodes(20);
+        const episodeText = extractEpisodeContinuity(episodes, this._sessionId, {
+          threadId: this._threadId ?? undefined,
+        });
+        if (episodeText) {
+          continuityTail = episodeText;
+          continuityBlock = formatContinuityBlock(episodeText);
         }
       }
 
@@ -340,7 +357,7 @@ export class GraphitiContextEngine {
           role: "conversation",
           name: buildEpisodeName("compact", { sessionKey: params.sessionId }),
           timestamp: new Date().toISOString(),
-          source_description: buildProvenance(this.groupId, { event: "compact", session_key: params.sessionId }),
+          source_description: buildProvenance(this.groupId, { event: "compact", session_key: params.sessionId, thread_id: this._threadId ?? undefined }),
         }]);
 
         this._lastEvent = "compact";
@@ -406,6 +423,7 @@ export class GraphitiContextEngine {
         source_description: buildProvenance(this.groupId, {
           event: "ingest_batch",
           session_key: params.sessionId,
+          thread_id: this._threadId ?? undefined,
         }),
       }]);
 
@@ -430,8 +448,9 @@ export class GraphitiContextEngine {
     isHeartbeat?: boolean;
     tokenBudget?: number;
   }): Promise<void> {
-    // Keep session file reference fresh for Smart autoRecall
+    // Keep session state fresh for Smart autoRecall
     if (params.sessionFile) this._sessionFile = params.sessionFile;
+    if (params.sessionId) this._sessionId = params.sessionId;
 
     if (this.cfg.autoCapture === false) {
       this.debugLog.log("ce-afterTurn", { skipped: true, reason: "autoCapture_disabled" });
@@ -492,6 +511,7 @@ export class GraphitiContextEngine {
         source_description: buildProvenance(this.groupId, {
           event,
           session_key: params.sessionId,
+          thread_id: this._threadId ?? undefined,
         }),
       }]);
 
@@ -510,9 +530,12 @@ export class GraphitiContextEngine {
   async bootstrap(params: {
     sessionId: string;
     sessionFile?: string;
+    threadId?: string;
   }): Promise<BootstrapResult> {
     try {
       this._sessionFile = params.sessionFile ?? null;
+      this._sessionId = params.sessionId;
+      this._threadId = params.threadId ?? this._threadId;
 
       const healthy = await this.cachedHealthy();
       if (!healthy) {
@@ -582,6 +605,7 @@ export class GraphitiContextEngine {
         source_description: buildProvenance(this.groupId, {
           event: "subagent_ended",
           session_key: params.childSessionKey,
+          thread_id: this._threadId ?? undefined,
         }),
       }]);
 

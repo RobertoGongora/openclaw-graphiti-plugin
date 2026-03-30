@@ -51,6 +51,52 @@ export const SAMPLE_EPISODES = [
   },
 ];
 
+export const SAMPLE_EPISODES_WITH_SESSION = [
+  {
+    uuid: "ep-sess-001",
+    name: "turn-sess-1-1700000001",
+    group_id: "test-group",
+    created_at: "2024-01-15T11:00:00+00:00",
+    source: "message",
+    source_description: JSON.stringify({
+      plugin: "openclaw-graphiti",
+      event: "after_turn",
+      session_key: "sess-1",
+      group_id: "test-group",
+    }),
+    content: "user: What is the architecture of our system?\n\nassistant: The system uses microservices with Neo4j for the knowledge graph.",
+  },
+  {
+    uuid: "ep-sess-002",
+    name: "turn-other-1700000002",
+    group_id: "test-group",
+    created_at: "2024-01-15T10:00:00+00:00",
+    source: "message",
+    source_description: JSON.stringify({
+      plugin: "openclaw-graphiti",
+      event: "after_turn",
+      session_key: "other-session",
+      group_id: "test-group",
+    }),
+    content: "user: Unrelated conversation from another session.\n\nassistant: Different topic entirely.",
+  },
+  {
+    uuid: "ep-sess-003",
+    name: "turn-sess-1-thread-a-1700000003",
+    group_id: "test-group",
+    created_at: "2024-01-15T11:30:00+00:00",
+    source: "message",
+    source_description: JSON.stringify({
+      plugin: "openclaw-graphiti",
+      event: "after_turn",
+      session_key: "sess-1",
+      thread_id: "thread-a",
+      group_id: "test-group",
+    }),
+    content: "user: Tell me about the deployment pipeline.\n\nassistant: We use GitHub Actions with Docker containers.",
+  },
+];
+
 // ============================================================================
 // Mock HTTP Server
 // ============================================================================
@@ -58,6 +104,7 @@ export const SAMPLE_EPISODES = [
 export type MockOverrides = {
   healthy?: boolean;
   searchFacts?: GraphitiFact[];
+  getMemoryFacts?: GraphitiFact[];
   ingestStatus?: number;
   ingestBody?: Record<string, unknown>;
   searchStatus?: number;
@@ -163,7 +210,7 @@ export function startMockServer(): Promise<void> {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(
           JSON.stringify({
-            facts: mockOverrides.searchFacts ?? SAMPLE_FACTS,
+            facts: mockOverrides.getMemoryFacts ?? mockOverrides.searchFacts ?? SAMPLE_FACTS,
           }),
         );
         return;

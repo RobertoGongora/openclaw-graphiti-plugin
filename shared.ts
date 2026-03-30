@@ -302,3 +302,57 @@ export async function readSessionFileTail(
 export function formatContinuityBlock(text: string): string {
   return `<graphiti-continuity>\nRecent session context (recovered from transcript):\n${text}\n</graphiti-continuity>`;
 }
+
+/**
+ * Extract continuity text from recent episodes that share the same session/thread.
+ * Used as a fallback when the session JSONL file is empty or missing (e.g. after
+ * `/new` reset or timeout resume).
+ */
+export function extractEpisodeContinuity(
+  episodes: Array<{ source_description?: string; content?: string; created_at?: string }>,
+  sessionKey: string,
+  opts?: { threadId?: string; maxChars?: number },
+): string | null {
+  const maxChars = opts?.maxChars ?? 8000;
+  const threadId = opts?.threadId;
+
+  // Score and filter episodes by provenance match
+  const scored: Array<{ content: string; score: number; created_at: string }> = [];
+  for (const ep of episodes) {
+    if (!ep.content) continue;
+    let prov: Record<string, unknown> | null = null;
+    try {
+      if (ep.source_description) prov = JSON.parse(ep.source_description);
+    } catch { /* skip unparseable provenance */ }
+
+    let score = 0;
+    if (prov) {
+      if (prov.session_key === sessionKey) score = 1;
+      if (threadId && prov.thread_id === threadId) score = 2;
+    }
+    if (score >= 1) {
+      scored.push({ content: ep.content, score, created_at: ep.created_at ?? "" });
+    }
+  }
+
+  if (scored.length === 0) return null;
+
+  // Sort: highest score first, then newest first
+  scored.sort((a, b) => b.score - a.score || b.created_at.localeCompare(a.created_at));
+
+  // Collect content up to budget (account for \n\n joiner between parts)
+  const parts: string[] = [];
+  let chars = 0;
+  for (const ep of scored) {
+    const joinerCost = parts.length > 0 ? 2 : 0; // \n\n between parts
+    if (chars + joinerCost + ep.content.length > maxChars) {
+      const remaining = maxChars - chars - joinerCost;
+      if (remaining > 100) parts.push(ep.content.slice(0, remaining));
+      break;
+    }
+    parts.push(ep.content);
+    chars += joinerCost + ep.content.length;
+  }
+
+  return parts.length > 0 ? parts.join("\n\n") : null;
+}

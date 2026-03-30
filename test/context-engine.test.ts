@@ -16,11 +16,12 @@ import {
   getMockPort,
   mockOverrides,
   lastRequest,
+  SAMPLE_EPISODES_WITH_SESSION,
 } from "./helpers.js";
 import { GraphitiClient } from "../client.js";
 import { NOOP_LOG } from "../debug-log.js";
 import { GraphitiContextEngine } from "../context-engine.js";
-import { formatFactsAsContext, isContinuityGap, hasDeicticReferences, readSessionFileTail, formatContinuityBlock } from "../shared.js";
+import { formatFactsAsContext, isContinuityGap, hasDeicticReferences, readSessionFileTail, formatContinuityBlock, extractEpisodeContinuity } from "../shared.js";
 import { createRequire } from "node:module";
 
 const _require = createRequire(import.meta.url);
@@ -1210,29 +1211,146 @@ describe("GraphitiContextEngine", () => {
       expect(result.systemPromptAddition).toContain("<graphiti-context>");
     });
 
-    test("reset with new/empty session file — no continuity, falls back to semantic only", async () => {
-      // Simulates /new or session reset: bootstrap receives a fresh empty transcript.
-      // Stage A has nothing to recover. Stage B falls back to getMemory on the
-      // current (shallow) message window. Cross-session episode recovery requires
-      // session lineage metadata (#155).
+    test("reset with empty session file — recovers continuity from same-session episodes", async () => {
+      mockOverrides.episodes = SAMPLE_EPISODES_WITH_SESSION;
       const emptySessionFile = path.join(tmpDir, "new-session.jsonl");
       require("node:fs").writeFileSync(emptySessionFile, JSON.stringify({
         type: "session", version: 2, id: "new-session", timestamp: new Date().toISOString(),
       }));
 
       const engine = createEngine();
-      await engine.bootstrap({ sessionId: "new-sess", sessionFile: emptySessionFile });
+      await engine.bootstrap({ sessionId: "sess-1", sessionFile: emptySessionFile });
 
       const result = await engine.assemble({
-        sessionId: "new-sess",
+        sessionId: "sess-1",
         messages: [{ role: "user", content: "What were we just talking about?" }],
       });
 
-      // No continuity block — empty session file has no messages
       expect(result.systemPromptAddition).toBeDefined();
-      expect(result.systemPromptAddition).not.toContain("<graphiti-continuity>");
-      // Semantic recall still fires via getMemory fallback
+      // Episode-based recovery should produce continuity block
+      expect(result.systemPromptAddition).toContain("<graphiti-continuity>");
+      expect(result.systemPromptAddition).toContain("microservices");
+      // Semantic block also present (search driven by episode content)
       expect(result.systemPromptAddition).toContain("<graphiti-context>");
+      // Should have used /search (not /get-memory) since continuity was recovered
+      expect(lastRequest["/search"]).toBeDefined();
+    });
+
+    test("episode recovery when no session file at all", async () => {
+      mockOverrides.episodes = SAMPLE_EPISODES_WITH_SESSION;
+
+      const engine = createEngine();
+      await engine.bootstrap({ sessionId: "sess-1" }); // no sessionFile
+
+      const result = await engine.assemble({
+        sessionId: "sess-1",
+        messages: [{ role: "user", content: "Continue where we left off" }],
+      });
+
+      expect(result.systemPromptAddition).toBeDefined();
+      expect(result.systemPromptAddition).toContain("<graphiti-continuity>");
+      expect(result.systemPromptAddition).toContain("microservices");
+    });
+
+    test("episode recovery filters by session_key — excludes other sessions", async () => {
+      mockOverrides.episodes = SAMPLE_EPISODES_WITH_SESSION;
+
+      const engine = createEngine();
+      await engine.bootstrap({ sessionId: "sess-1" });
+
+      const result = await engine.assemble({
+        sessionId: "sess-1",
+        messages: [{ role: "user", content: "What were we discussing?" }],
+      });
+
+      expect(result.systemPromptAddition).toContain("microservices");
+      expect(result.systemPromptAddition).not.toContain("Unrelated conversation from another session");
+    });
+
+    test("episode recovery returns null when no matching session — falls to getMemory", async () => {
+      mockOverrides.episodes = SAMPLE_EPISODES_WITH_SESSION;
+      // Use a different set of facts for /get-memory to prove it was called
+      mockOverrides.getMemoryFacts = [
+        { uuid: "f-gm-001", name: "FALLBACK", fact: "Fallback semantic fact from getMemory", valid_at: null, invalid_at: null, created_at: "2024-01-01T00:00:00Z", expired_at: null },
+      ];
+
+      const engine = createEngine();
+      await engine.bootstrap({ sessionId: "no-match-session" });
+
+      const result = await engine.assemble({
+        sessionId: "no-match-session",
+        messages: [{ role: "user", content: "Tell me something" }],
+      });
+
+      expect(result.systemPromptAddition).toBeDefined();
+      // No continuity block — no episodes match this session
+      expect(result.systemPromptAddition).not.toContain("<graphiti-continuity>");
+      // Falls to getMemory which returns the fallback facts
+      expect(result.systemPromptAddition).toContain("<graphiti-context>");
+      expect(result.systemPromptAddition).toContain("Fallback semantic fact from getMemory");
+    });
+
+    test("episode recovery prefers thread_id match over session_key-only", async () => {
+      mockOverrides.episodes = SAMPLE_EPISODES_WITH_SESSION;
+
+      const engine = createEngine();
+      await engine.bootstrap({ sessionId: "sess-1", threadId: "thread-a" });
+
+      const result = await engine.assemble({
+        sessionId: "sess-1",
+        messages: [{ role: "user", content: "Continue" }],
+      });
+
+      expect(result.systemPromptAddition).toContain("<graphiti-continuity>");
+      // thread-a episode ("deployment pipeline") should be prioritized
+      expect(result.systemPromptAddition).toContain("deployment pipeline");
+    });
+
+    test("skips episode fetch when session file has content", async () => {
+      mockOverrides.episodes = SAMPLE_EPISODES_WITH_SESSION;
+      const sessionFile = createSessionFile([
+        { role: "user", content: "This is the existing session file content about React hooks" },
+        { role: "assistant", content: "React hooks are used for state management and side effects." },
+      ]);
+
+      const engine = createEngine();
+      await engine.bootstrap({ sessionId: "sess-1", sessionFile });
+
+      const result = await engine.assemble({
+        sessionId: "sess-1",
+        messages: [{ role: "user", content: "Tell me more" }],
+      });
+
+      // Continuity from session file, not episodes
+      expect(result.systemPromptAddition).toContain("<graphiti-continuity>");
+      expect(result.systemPromptAddition).toContain("React hooks");
+      // Should use /search (driven by session file tail), not episode content
+      expect(lastRequest["/search"]).toBeDefined();
+      // Continuity should NOT contain episode content
+      expect(result.systemPromptAddition).not.toContain("microservices");
+    });
+
+    test("timeout/resume — recovers from episodes after bootstrap with no session file", async () => {
+      // Simulates a timeout-resume scenario: the runtime bootstraps a new session
+      // with no session file. Episodes from the prior session should be recovered.
+      mockOverrides.episodes = SAMPLE_EPISODES_WITH_SESSION;
+      mockOverrides.getMemoryFacts = [
+        { uuid: "f-unrelated", name: "UNRELATED", fact: "Completely unrelated fact", valid_at: null, invalid_at: null, created_at: "2024-01-01T00:00:00Z", expired_at: null },
+      ];
+
+      const engine = createEngine();
+      await engine.bootstrap({ sessionId: "sess-1" }); // no sessionFile — simulates resume
+
+      const result = await engine.assemble({
+        sessionId: "sess-1",
+        messages: [{ role: "user", content: "Where were we?" }],
+      });
+
+      // Should recover from episodes, NOT fall to getMemory
+      expect(result.systemPromptAddition).toContain("<graphiti-continuity>");
+      expect(result.systemPromptAddition).toContain("microservices");
+      // /search should be used (driven by episode content), not /get-memory
+      expect(lastRequest["/search"]).toBeDefined();
     });
   });
 
@@ -1407,6 +1525,106 @@ describe("GraphitiContextEngine", () => {
     test("wraps text in graphiti-continuity tags", () => {
       const result = formatContinuityBlock("User: Hello\nAssistant: Hi");
       expect(result).toBe("<graphiti-continuity>\nRecent session context (recovered from transcript):\nUser: Hello\nAssistant: Hi\n</graphiti-continuity>");
+    });
+  });
+
+  // ========================================================================
+  // extractEpisodeContinuity (unit tests)
+  // ========================================================================
+
+  describe("extractEpisodeContinuity", () => {
+    test("returns null when no episodes match session_key", () => {
+      const episodes = [
+        { source_description: JSON.stringify({ session_key: "other" }), content: "irrelevant" },
+      ];
+      expect(extractEpisodeContinuity(episodes, "my-session")).toBeNull();
+    });
+
+    test("returns content from matching session_key episodes", () => {
+      const episodes = [
+        { source_description: JSON.stringify({ session_key: "my-session" }), content: "user: Hello\nassistant: Hi", created_at: "2024-01-15T10:00:00Z" },
+        { source_description: JSON.stringify({ session_key: "other" }), content: "unrelated" },
+      ];
+      const result = extractEpisodeContinuity(episodes, "my-session");
+      expect(result).toBe("user: Hello\nassistant: Hi");
+    });
+
+    test("prefers thread_id match over session_key-only", () => {
+      const episodes = [
+        { source_description: JSON.stringify({ session_key: "s1" }), content: "session-only content", created_at: "2024-01-15T11:00:00Z" },
+        { source_description: JSON.stringify({ session_key: "s1", thread_id: "t1" }), content: "thread-matched content", created_at: "2024-01-15T10:00:00Z" },
+      ];
+      const result = extractEpisodeContinuity(episodes, "s1", { threadId: "t1" });
+      // thread-matched should come first despite being older
+      expect(result).toContain("thread-matched content");
+      expect(result!.indexOf("thread-matched")).toBeLessThan(result!.indexOf("session-only"));
+    });
+
+    test("respects maxChars budget", () => {
+      const episodes = [
+        { source_description: JSON.stringify({ session_key: "s1" }), content: "A".repeat(5000), created_at: "2024-01-15T11:00:00Z" },
+        { source_description: JSON.stringify({ session_key: "s1" }), content: "B".repeat(5000), created_at: "2024-01-15T10:00:00Z" },
+      ];
+      const result = extractEpisodeContinuity(episodes, "s1", { maxChars: 6000 });
+      expect(result).toBeDefined();
+      expect(result!.length).toBeLessThanOrEqual(6000);
+      // First episode fits; second is truncated
+      expect(result).toContain("A".repeat(5000));
+    });
+
+    test("returns null for episodes with no content", () => {
+      const episodes = [
+        { source_description: JSON.stringify({ session_key: "s1" }), content: "" },
+        { source_description: JSON.stringify({ session_key: "s1" }) },
+      ];
+      expect(extractEpisodeContinuity(episodes, "s1")).toBeNull();
+    });
+
+    test("handles unparseable source_description gracefully", () => {
+      const episodes = [
+        { source_description: "not-json", content: "some content" },
+        { source_description: JSON.stringify({ session_key: "s1" }), content: "valid content" },
+      ];
+      const result = extractEpisodeContinuity(episodes, "s1");
+      expect(result).toBe("valid content");
+    });
+  });
+
+  // ========================================================================
+  // thread_id provenance
+  // ========================================================================
+
+  describe("thread_id provenance", () => {
+    test("ingest includes thread_id in provenance when set via bootstrap", async () => {
+      const engine = createEngine();
+      await engine.bootstrap({ sessionId: "sess-1", threadId: "thread-abc" });
+      await engine.ingest({
+        sessionId: "sess-1",
+        message: { role: "user", content: "This is a test message for provenance checking" },
+      });
+
+      const req = lastRequest["/messages"] as any;
+      expect(req).toBeDefined();
+      const prov = JSON.parse(req.messages[0].source_description);
+      expect(prov.thread_id).toBe("thread-abc");
+      expect(prov.session_key).toBe("sess-1");
+    });
+
+    test("afterTurn includes thread_id in provenance", async () => {
+      const engine = createEngine();
+      await engine.bootstrap({ sessionId: "sess-1", threadId: "thread-xyz" });
+      await engine.afterTurn({
+        sessionId: "sess-1",
+        messages: [
+          { role: "user", content: "Hello there, how are you doing today?" },
+          { role: "assistant", content: "I am doing great, thank you for asking!" },
+        ],
+        prePromptMessageCount: 0,
+      });
+
+      const req = lastRequest["/messages"] as any;
+      const prov = JSON.parse(req.messages[0].source_description);
+      expect(prov.thread_id).toBe("thread-xyz");
     });
   });
 });

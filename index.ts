@@ -49,6 +49,7 @@ interface HookContext {
   agentId?: string;
   messageProvider?: string;
   messageChannel?: string;
+  threadId?: string;
   [key: string]: unknown; // allow extension without breaking
 }
 
@@ -108,6 +109,7 @@ const graphitiPlugin = {
       if (ctx.agentId) meta.agent = ctx.agentId;
       if (ctx.messageProvider) meta.channel = ctx.messageProvider;
       else if (ctx.messageChannel) meta.channel = ctx.messageChannel;
+      if (ctx.threadId) meta.threadId = ctx.threadId;
       if (ctx.sessionId && sessionStarts.has(ctx.sessionId)) {
         meta.sessionStart = sessionStarts.get(ctx.sessionId);
       }
@@ -490,6 +492,7 @@ const graphitiPlugin = {
             source_description: buildProvenance(groupId, {
               event: "before_compaction",
               session_key: meta.sessionKey,
+              thread_id: meta.threadId,
               agent: meta.agent,
               channel: meta.channel,
               session_start: meta.sessionStart,
@@ -533,6 +536,7 @@ const graphitiPlugin = {
             source_description: buildProvenance(groupId, {
               event: "before_reset",
               session_key: meta.sessionKey,
+              thread_id: meta.threadId,
               agent: meta.agent,
               channel: meta.channel,
               session_start: meta.sessionStart,

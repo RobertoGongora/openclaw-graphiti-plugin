@@ -16,12 +16,16 @@
     Normal turns with sufficient message history get zero auto-injection.
   - **Output**: separate `<graphiti-continuity>` and `<graphiti-context>` blocks
     for clear debugging and feedback-loop prevention via `sanitizeForCapture()`.
-  - **Limitation**: after `/new` or session reset, the new session file is empty
-    so Stage A cannot recover prior context. Cross-session episode recovery
-    requires session lineage metadata tracked in #155.
+  - **Episode-based fallback** (Stage A.5): when the session file is empty or
+    missing (after `/new`, timeout, or resume), `assemble()` now queries recent
+    episodes from the knowledge graph and filters by `session_key` provenance to
+    recover what was discussed in the same session. This closes the reset/timeout
+    gap where Stage A had nothing to recover.
 
-- **Provenance scaffolding**: `thread_id` field added to `SessionMeta` and
-  `buildProvenance()` for future saga/thread support (#155).
+- **`thread_id` wired end-to-end**: `thread_id` is now populated from runtime
+  context (`HookContext.threadId`), stored in episode provenance across all
+  capture paths (ingest, afterTurn, compact, ingestBatch, onSubagentEnded), and
+  used by episode-based continuity recovery to prefer same-thread episodes.
 
 ### Changed
 
