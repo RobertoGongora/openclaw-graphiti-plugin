@@ -173,8 +173,10 @@ export class GraphitiContextEngine {
    * context. Normal turns with sufficient history get no injection.
    *
    * Two-stage pipeline:
-   *   A. Continuity recovery from session transcript (JSONL file tail)
-   *   B. Targeted semantic recall via /get-memory
+   *   A. Continuity recovery — session transcript tail, then episode-based
+   *      fallback (filtered by session_key/thread_id provenance)
+   *   B. Targeted semantic recall — /search against recovered continuity,
+   *      or /get-memory on the current window when no continuity is available
    */
   async assemble(params: {
     sessionId: string;
