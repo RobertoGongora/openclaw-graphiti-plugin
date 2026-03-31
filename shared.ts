@@ -191,9 +191,11 @@ export function formatFactsAsContext(facts: { name: string; fact: string }[]): s
  * Detect whether the current turn is likely a continuity gap —
  * the runtime has lost recent conversational context.
  */
+export type LifecycleEvent = "bootstrap" | "compact";
+
 export function isContinuityGap(
   messageCount: number,
-  opts?: { recentEvent?: string | null; threshold?: number },
+  opts?: { recentEvent?: LifecycleEvent | string | null; threshold?: number },
 ): boolean {
   const threshold = opts?.threshold ?? 3;
   const event = opts?.recentEvent;

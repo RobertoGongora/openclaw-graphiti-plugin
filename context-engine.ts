@@ -10,6 +10,7 @@ import { createRequire } from "node:module";
 import type { GraphitiClient, GraphitiMessage } from "./client.js";
 import type { DebugLog } from "./debug-log.js";
 import { buildEpisodeName, buildProvenance, extractEpisodeContinuity, extractTextContent, extractTextsFromMessages, formatContinuityBlock, formatFactsAsContext, hasDeicticReferences, isContinuityGap, readSessionFileTail, sanitizeForCapture } from "./shared.js";
+import type { LifecycleEvent } from "./shared.js";
 
 const _require = createRequire(import.meta.url);
 const PLUGIN_VERSION: string = (_require("./package.json") as any).version;
@@ -87,10 +88,11 @@ export class GraphitiContextEngine {
   private static readonly HEALTH_CACHE_TTL_MS = 15_000;
 
   /** Smart autoRecall state — tracks lifecycle events for continuity gap detection. */
-  private _lastEvent: string | null = null;
+  private _lastEvent: LifecycleEvent | null = null;
   private _sessionFile: string | null = null;
   private _sessionId: string | null = null;
   private _threadId: string | null = null;
+  private _recalledSessions = new Set<string>();
 
   constructor(
     private client: GraphitiClient,
@@ -99,6 +101,12 @@ export class GraphitiContextEngine {
     private debugLog: DebugLog,
     private logger?: { info?: (...args: any[]) => void; warn: (...args: any[]) => void },
   ) {}
+
+  /** Signal that the next assemble() should fire recovery for this session. */
+  private signalRecovery(sessionId: string, event: LifecycleEvent): void {
+    this._lastEvent = event;
+    this._recalledSessions.delete(sessionId);
+  }
 
   /** Health check with short TTL cache (15s). */
   private async cachedHealthy(): Promise<boolean> {
@@ -208,12 +216,24 @@ export class GraphitiContextEngine {
       const gapDetected = isContinuityGap(params.messages.length, { recentEvent: this._lastEvent });
       const deicticDetected = !!lastUserText && hasDeicticReferences(lastUserText);
 
+      // Session-scoped short-circuit: skip recall if this session already received
+      // Graphiti context.  Lifecycle events (bootstrap/compact via _lastEvent) and
+      // deictic references override the gate so recovery still fires when needed.
+      // TODO(#171): if the plugin-sdk exposes effective system-prompt contents or
+      // placement control for ContextEngine additions, replace this session-scoped
+      // short-circuit with direct Graphiti-tag detection or append-based placement.
+      if (this._recalledSessions.has(params.sessionId) && !this._lastEvent && !deicticDetected) {
+        this.debugLog.log("ce-assemble", { skipped: true, reason: "already_injected" });
+        return passThrough;
+      }
+
       if (!gapDetected && !deicticDetected) {
         this.debugLog.log("ce-assemble", { skipped: true, reason: "no_recovery_needed" });
         return passThrough;
       }
 
-      // Consume the one-shot event flag
+      // Consume the one-shot event flag.  Safe: JS is single-threaded so no
+      // concurrent assemble() can read between capture and clear.
       const triggerEvent = this._lastEvent;
       this._lastEvent = null;
       const maxFacts = this.cfg.recallMaxFacts ?? 10;
@@ -281,6 +301,11 @@ export class GraphitiContextEngine {
         ms: Date.now() - start,
       });
 
+      if (this._recalledSessions.size >= 1000) {
+        this.debugLog.log("ce-assemble", { action: "recalled_sessions_reset", previousSize: this._recalledSessions.size });
+        this._recalledSessions.clear();
+      }
+      this._recalledSessions.add(params.sessionId);
       return { messages: params.messages, systemPromptAddition, estimatedTokens };
     } catch (err) {
       this.logger?.warn(`graphiti: assemble failed: ${String(err)}`);
@@ -370,13 +395,13 @@ export class GraphitiContextEngine {
           source_description: buildProvenance(this.groupId, { event: "compact", session_key: params.sessionId, thread_id: this._threadId ?? undefined }),
         }]);
 
-        this._lastEvent = "compact";
+        this.signalRecovery(params.sessionId, "compact");
         this.debugLog.log("ce-compact", { action: "ingested", texts: texts.length, compacted: true });
         return { ok: true, compacted: true };
       }
 
       if (params.legacyParams?.bridge) {
-        this._lastEvent = "compact";
+        this.signalRecovery(params.sessionId, "compact");
         this.debugLog.log("ce-compact", { action: "legacy_bridge" });
         await params.legacyParams.bridge.compact();
         return { ok: true, compacted: true };
@@ -527,6 +552,13 @@ export class GraphitiContextEngine {
 
       this.logger?.info?.(`graphiti: after-turn ingested ${texts.length} messages`);
       this.debugLog.log("ce-afterTurn", { count: texts.length, sweep: compactionOccurred, ms: Date.now() - start });
+
+      // Auto-compaction truncated the message window — clear the session
+      // recall flag so the next assemble() fires recovery, mirroring the
+      // explicit compact() method.
+      if (compactionOccurred) {
+        this.signalRecovery(params.sessionId, "compact");
+      }
     } catch (err) {
       this.logger?.warn(`graphiti: afterTurn failed: ${String(err)}`);
       this.debugLog.log("ce-afterTurn", { error: String(err) });
@@ -553,7 +585,7 @@ export class GraphitiContextEngine {
         return { bootstrapped: false, reason: "server-unhealthy" };
       }
 
-      this._lastEvent = "bootstrap";
+      this.signalRecovery(params.sessionId, "bootstrap");
 
       const stats = await this.client.episodeCount();
       this.debugLog.log("ce-bootstrap", { healthy: true, episodes: stats.count });
