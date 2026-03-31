@@ -15,7 +15,7 @@
  * - Slash command: /graphiti
  */
 
-import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
+import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { Type } from "@sinclair/typebox";
 import path from "node:path";
 import os from "node:os";
@@ -409,12 +409,14 @@ const graphitiPlugin = {
     // ContextEngine registration (OpenClaw v2026.3.7+)
     // ========================================================================
 
-    const hasEngineSupport = typeof (api as any).registerContextEngine === "function";
+    const hasEngineSupport = typeof api.registerContextEngine === "function";
 
     if (hasEngineSupport) {
-      (api as any).registerContextEngine("graphiti", () =>
+      api.registerContextEngine("graphiti", () =>
         new GraphitiContextEngine(client, cfg, groupId, debugLog, api.logger),
       );
+    } else {
+      debugLog.log("register", { contextEngine: false, reason: "api_version" });
     }
 
     // ========================================================================

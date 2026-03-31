@@ -15,8 +15,9 @@ const _require = createRequire(import.meta.url);
 const PLUGIN_VERSION: string = (_require("./package.json") as any).version;
 
 // ---------------------------------------------------------------------------
-// Types from openclaw/plugin-sdk — declared locally so the plugin compiles
-// without a hard dependency on a specific OpenClaw version.
+// Types from openclaw/plugin-sdk (canonical source: context-engine/types.ts).
+// Declared locally so the plugin compiles without a hard dependency on a
+// specific OpenClaw version. Keep structurally compatible with the SDK types.
 // ---------------------------------------------------------------------------
 
 export interface ContextEngineInfo {

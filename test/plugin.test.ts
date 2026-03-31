@@ -31,6 +31,35 @@ describe("plugin shape", () => {
 });
 
 // ============================================================================
+// Manifest & Packaging
+// ============================================================================
+
+describe("manifest and packaging contract", () => {
+  test("manifest declares skills", async () => {
+    const fs = await import("node:fs");
+    const manifest = JSON.parse(
+      fs.readFileSync(new URL("../openclaw.plugin.json", import.meta.url), "utf-8"),
+    );
+    expect(manifest.skills).toEqual(["./skills"]);
+  });
+
+  test("SKILL.md exists at the declared path", async () => {
+    const fs = await import("node:fs");
+    const skillPath = new URL("../skills/graphiti/SKILL.md", import.meta.url);
+    expect(fs.existsSync(skillPath)).toBe(true);
+  });
+
+  test("package.json files[] includes README.md and skills", async () => {
+    const fs = await import("node:fs");
+    const pkg = JSON.parse(
+      fs.readFileSync(new URL("../package.json", import.meta.url), "utf-8"),
+    );
+    expect(pkg.files).toContain("README.md");
+    expect(pkg.files).toContain("skills");
+  });
+});
+
+// ============================================================================
 // Registration
 // ============================================================================
 
