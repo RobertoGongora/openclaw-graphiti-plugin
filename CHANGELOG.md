@@ -1,4 +1,25 @@
 # Changelog
+## [0.7.0-beta.4] — 2026-03-31
+
+### Added
+
+- **Session-scoped recall short-circuit** (#169): `assemble()` now skips recall
+  after the first successful Graphiti injection per session. Lifecycle events
+  (bootstrap, compaction) and deictic references override the gate so recovery
+  still fires when needed. Eliminates per-turn prompt churn and improves
+  prompt-cache reuse.
+  - `afterTurn()` now detects auto-compaction (message window shrunk mid-prompt)
+    and clears the recall gate so the next `assemble()` fires recovery.
+  - The 1000-entry safety cap on `_recalledSessions` now emits a debug log when
+    it triggers.
+  - Internal lifecycle state management extracted into `signalRecovery()` and
+    typed with `LifecycleEvent` union (`"bootstrap" | "compact"`).
+
+### Fixed
+
+- **Debug logging**: 1000-entry cap on `_recalledSessions` now logs when triggered.
+- **TODO links**: Added GitHub issue link (#171) for future re-marking test coverage.
+
 
 ## [0.7.0-beta.3] — 2026-03-31
 
