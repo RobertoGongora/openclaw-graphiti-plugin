@@ -1101,13 +1101,12 @@ describe("GraphitiContextEngine", () => {
       expect(result1.systemPromptAddition).toBeDefined();
       expect(result1.systemPromptAddition).toContain("<graphiti-continuity>");
 
-      // Second assemble with few messages but no event — gap by message count still works
+      // Second assemble — session already recalled, short-circuits (bootstrap-once)
       const result2 = await engine.assemble({
         sessionId: "sess-1",
         messages: [{ role: "user", content: "What else is there?" }],
       });
-      // Still fires because messageCount <= 3 (gap heuristic), but no event flag
-      expect(result2.systemPromptAddition).toBeDefined();
+      expect(result2.systemPromptAddition).toBeUndefined();
     });
 
     test("fires after compact", async () => {
@@ -1351,6 +1350,177 @@ describe("GraphitiContextEngine", () => {
       expect(result.systemPromptAddition).toContain("microservices");
       // /search should be used (driven by episode content), not /get-memory
       expect(lastRequest["/search"]).toBeDefined();
+    });
+
+    describe("session-scoped short-circuit", () => {
+      test("first turn injects and marks session; second turn short-circuits", async () => {
+        const sessionFile = createSessionFile([
+          { role: "user", content: "Tell me about the architecture" },
+          { role: "assistant", content: "The system uses microservices with Neo4j" },
+        ]);
+
+        const engine = createEngine();
+        await engine.bootstrap({ sessionId: "sess-1", sessionFile });
+
+        const result1 = await engine.assemble({
+          sessionId: "sess-1",
+          messages: [{ role: "user", content: "Hello" }],
+        });
+        expect(result1.systemPromptAddition).toBeDefined();
+
+        // Same session, no lifecycle event, no deictic — should short-circuit
+        const result2 = await engine.assemble({
+          sessionId: "sess-1",
+          messages: Array.from({ length: 5 }, (_, i) => ({ role: i % 2 === 0 ? "user" : "assistant", content: `msg ${i}` })),
+        });
+        expect(result2.systemPromptAddition).toBeUndefined();
+      });
+
+      test("second turn does not call /get-memory or /search", async () => {
+        const sessionFile = createSessionFile([
+          { role: "user", content: "Previous discussion about deployment" },
+          { role: "assistant", content: "Deployment uses Docker containers" },
+        ]);
+
+        const engine = createEngine();
+        await engine.bootstrap({ sessionId: "sess-1", sessionFile });
+
+        // First call — triggers recall
+        await engine.assemble({
+          sessionId: "sess-1",
+          messages: [{ role: "user", content: "Hello" }],
+        });
+
+        // Clear request tracking
+        delete (lastRequest as any)["/get-memory"];
+        delete (lastRequest as any)["/search"];
+
+        // Second call — should short-circuit without server calls
+        await engine.assemble({
+          sessionId: "sess-1",
+          messages: [{ role: "user", content: "Next question" }],
+        });
+
+        expect(lastRequest["/get-memory"]).toBeUndefined();
+        expect(lastRequest["/search"]).toBeUndefined();
+      });
+
+      test("zero facts do not mark session", async () => {
+        mockOverrides.searchFacts = [];
+        mockOverrides.getMemoryFacts = [];
+
+        const engine = createEngine();
+        await engine.bootstrap({ sessionId: "sess-1" });
+
+        // First assemble — no facts returned, session should NOT be marked
+        const result1 = await engine.assemble({
+          sessionId: "sess-1",
+          messages: [{ role: "user", content: "Hello" }],
+        });
+        expect(result1.systemPromptAddition).toBeUndefined();
+
+        // Restore facts and trigger compact to set _lastEvent (messages must be >20 chars)
+        mockOverrides.searchFacts = undefined;
+        mockOverrides.getMemoryFacts = undefined;
+        await engine.compact({
+          sessionId: "sess-1",
+          messages: [
+            { role: "user", content: "Tell me about the deployment pipeline and its stages" },
+            { role: "assistant", content: "The pipeline uses Docker containers with GitHub Actions for CI/CD" },
+          ],
+        });
+
+        // Next assemble should still attempt recall (session was never marked)
+        const result2 = await engine.assemble({
+          sessionId: "sess-1",
+          messages: [{ role: "user", content: "Continue" }],
+        });
+        expect(result2.systemPromptAddition).toBeDefined();
+      });
+
+      test("different sessionId still performs recall", async () => {
+        const sessionFile = createSessionFile([
+          { role: "user", content: "Architecture discussion" },
+          { role: "assistant", content: "Event-driven design with plugins" },
+        ]);
+
+        const engine = createEngine();
+        await engine.bootstrap({ sessionId: "sess-1", sessionFile });
+
+        // Mark sess-1
+        const result1 = await engine.assemble({
+          sessionId: "sess-1",
+          messages: [{ role: "user", content: "Hello" }],
+        });
+        expect(result1.systemPromptAddition).toBeDefined();
+
+        // sess-2 should still get recall (few messages → gap detected)
+        const result2 = await engine.assemble({
+          sessionId: "sess-2",
+          messages: [{ role: "user", content: "Tell me about Alice" }],
+        });
+        expect(result2.systemPromptAddition).toBeDefined();
+      });
+
+      test("compact overrides short-circuit", async () => {
+        const sessionFile = createSessionFile([
+          { role: "user", content: "System design discussion" },
+          { role: "assistant", content: "The system uses event-driven architecture" },
+        ]);
+
+        const engine = createEngine();
+        await engine.bootstrap({ sessionId: "sess-1", sessionFile });
+
+        // First call — marks session
+        const result1 = await engine.assemble({
+          sessionId: "sess-1",
+          messages: [{ role: "user", content: "Hello" }],
+        });
+        expect(result1.systemPromptAddition).toBeDefined();
+
+        // Compact sets _lastEvent = "compact" (messages must be >20 chars)
+        await engine.compact({
+          sessionId: "sess-1",
+          messages: [
+            { role: "user", content: "Tell me about the deployment pipeline and its stages" },
+            { role: "assistant", content: "The pipeline uses Docker containers with GitHub Actions for CI/CD" },
+          ],
+        });
+
+        // Next assemble — compact event overrides the session gate
+        const result2 = await engine.assemble({
+          sessionId: "sess-1",
+          messages: [{ role: "user", content: "Where were we?" }],
+        });
+        expect(result2.systemPromptAddition).toBeDefined();
+      });
+
+      test("deictic reference overrides short-circuit", async () => {
+        const sessionFile = createSessionFile([
+          { role: "user", content: "Discuss the authentication redesign" },
+          { role: "assistant", content: "JWT with refresh tokens for the new auth system" },
+        ]);
+
+        const engine = createEngine();
+        await engine.bootstrap({ sessionId: "sess-1", sessionFile });
+
+        // First call — marks session
+        const result1 = await engine.assemble({
+          sessionId: "sess-1",
+          messages: [{ role: "user", content: "Hello" }],
+        });
+        expect(result1.systemPromptAddition).toBeDefined();
+
+        // Deictic reference should override the session gate
+        const result2 = await engine.assemble({
+          sessionId: "sess-1",
+          messages: Array.from({ length: 5 }, (_, i) => ({
+            role: i % 2 === 0 ? "user" : "assistant",
+            content: i === 4 ? "continue where we left off" : `msg ${i}`,
+          })),
+        });
+        expect(result2.systemPromptAddition).toBeDefined();
+      });
     });
 
     test("autoRecall: false disables recall in assemble but engine still works", async () => {

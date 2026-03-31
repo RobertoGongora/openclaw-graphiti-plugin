@@ -8,6 +8,11 @@
   guidance, and memory-core complementarity notes.
 - **Install guidance**: README now documents stable (pinned version) vs beta
   (`@beta` tag) install paths.
+- **Session-scoped recall short-circuit** (#168): `assemble()` now skips recall
+  after the first successful Graphiti injection per session. Lifecycle events
+  (bootstrap, compaction) and deictic references override the gate so recovery
+  still fires when needed. Eliminates per-turn prompt churn and improves
+  prompt-cache reuse.
 - **Smart autoRecall** (#164): `assemble()` is now a two-stage continuity-aware
   pipeline that only fires when context loss is detected — not every turn.
   - **Stage A** reads the tail of the JSONL session transcript (bounded 128KB chunk)

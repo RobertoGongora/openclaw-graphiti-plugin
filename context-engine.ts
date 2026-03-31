@@ -91,6 +91,7 @@ export class GraphitiContextEngine {
   private _sessionFile: string | null = null;
   private _sessionId: string | null = null;
   private _threadId: string | null = null;
+  private _recalledSessions = new Set<string>();
 
   constructor(
     private client: GraphitiClient,
@@ -208,6 +209,17 @@ export class GraphitiContextEngine {
       const gapDetected = isContinuityGap(params.messages.length, { recentEvent: this._lastEvent });
       const deicticDetected = !!lastUserText && hasDeicticReferences(lastUserText);
 
+      // Session-scoped short-circuit: skip recall if this session already received
+      // Graphiti context.  Lifecycle events (bootstrap/compact via _lastEvent) and
+      // deictic references override the gate so recovery still fires when needed.
+      // TODO: if the plugin-sdk exposes effective system-prompt contents or
+      // placement control for ContextEngine additions, replace this session-scoped
+      // short-circuit with direct Graphiti-tag detection or append-based placement.
+      if (this._recalledSessions.has(params.sessionId) && !this._lastEvent && !deicticDetected) {
+        this.debugLog.log("ce-assemble", { skipped: true, reason: "already_injected" });
+        return passThrough;
+      }
+
       if (!gapDetected && !deicticDetected) {
         this.debugLog.log("ce-assemble", { skipped: true, reason: "no_recovery_needed" });
         return passThrough;
@@ -281,6 +293,8 @@ export class GraphitiContextEngine {
         ms: Date.now() - start,
       });
 
+      if (this._recalledSessions.size >= 1000) this._recalledSessions.clear();
+      this._recalledSessions.add(params.sessionId);
       return { messages: params.messages, systemPromptAddition, estimatedTokens };
     } catch (err) {
       this.logger?.warn(`graphiti: assemble failed: ${String(err)}`);
@@ -371,12 +385,14 @@ export class GraphitiContextEngine {
         }]);
 
         this._lastEvent = "compact";
+        this._recalledSessions.delete(params.sessionId);
         this.debugLog.log("ce-compact", { action: "ingested", texts: texts.length, compacted: true });
         return { ok: true, compacted: true };
       }
 
       if (params.legacyParams?.bridge) {
         this._lastEvent = "compact";
+        this._recalledSessions.delete(params.sessionId);
         this.debugLog.log("ce-compact", { action: "legacy_bridge" });
         await params.legacyParams.bridge.compact();
         return { ok: true, compacted: true };
@@ -554,6 +570,7 @@ export class GraphitiContextEngine {
       }
 
       this._lastEvent = "bootstrap";
+      this._recalledSessions.delete(params.sessionId);
 
       const stats = await this.client.episodeCount();
       this.debugLog.log("ce-bootstrap", { healthy: true, episodes: stats.count });
