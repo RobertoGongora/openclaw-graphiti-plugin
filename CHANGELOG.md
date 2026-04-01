@@ -1,4 +1,14 @@
 # Changelog
+## [0.7.0-beta.5] — 2026-04-01
+
+### Fixed
+
+- **Config overwrite on install/update** (#172): Removed `default` values from
+  `configSchema` in `openclaw.plugin.json` to prevent the installer from
+  overwriting user-customized settings. Runtime behavior is unchanged — the plugin
+  applies identical defaults in code. Added `placeholder` and clarified `help`
+  text in `uiHints` so the Settings UI still communicates default values.
+
 ## [0.7.0-beta.4] — 2026-03-31
 
 ### Added
