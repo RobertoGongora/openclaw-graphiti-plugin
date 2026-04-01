@@ -55,6 +55,18 @@ The `@beta` tag resolves to the latest pre-release at install time. The resolved
 version is locked, but future `openclaw plugins update` runs will pull the newest
 beta. For reproducible deployments, always use an exact version.
 
+### Known issue: config overwrite on install/update
+
+OpenClaw's plugin installer may overwrite your custom config values with schema
+defaults when you run `openclaw plugins install` or `openclaw plugins update`. As
+of v0.7.0-beta.5, this plugin removes schema defaults to mitigate the issue.
+
+If you are on an older plugin version, verify your settings after install/update:
+
+```bash
+openclaw config get plugins.entries.graphiti.config
+```
+
 ## Recommended setup
 
 As of v0.3.0, Graphiti does **not** claim the exclusive memory slot. The recommended
