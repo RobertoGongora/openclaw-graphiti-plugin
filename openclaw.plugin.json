@@ -59,12 +59,12 @@
     "url": {
       "label": "Graphiti Server URL",
       "placeholder": "http://localhost:8100",
-      "help": "URL of the Graphiti FastAPI server"
+      "help": "URL of the Graphiti FastAPI server (default: http://localhost:8100)"
     },
     "groupId": {
       "label": "Group ID",
       "placeholder": "core",
-      "help": "Graph namespace for this agent"
+      "help": "Graph namespace for this agent (default: core)"
     },
     "autoRecall": {
       "label": "Auto-Recall",
@@ -99,6 +99,7 @@
     "autoIndexExtensions": {
       "label": "Index File Extensions",
       "advanced": true,
+      "placeholder": ".md, .txt",
       "help": "Only index memory files with these extensions (default: .md, .txt)"
     },
     "debug": {
