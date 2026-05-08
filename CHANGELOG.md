@@ -1,4 +1,12 @@
 # Changelog
+
+## Unreleased
+
+### Fixed
+
+- Make ContextEngine `afterTurn()` ingestion non-blocking by scheduling Graphiti writes in a guarded background drain instead of awaiting them on the reply path.
+- Keep compaction safe by waiting for pending after-turn ingestion before compact ingestion.
+
 ## [0.7.0-beta.5] — 2026-04-01
 
 ### Fixed
