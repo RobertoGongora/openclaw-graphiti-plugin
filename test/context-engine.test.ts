@@ -16,6 +16,7 @@ import {
   getMockPort,
   mockOverrides,
   lastRequest,
+  requestBodies,
   SAMPLE_EPISODES_WITH_SESSION,
   SAMPLE_FACTS,
 } from "./helpers.js";
@@ -48,6 +49,20 @@ function createSessionFile(dir: string, messages: Array<{ role: string; content:
   ];
   require("node:fs").writeFileSync(filePath, lines.join("\n"));
   return filePath;
+}
+
+async function waitUntil(predicate: () => boolean, timeoutMs = 500): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  throw new Error("Timed out waiting for condition");
+}
+
+async function waitForMessageRequest(timeoutMs = 500): Promise<any> {
+  await waitUntil(() => !!lastRequest["/messages"], timeoutMs);
+  return lastRequest["/messages"] as any;
 }
 
 describe("GraphitiContextEngine", () => {
@@ -235,7 +250,7 @@ describe("GraphitiContextEngine", () => {
         prePromptMessageCount: 2,
       });
 
-      const req = lastRequest["/messages"] as any;
+      const req = await waitForMessageRequest();
       expect(req).toBeDefined();
       expect(req.messages[0].content).toContain("architecture");
       expect(req.messages[0].content).toContain("design patterns");
@@ -255,10 +270,30 @@ describe("GraphitiContextEngine", () => {
         prePromptMessageCount: 1,
       });
 
-      const req = lastRequest["/messages"] as any;
+      const req = await waitForMessageRequest();
       expect(req).toBeDefined();
       expect(req.messages[0].content).toContain("architecture");
       expect(req.messages[0].content).not.toContain("Tool result");
+    });
+
+    test("returns before slow Graphiti ingestion completes", async () => {
+      mockOverrides.ingestDelayMs = 100;
+      const engine = createEngine();
+
+      const start = Date.now();
+      await engine.afterTurn({
+        sessionId: "sess-1",
+        messages: [
+          { role: "user", content: "New question about architecture and design" },
+          { role: "assistant", content: "New answer about architecture and system design" },
+        ],
+        prePromptMessageCount: 0,
+      });
+      const elapsed = Date.now() - start;
+
+      expect(elapsed).toBeLessThan(50);
+      const req = await waitForMessageRequest();
+      expect(req.messages[0].content).toContain("architecture");
     });
 
     test("skips heartbeat turns", async () => {
@@ -272,6 +307,7 @@ describe("GraphitiContextEngine", () => {
         isHeartbeat: true,
       });
 
+      await new Promise((resolve) => setTimeout(resolve, 5));
       expect(lastRequest["/messages"]).toBeUndefined();
     });
 
@@ -316,7 +352,7 @@ describe("GraphitiContextEngine", () => {
         prePromptMessageCount: 10, // pre-compaction count, now only 5 messages remain
       });
 
-      const req = lastRequest["/messages"] as any;
+      const req = await waitForMessageRequest();
       expect(req).toBeDefined();
       // All 5 messages should be considered — 4 are user/assistant with enough text
       expect(req.messages[0].content).toContain("architecture");
@@ -337,7 +373,7 @@ describe("GraphitiContextEngine", () => {
         prePromptMessageCount: 8, // compaction occurred
       });
 
-      const req = lastRequest["/messages"] as any;
+      const req = await waitForMessageRequest();
       expect(req).toBeDefined();
       expect(req.messages[0].source_description).toContain("after_turn_sweep");
     });
@@ -354,7 +390,7 @@ describe("GraphitiContextEngine", () => {
         prePromptMessageCount: 1,
       });
 
-      const req = lastRequest["/messages"] as any;
+      const req = await waitForMessageRequest();
       expect(req).toBeDefined();
       expect(req.messages[0].source_description).toContain('"event":"after_turn"');
       expect(req.messages[0].source_description).not.toContain("after_turn_sweep");
@@ -512,6 +548,36 @@ describe("GraphitiContextEngine", () => {
       const req = lastRequest["/messages"] as any;
       expect(req).toBeDefined();
       expect(req.messages[0].content).toContain("architecture");
+    });
+
+    test("waits for pending afterTurn ingestion before compact ingestion", async () => {
+      mockOverrides.ingestDelayMs = 50;
+      const engine = createEngine();
+
+      await engine.afterTurn({
+        sessionId: "sess-1",
+        messages: [
+          { role: "user", content: "Turn question about project architecture and design" },
+          { role: "assistant", content: "Turn answer about modular architecture patterns" },
+        ],
+        prePromptMessageCount: 0,
+      });
+
+      const result = await engine.compact({
+        sessionId: "sess-1",
+        messages: [
+          { role: "user", content: "Compacted question about deployment process" },
+          { role: "assistant", content: "Compacted answer about release validation" },
+        ],
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.compacted).toBe(true);
+      expect(requestBodies["/messages"]).toHaveLength(2);
+      const afterTurnReq = requestBodies["/messages"][0] as any;
+      const compactReq = requestBodies["/messages"][1] as any;
+      expect(afterTurnReq.messages[0].source_description).toContain('"event":"after_turn"');
+      expect(compactReq.messages[0].source_description).toContain('"event":"compact"');
     });
 
     test("falls back to bridge when server unhealthy", async () => {
@@ -965,7 +1031,7 @@ describe("GraphitiContextEngine", () => {
         prePromptMessageCount: 10, // trigger sweep
       });
 
-      const req = lastRequest["/messages"] as any;
+      const req = await waitForMessageRequest();
       expect(req).toBeDefined();
       // The tail marker must survive because sweep uses slice(-12000)
       expect(req.messages[0].content).toContain("UNIQUE_TAIL_MARKER");
@@ -1669,6 +1735,7 @@ describe("GraphitiContextEngine", () => {
       });
 
       // Capture should still work even with recall disabled
+      await waitForMessageRequest();
       expect(lastRequest["/messages"]).toBeDefined();
     });
   });
@@ -1953,7 +2020,7 @@ describe("GraphitiContextEngine", () => {
         prePromptMessageCount: 0,
       });
 
-      const req = lastRequest["/messages"] as any;
+      const req = await waitForMessageRequest();
       const prov = JSON.parse(req.messages[0].source_description);
       expect(prov.thread_id).toBe("thread-xyz");
     });

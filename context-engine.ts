@@ -71,6 +71,13 @@ interface PluginConfig {
   [key: string]: unknown;
 }
 
+type AfterTurnIngestJob = {
+  sessionId: string;
+  texts: string[];
+  event: "after_turn" | "after_turn_sweep";
+  compactionOccurred: boolean;
+};
+
 // ---------------------------------------------------------------------------
 // GraphitiContextEngine
 // ---------------------------------------------------------------------------
@@ -93,6 +100,12 @@ export class GraphitiContextEngine {
   private _sessionId: string | null = null;
   private _threadId: string | null = null;
   private _recalledSessions = new Set<string>();
+
+  /** afterTurn ingestion runs off the reply path. */
+  private _afterTurnQueue: AfterTurnIngestJob[] = [];
+  private _afterTurnDrainScheduled = false;
+  private _afterTurnDrainInFlight = false;
+  private _afterTurnDrainPromise: Promise<void> | null = null;
 
   constructor(
     private client: GraphitiClient,
@@ -377,6 +390,8 @@ export class GraphitiContextEngine {
           return { ok: true, compacted: false, reason: "server-unhealthy" };
         }
 
+        await this.waitForAfterTurnDrain();
+
         const texts = extractTextsFromMessages(params.messages);
         if (texts.length === 0) {
           // No user/assistant text to preserve — safe to signal compaction complete.
@@ -526,14 +541,75 @@ export class GraphitiContextEngine {
 
     const event = compactionOccurred ? "after_turn_sweep" : "after_turn";
 
+    // Auto-compaction truncated the message window — clear the session
+    // recall flag immediately so the next assemble() can recover continuity
+    // without waiting for slow Graphiti extraction/ingest to finish.
+    if (compactionOccurred) {
+      this.signalRecovery(params.sessionId, "compact");
+    }
+
+    this.enqueueAfterTurnIngest({ sessionId: params.sessionId, texts, event, compactionOccurred });
+    this.debugLog.log("ce-afterTurn", { scheduled: true, count: texts.length, sweep: compactionOccurred });
+  }
+
+  private enqueueAfterTurnIngest(job: AfterTurnIngestJob): void {
+    this._afterTurnQueue.push(job);
+    this.scheduleAfterTurnDrain();
+  }
+
+  private scheduleAfterTurnDrain(): void {
+    if (this._afterTurnDrainScheduled || this._afterTurnDrainInFlight) return;
+
+    this._afterTurnDrainScheduled = true;
+    setTimeout(() => {
+      this._afterTurnDrainScheduled = false;
+      this._afterTurnDrainPromise = this.runAfterTurnDrain();
+      void this._afterTurnDrainPromise;
+    }, 0);
+  }
+
+  private async runAfterTurnDrain(): Promise<void> {
+    if (this._afterTurnDrainInFlight) return this._afterTurnDrainPromise ?? Promise.resolve();
+
+    this._afterTurnDrainInFlight = true;
+    try {
+      while (this._afterTurnQueue.length > 0) {
+        const job = this._afterTurnQueue.shift();
+        if (!job) continue;
+        await this.ingestAfterTurnJob(job);
+      }
+    } catch (err) {
+      this.logger?.warn(`graphiti: afterTurn background drain failed: ${String(err)}`);
+      this.debugLog.log("ce-afterTurn", { backgroundError: String(err) });
+    } finally {
+      this._afterTurnDrainInFlight = false;
+      this._afterTurnDrainPromise = null;
+
+      if (this._afterTurnQueue.length > 0) {
+        this.scheduleAfterTurnDrain();
+      }
+    }
+  }
+
+  private async waitForAfterTurnDrain(): Promise<void> {
+    if (this._afterTurnDrainScheduled && !this._afterTurnDrainPromise) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    if (this._afterTurnDrainPromise) {
+      await this._afterTurnDrainPromise;
+    }
+  }
+
+  private async ingestAfterTurnJob(job: AfterTurnIngestJob): Promise<void> {
     try {
       const start = Date.now();
-      const joined = sanitizeForCapture(texts.join("\n\n"));
+      const joined = sanitizeForCapture(job.texts.join("\n\n"));
       if (!joined) {
         this.debugLog.log("ce-afterTurn", { skipped: true, reason: "sanitized_empty" });
         return;
       }
-      const episode = compactionOccurred
+      const episode = job.compactionOccurred
         ? joined.slice(-12000)   // sweep: keep tail (newest messages)
         : joined.slice(0, 12000);
 
@@ -541,24 +617,17 @@ export class GraphitiContextEngine {
         content: episode,
         role_type: "user",
         role: "conversation",
-        name: buildEpisodeName("turn", { sessionKey: params.sessionId }),
+        name: buildEpisodeName("turn", { sessionKey: job.sessionId }),
         timestamp: new Date().toISOString(),
         source_description: buildProvenance(this.groupId, {
-          event,
-          session_key: params.sessionId,
+          event: job.event,
+          session_key: job.sessionId,
           thread_id: this._threadId ?? undefined,
         }),
       }]);
 
-      this.logger?.info?.(`graphiti: after-turn ingested ${texts.length} messages`);
-      this.debugLog.log("ce-afterTurn", { count: texts.length, sweep: compactionOccurred, ms: Date.now() - start });
-
-      // Auto-compaction truncated the message window — clear the session
-      // recall flag so the next assemble() fires recovery, mirroring the
-      // explicit compact() method.
-      if (compactionOccurred) {
-        this.signalRecovery(params.sessionId, "compact");
-      }
+      this.logger?.info?.(`graphiti: after-turn ingested ${job.texts.length} messages`);
+      this.debugLog.log("ce-afterTurn", { count: job.texts.length, sweep: job.compactionOccurred, ms: Date.now() - start });
     } catch (err) {
       this.logger?.warn(`graphiti: afterTurn failed: ${String(err)}`);
       this.debugLog.log("ce-afterTurn", { error: String(err) });
