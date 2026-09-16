@@ -1,6 +1,6 @@
 # ADR-002: Knowledge journal and historical replay
 
-Status: implemented; isolated validation in progress before live activation.
+Status: implemented and validated in isolation; live activation pending.
 
 ## Decision
 
@@ -76,3 +76,11 @@ support invalidation, concurrent idempotent writes, transaction rollback, journa
 corruption detection, bootstrap coverage, checkpoint reconstruction, isolated
 read-only replay, and atomic revision promotion. Model regression expectations
 remain fixed; the existing real-bank exact-quote A/B limitation remains separate.
+
+The Docker candidate passed 47 deterministic tests and all six fixed Luna/medium
+cases twice (12/12). A private replica of 1,677 existing knowledge records retained
+identical current results after bootstrap, with matching historical results for
+five representative subjects. Baseline creation took 0.17 seconds on that replica;
+full head verification took 0.15 seconds. These are one-run measurements, not a
+scaling guarantee. Sanitized results are committed in
+`evals/baselines/journal-validation.json`; golden approval remains false.
