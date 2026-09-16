@@ -66,3 +66,17 @@ Read-only replay protects its historical view from ingest, corrections, merges,
 and dream publication. Source file content and embedded dream snapshots retain
 original provenance. See [ADR-002](adr/002-memory-change-journal.md) for boundaries
 and implementation costs.
+
+## Upgrading an existing installation
+
+Validate the candidate engine against an isolated database first. Gracefully stop
+all writers, save a graph backup, and run `history init` with the new engine before
+starting the upgraded worker and MCP service. Preserve the database volume and
+source mount paths so the worker resumes the same queue.
+
+Once a namespace has a journal, every knowledge writer must support it. Running
+an older writer or editing knowledge properties directly in Cypher can diverge
+from recorded history; subsequent journaled writes stop until that discrepancy is
+resolved. `history verify` detects this condition. Keep the original backup and
+validated image identifiers with the deployment record. Retrying an existing
+source does not create a new journal entry unless its knowledge state changes.
