@@ -418,6 +418,7 @@ class Journal:
                 {"replay_origin": namespace, "replay_sequence": snapshot["sequence"]},
                 capture(tx, target),
             )
+            self.store.repair(target, transaction=tx)
             return {
                 "namespace": target,
                 "source": namespace,
@@ -425,6 +426,4 @@ class Journal:
                 "read_only": True,
             }
 
-        result = self.store.transaction(run)
-        self.store.repair(target)
-        return result
+        return self.store.transaction(run)

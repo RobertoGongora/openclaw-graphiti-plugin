@@ -667,7 +667,7 @@ class GraphStore:
             )
         )
 
-    def repair(self, namespace):
+    def repair(self, namespace, transaction=None):
         def run(tx):
             self.lock(tx, namespace)
             # Facts are the durable source of truth: restore missing structural edges.
@@ -678,6 +678,11 @@ class GraphStore:
                 "RETURN count(f) AS checked",
                 ns=namespace,
             ).single()["checked"]
+            tx.run(
+                "MATCH (i:MemoryInsight {namespace:$ns}) UNWIND i.supporting_fact_ids AS fid "
+                "MATCH (f:MemoryFact {namespace:$ns,id:fid}) MERGE (i)-[:DERIVED_FROM]->(f)",
+                ns=namespace,
+            ).consume()
             orphaned = tx.run(
                 "MATCH (f:MemoryFact {namespace:$ns}) WHERE NOT EXISTS { MATCH (:MemoryEntity)-[:HAS_FACT]->(f) } "
                 "OR NOT EXISTS { MATCH (f)-[:TARGET]->(:MemoryEntity) } "
@@ -691,4 +696,4 @@ class GraphStore:
                 "temporal_projection": "recomputed on every read",
             }
 
-        return self.transaction(run)
+        return run(transaction) if transaction is not None else self.transaction(run)

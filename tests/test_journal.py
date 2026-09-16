@@ -136,6 +136,26 @@ def test_dream_publication_and_support_retraction_have_history(graph):
     published = journal.snapshot(ns)["sequence"]
     assert store.recall(ns, "Atlas", at_change=before)["insights"] == []
     assert len(store.recall(ns, "Atlas", at_change=published)["insights"]) == 1
+    target = "replay:" + ns
+    try:
+        journal.replay(ns, target, sequence=published)
+        assert len(store.recall(target, "Atlas")["insights"]) == 1
+        links = store.transaction(
+            lambda tx: tx.run(
+                "MATCH (i:MemoryInsight {namespace:$ns})-[:DERIVED_FROM]->"
+                "(f:MemoryFact {namespace:$ns}) RETURN count(*) AS count",
+                ns=target,
+            ).single()["count"]
+        )
+        assert links == 1
+    finally:
+        store.transaction(
+            lambda tx: tx.run(
+                "MATCH (n) WHERE n.namespace=$ns OR (n:MemoryChange AND n.scope=$ns) "
+                "OR (n:MemorySpace AND n.id=$ns) DETACH DELETE n",
+                ns=target,
+            ).consume()
+        )
     service.dream_apply(request)
     assert journal.snapshot(ns)["sequence"] == published
     store.retract(ns, receipt["fact_ids"][0], "Wrong")
