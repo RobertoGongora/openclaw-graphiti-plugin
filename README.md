@@ -115,6 +115,15 @@ current-state neighborhood returned by `memory_recall`.
 - Reads restore missing structural links when their durable endpoints and source
   exist. Facts missing evidence are excluded and counted in freshness.
 
+## History and replay
+
+Knowledge changes are journaled atomically under `audit:<namespace>`. Ordinary
+recall uses the current graph; optional `known_at` or `at_change` inputs reconstruct
+past identities, facts, corrections, and published insights. `as_of` remains the
+event-time cutoff. Existing data starts with a dated baseline, not invented past
+history. [History commands and examples](docs/history.md) describe verification
+and read-only replay into a separate namespace.
+
 ## Dreaming
 
 Inspired by [Claude Managed Agents Dreams](https://platform.claude.com/docs/en/managed-agents/dreams),

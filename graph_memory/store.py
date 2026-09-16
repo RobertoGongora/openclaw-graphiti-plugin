@@ -3,6 +3,7 @@
 import hashlib
 import json
 import re
+import threading
 import unicodedata
 from datetime import datetime
 
@@ -32,9 +33,20 @@ class GraphStore:
         )
         self.database = database
         self.engine = engine_fingerprint()
+        self._journal_local = threading.local()
 
     def close(self):
         self.driver.close()
+
+    def assert_writable(self, namespace):
+        row = self.transaction(
+            lambda tx: tx.run(
+                "MATCH (s:MemorySpace {id:$ns}) RETURN s.replay_read_only AS readonly",
+                ns=namespace,
+            ).single()
+        )
+        if row and row["readonly"]:
+            raise ValueError("Historical replay is read-only")
 
     def transaction(self, fn, *args):
         # Leader routing matters: a different MCP process must not read a lagging follower.
@@ -56,6 +68,7 @@ class GraphStore:
                 "MemoryInsight",
                 "MemoryRevision",
                 "MemoryFeed",
+                "MemoryChange",
             ):
                 tx.run(
                     f"CREATE CONSTRAINT {label.lower()}_id IF NOT EXISTS FOR (n:{label}) REQUIRE n.id IS UNIQUE"
@@ -66,12 +79,29 @@ class GraphStore:
             tx.run(
                 "CREATE INDEX memory_episode_namespace IF NOT EXISTS FOR (n:MemoryEpisode) ON (n.namespace, n.status)"
             ).consume()
+            tx.run(
+                "CREATE INDEX memory_change_scope IF NOT EXISTS FOR (n:MemoryChange) ON (n.scope,n.sequence)"
+            ).consume()
             for field in ("subject_id", "target_id", "episode_id"):
                 tx.run(
                     f"CREATE INDEX memory_fact_{field} IF NOT EXISTS FOR (n:MemoryFact) ON (n.namespace,n.{field})"
                 ).consume()
 
         self.transaction(run)
+
+    def mutate(self, tx, namespace, kind, details, operation):
+        from .journal import Journal
+
+        active = getattr(self._journal_local, "active", set())
+        key = (id(tx), namespace)
+        if key in active:
+            return operation(tx)
+        self._journal_local.active = active
+        active.add(key)
+        try:
+            return Journal(self).mutate(tx, namespace, kind, details, operation)
+        finally:
+            active.remove(key)
 
     @staticmethod
     def lock(tx, namespace):
@@ -103,7 +133,12 @@ class GraphStore:
             ).single()
             return dict(record)
 
-        return run(transaction) if transaction is not None else self.transaction(run)
+        def operation(tx):
+            return self.mutate(
+                tx, transcript.namespace, "source_saved", {"episode_id": episode_id}, run
+            )
+
+        return operation(transaction) if transaction is not None else self.transaction(operation)
 
     def episode(self, namespace, episode_id):
         def run(tx):
@@ -319,7 +354,16 @@ class GraphStore:
                 "replayed": False,
             }
 
-        return run(transaction) if transaction is not None else self.transaction(run)
+        def operation(tx):
+            return self.mutate(
+                tx,
+                namespace,
+                "facts_committed",
+                {"episode_id": episode_id, "model": model_info or {"provider": "caller"}},
+                run,
+            )
+
+        return operation(transaction) if transaction is not None else self.transaction(operation)
 
     @staticmethod
     def grounded_facts(tx, namespace, ids, relation=None):
@@ -347,7 +391,21 @@ class GraphStore:
         limit=30,
         *,
         _complete=False,
+        known_at=None,
+        at_change=None,
     ):
+        if known_at is not None or at_change is not None:
+            from .journal import Journal
+
+            return Journal(self).recall(
+                namespace,
+                query,
+                as_of,
+                limit,
+                known_at=known_at,
+                sequence=at_change,
+                complete=_complete,
+            )
         at = as_of or now()
         needle = normalized(query)
 
@@ -437,15 +495,24 @@ class GraphStore:
 
         return self.transaction(run)
 
-    def latest(self, namespace, entity, as_of=None, relation=None):
+    def latest(
+        self, namespace, entity, as_of=None, relation=None, *, known_at=None, at_change=None
+    ):
         # Generic across entity kinds; resolve all evidence before applying output bounds.
-        context = self.recall(namespace, entity, as_of, 100, _complete=True)
+        context = self.recall(
+            namespace, entity, as_of, 100, _complete=True, known_at=known_at, at_change=at_change
+        )
         entities = context["entities"]
         if len(entities) != 1:
             return {
                 "status": "ambiguous" if entities else "not_found",
                 "candidates": entities,
                 "freshness": context["freshness"],
+                **(
+                    {"knowledge_history": context["knowledge_history"]}
+                    if "knowledge_history" in context
+                    else {}
+                ),
             }
 
         def relevant(fact):
@@ -518,6 +585,11 @@ class GraphStore:
             "as_of": context["as_of"],
             "revision": context["revision"],
             "freshness": context["freshness"],
+            **(
+                {"knowledge_history": context["knowledge_history"]}
+                if "knowledge_history" in context
+                else {}
+            ),
         }
 
     def retract(self, namespace, fact_id, reason):
@@ -538,7 +610,11 @@ class GraphStore:
             ).consume()
             return {"fact_id": fact_id, "retracted": True}
 
-        return self.transaction(run)
+        return self.transaction(
+            lambda tx: self.mutate(
+                tx, namespace, "fact_retracted", {"fact_id": fact_id, "reason": reason}, run
+            )
+        )
 
     def merge(self, namespace, source_key, target_key, reason):
         if source_key == target_key:
@@ -581,7 +657,15 @@ class GraphStore:
             ).consume()
             return {"merged": source_key, "into": target_key}
 
-        return self.transaction(run)
+        return self.transaction(
+            lambda tx: self.mutate(
+                tx,
+                namespace,
+                "entities_merged",
+                {"source_key": source_key, "target_key": target_key, "reason": reason},
+                run,
+            )
+        )
 
     def repair(self, namespace):
         def run(tx):

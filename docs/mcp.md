@@ -70,3 +70,7 @@ The public catalog contains only `memory_recall`, `memory_latest`, `memory_inges
 rejected by MCP and remain accessible through the Python engine and CLI.
 `memory_ingest` accepts original messages and always queues them; its public schema
 has no `extract` switch and its response never delegates processing back to the agent.
+
+Recall/latest also accept optional `known_at` or `at_change` cutoffs for historical
+knowledge. `as_of` remains the separate event-time cutoff. Historical results
+include coverage metadata; see [history](history.md). The catalog remains five tools.

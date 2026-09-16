@@ -10,7 +10,7 @@ from pathlib import Path
 from .importers import memory_files, transcripts
 from .llm import configured_llm
 from .mcp import Protocol, http_server, stdio
-from .models import DreamCreate, DreamRequest, Ingest, Relation
+from .models import DreamCreate, DreamRequest, HistoricalScope, Ingest, Latest, Recall, Relation
 from .service import MemoryService
 from .store import GraphStore
 
@@ -51,6 +51,19 @@ def main():
     latest = commands.add_parser("latest")
     latest.add_argument("entity")
     latest.add_argument("--relation", choices=[r.value for r in Relation])
+    for query_parser in (recall, latest):
+        query_parser.add_argument("--as-of")
+        cutoffs = query_parser.add_mutually_exclusive_group()
+        cutoffs.add_argument("--known-at")
+        cutoffs.add_argument("--at-change", type=int)
+    history = commands.add_parser("history", help="Inspect and replay the knowledge journal")
+    history.add_argument("action", choices=("init", "list", "snapshot", "replay", "verify"))
+    history.add_argument("--after", type=int, default=-1)
+    history.add_argument("--limit", type=int, default=100)
+    cutoffs = history.add_mutually_exclusive_group()
+    cutoffs.add_argument("--known-at")
+    cutoffs.add_argument("--at-change", type=int)
+    history.add_argument("--target", help="New replay: namespace for an isolated historical graph")
     worker = commands.add_parser("work")
     worker.add_argument("--limit", type=int, default=10)
     worker.add_argument("--watch", action="store_true")
@@ -160,9 +173,51 @@ def main():
             else:
                 result = getattr(manager, args.action)(args.namespace, args.id)
         elif args.command == "recall":
-            result = service.store.recall(args.namespace, args.query)
+            result = service.call(
+                "memory_recall",
+                Recall(
+                    namespace=args.namespace,
+                    query=args.query,
+                    as_of=args.as_of,
+                    known_at=args.known_at,
+                    at_change=args.at_change,
+                ).model_dump(mode="json"),
+            )
         elif args.command == "latest":
-            result = service.store.latest(args.namespace, args.entity, relation=args.relation)
+            result = service.call(
+                "memory_latest",
+                Latest(
+                    namespace=args.namespace,
+                    entity=args.entity,
+                    relation=args.relation,
+                    as_of=args.as_of,
+                    known_at=args.known_at,
+                    at_change=args.at_change,
+                ).model_dump(mode="json"),
+            )
+        elif args.command == "history":
+            from .journal import Journal
+
+            journal = Journal(service.store)
+            cutoff = HistoricalScope(
+                namespace=args.namespace, known_at=args.known_at, at_change=args.at_change
+            )
+            if args.action == "init":
+                result = journal.initialize(args.namespace)
+            elif args.action == "verify":
+                result = journal.verify(args.namespace)
+            elif args.action == "list":
+                result = {"changes": journal.events(args.namespace, args.after, args.limit)}
+            elif args.action == "snapshot":
+                result = journal.snapshot(
+                    args.namespace, known_at=cutoff.known_at, sequence=cutoff.at_change
+                )
+            else:
+                if not args.target:
+                    parser.error("history replay requires --target replay:<name>")
+                result = journal.replay(
+                    args.namespace, args.target, known_at=cutoff.known_at, sequence=cutoff.at_change
+                )
         elif args.command == "scan":
             from .daemon import scan_bank
 

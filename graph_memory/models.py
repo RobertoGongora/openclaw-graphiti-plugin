@@ -215,13 +215,29 @@ class Commit(EpisodeRequest):
     extraction: Extraction
 
 
-class Recall(Scope):
+class HistoricalScope(Scope):
+    known_at: AwareDatetime | None = Field(
+        default=None,
+        description="What the graph knew at this time; distinct from the date a fact was true.",
+    )
+    at_change: Annotated[int, Field(ge=0)] | None = Field(
+        default=None, description="Exact journal change number, instead of known_at."
+    )
+
+    @model_validator(mode="after")
+    def one_history_cutoff(self):
+        if self.known_at is not None and self.at_change is not None:
+            raise ValueError("Choose known_at or at_change, not both")
+        return self
+
+
+class Recall(HistoricalScope):
     query: Text
     as_of: AwareDatetime | None = None
     limit: Annotated[int, Field(ge=1, le=100)] = 30
 
 
-class Latest(Scope):
+class Latest(HistoricalScope):
     entity: Text
     relation: Relation | None = None
     as_of: AwareDatetime | None = None

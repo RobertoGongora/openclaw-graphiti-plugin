@@ -149,7 +149,11 @@ class Revisions:
                 mapping=json.dumps({eid: mapping[eid] for eid in revision["episode_ids"]}),
             ).consume()
 
-        self.store.transaction(clone)
+        self.store.transaction(
+            lambda tx: self.store.mutate(
+                tx, candidate, "revision_candidate_created", {"revision_id": revision_id}, clone
+            )
+        )
         self.store.repair(candidate)
         for eid in revision["episode_ids"]:
             result = self.service.extract(
@@ -407,4 +411,8 @@ class Revisions:
                 "revalidated_dreams": len(revision.get("dream_map", {})),
             }
 
-        return self.store.transaction(run)
+        return self.store.transaction(
+            lambda tx: self.store.mutate(
+                tx, namespace, "revision_promoted", {"revision_id": revision_id}, run
+            )
+        )

@@ -1,6 +1,7 @@
 import pytest
 
 from evals.run import load_cases, suite_fingerprint
+from graph_memory.journal import Journal
 from graph_memory.models import DreamCreate, DreamOutput, DreamRequest
 from graph_memory.revisions import Revisions
 from graph_memory.service import MemoryService
@@ -92,7 +93,12 @@ def test_shadow_replay_diff_gates_promotion_and_dream_revalidation(graph):
         assert revisions.validate(ns, rid, report(), checks)["passed"]
         with pytest.raises(ValueError, match="Behavior changed"):
             revisions.promote(ns, rid)
+        before_promotion = Journal(store).snapshot(ns)["sequence"]
         result = revisions.promote(ns, rid, result["diff"]["digest"])
+        assert Journal(store).snapshot(ns)["sequence"] == before_promotion + 1
+        assert Journal(store).events(ns)[-1]["kind"] == "revision_promoted"
+        assert store.recall(ns, "Atlas", at_change=before_promotion)["planned"] == []
+        assert Journal(store).verify(ns)["verified"]
         assert result["status"] == "promoted"
         assert store.recall(ns, "Atlas")["planned"][0]["target"] == PG["key"]
         assert store.recall(ns, "Atlas")["current"][0]["target"] == MYSQL["key"]
@@ -100,7 +106,7 @@ def test_shadow_replay_diff_gates_promotion_and_dream_revalidation(graph):
     finally:
         store.transaction(
             lambda tx: tx.run(
-                "MATCH (n) WHERE n.namespace=$ns OR (n:MemorySpace AND n.id=$ns) DETACH DELETE n",
+                "MATCH (n) WHERE n.namespace=$ns OR (n:MemoryChange AND n.scope=$ns) OR (n:MemorySpace AND n.id=$ns) DETACH DELETE n",
                 ns=created["candidate"],
             ).consume()
         )
@@ -151,7 +157,7 @@ def test_live_writes_after_validation_block_promotion(graph):
     finally:
         store.transaction(
             lambda tx: tx.run(
-                "MATCH (n) WHERE n.namespace=$ns OR (n:MemorySpace AND n.id=$ns) DETACH DELETE n",
+                "MATCH (n) WHERE n.namespace=$ns OR (n:MemoryChange AND n.scope=$ns) OR (n:MemorySpace AND n.id=$ns) DETACH DELETE n",
                 ns=created["candidate"],
             ).consume()
         )

@@ -162,7 +162,7 @@ def evaluate(service, runs=1):
             finally:
                 service.store.transaction(
                     lambda tx, namespace=namespace: tx.run(
-                        "MATCH (n) WHERE n.namespace=$ns OR (n:MemorySpace AND n.id=$ns) DETACH DELETE n",
+                        "MATCH (n) WHERE n.namespace=$ns OR (n:MemoryChange AND n.scope=$ns) OR (n:MemorySpace AND n.id=$ns) DETACH DELETE n",
                         ns=namespace,
                     ).consume()
                 )

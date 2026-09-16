@@ -101,6 +101,7 @@ def hook(service, namespace, payload):
 
 
 def worker_tick(service, namespace, limit=10):
+    service.store.assert_writable(namespace)
     if service.llm is None:
         raise ValueError("Worker requires MEMORY_LLM=codex or compatible")
     due = service.store.transaction(

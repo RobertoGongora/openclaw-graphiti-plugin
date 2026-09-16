@@ -45,6 +45,7 @@ class MemoryService:
         }
 
     def extract(self, request: m.EpisodeRequest):
+        self.store.assert_writable(request.namespace)
         packet = self.prepare(request)
         if packet["status"] == "complete":
             return {"episode_id": request.episode_id, "status": "complete", "replayed": True}
@@ -116,7 +117,11 @@ class MemoryService:
                 at=m.now().isoformat(),
             ).consume()
 
-        self.store.transaction(run)
+        self.store.transaction(
+            lambda tx: self.store.mutate(
+                tx, request.namespace, "dream_created", {"dream_id": dream_id}, run
+            )
+        )
         return {"dream_id": dream_id, "status": "pending", "next_tool": "memory_dream_run"}
 
     def dream_get(self, request: m.DreamRequest):
@@ -137,6 +142,7 @@ class MemoryService:
         return self.store.transaction(run)
 
     def dream_run(self, request: m.DreamRequest):
+        self.store.assert_writable(request.namespace)
         if self.llm is None:
             raise ValueError("Configure MEMORY_LLM=codex for unattended dreaming")
         dream = self.dream_get(request)
@@ -208,7 +214,15 @@ class MemoryService:
                 if not row:
                     raise ValueError("Dream worker lease was replaced")
 
-            self.store.transaction(complete)
+            self.store.transaction(
+                lambda tx: self.store.mutate(
+                    tx,
+                    request.namespace,
+                    "dream_completed",
+                    {"dream_id": request.dream_id},
+                    complete,
+                )
+            )
         except Exception as exc:
             error_type = type(exc).__name__
             self.store.transaction(
@@ -274,7 +288,11 @@ class MemoryService:
                 "insights": len(output.insights),
             }
 
-        return self.store.transaction(run)
+        return self.store.transaction(
+            lambda tx: self.store.mutate(
+                tx, request.namespace, "insights_published", {"dream_id": request.dream_id}, run
+            )
+        )
 
     def tools(self):
         # The tuple owns both validation and dispatch, preventing schema/handler drift.
@@ -301,12 +319,26 @@ class MemoryService:
             ),
             "memory_recall": (
                 m.Recall,
-                lambda r: self.store.recall(r.namespace, r.query, r.as_of, r.limit),
+                lambda r: self.store.recall(
+                    r.namespace,
+                    r.query,
+                    r.as_of,
+                    r.limit,
+                    known_at=r.known_at,
+                    at_change=r.at_change,
+                ),
                 "Use when the user asks about their projects, preferences, people, decisions, or past work.",
             ),
             "memory_latest": (
                 m.Latest,
-                lambda r: self.store.latest(r.namespace, r.entity, r.as_of, r.relation),
+                lambda r: self.store.latest(
+                    r.namespace,
+                    r.entity,
+                    r.as_of,
+                    r.relation,
+                    known_at=r.known_at,
+                    at_change=r.at_change,
+                ),
                 "Use when the user asks when something last happened or what was most recently recorded about a subject.",
             ),
             "memory_pending": (
