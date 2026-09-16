@@ -1,0 +1,40 @@
+{
+  "id": "habit-out-of-order",
+  "description": "Report time and import order must not override actual repetition time.",
+  "transcripts": [
+    {
+      "source_id": "habit-new",
+      "session_id": "session-a",
+      "messages": [
+        {
+          "id": "a",
+          "role": "user",
+          "timestamp": "2026-09-15T20:00:00Z",
+          "content": "Track my habit named Rob pushups. I completed a repetition of Rob pushups at 2026-09-15T08:00:00Z."
+        }
+      ]
+    },
+    {
+      "source_id": "habit-old",
+      "session_id": "session-b",
+      "messages": [
+        {
+          "id": "b",
+          "role": "user",
+          "timestamp": "2026-09-16T09:00:00Z",
+          "content": "For the same habit Rob pushups: I also completed a repetition at 2026-09-12T07:30:00Z. I am reporting this old repetition today. I plan another tomorrow, but have not done it."
+        }
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "tool": "memory_latest",
+      "arguments": {
+        "habit": "Rob pushups"
+      },
+      "path": "latest.valid_at",
+      "equals": "2026-09-15T08:00:00+00:00"
+    }
+  ]
+}

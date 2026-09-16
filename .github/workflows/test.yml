@@ -7,6 +7,35 @@ on:
     branches: [master]
 
 jobs:
+  graph-memory:
+    runs-on: ubuntu-latest
+    services:
+      neo4j:
+        image: neo4j:5.26-community
+        env:
+          NEO4J_AUTH: none
+        ports:
+          - 7687:7687
+        options: >-
+          --health-cmd "cypher-shell -a bolt://localhost:7687 'RETURN 1'"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+    env:
+      MEMORY_TEST_NEO4J_URI: bolt://127.0.0.1:7687
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.11.11'
+      - run: uv sync --locked
+      - run: uv run ruff check graph_memory tests evals
+      - run: uv run ruff format --check graph_memory tests evals
+      - run: uv run pytest -q
+      - run: uv build
+      - run: docker build -t graph-memory:ci .
+      - run: docker run --rm graph-memory:ci --help
+      - run: docker compose config --quiet
+        env:
+          MEMORY_HTTP_TOKEN: ci-validation-only
   test:
     runs-on: ubuntu-latest
     steps:

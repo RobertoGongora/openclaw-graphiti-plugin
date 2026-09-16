@@ -1,0 +1,13 @@
+**
+!Dockerfile
+!pyproject.toml
+!graph_memory/
+!graph_memory/*.py
+!evals/
+!evals/*.py
+!evals/cases/
+!evals/cases/*.json
+!evals/ab/
+!evals/ab/*.json
+!tests/
+!tests/*.py

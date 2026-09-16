@@ -1,0 +1,12 @@
+{
+  "id": "project-decision-history",
+  "description": "Project decision retrieval is ordered by the decision date across sessions; proposals never become accepted decisions.",
+  "transcripts": [
+    {"source_id":"orion-new","session_id":"orion-a","messages":[{"id":"a","role":"user","timestamp":"2026-09-15T11:00:00Z","content":"At 2026-09-15T11:00:00Z, project Orion decided to use a durable queue for background jobs. This is an accepted design decision, not a claim that it is deployed."}]},
+    {"source_id":"orion-old","session_id":"orion-b","messages":[{"id":"b","role":"user","timestamp":"2026-09-16T12:00:00Z","content":"Historical note for project Orion: at 2026-09-12T09:00:00Z we decided to prototype background jobs inline. I am reporting that older decision today. A move to distributed workers is only a proposal for next week; it has not been decided or deployed."}]}
+  ],
+  "checks": [
+    {"tool":"memory_latest","arguments":{"entity":"Orion","relation":"decided"},"path":"latest.valid_at","equals":"2026-09-15T11:00:00+00:00"},
+    {"tool":"memory_recall","arguments":{"query":"Orion"},"path":"current","contains":{"relation":"decided","status":"active"}}
+  ]
+}

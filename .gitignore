@@ -4,3 +4,9 @@ dist/
 *.d.ts
 *.map
 .env
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.local/

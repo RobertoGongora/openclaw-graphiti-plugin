@@ -1,0 +1,104 @@
+# Behavioral evals and golden baselines
+
+The eval runner is intentionally small: pytest for deterministic/integration
+checks, JSON fixtures for LLM behavior, and standard-library orchestration.
+There is no model judge that can relax an expectation to match a new response.
+
+## Fixed expectations
+
+- Projects retain deployed dependencies alongside planned migrations.
+- Decisions are ordered by their original decision time, not late report time.
+- Updated personal preferences supersede old evidence within the same scope while
+  preserving separate reporting preferences.
+- Atlas keeps deployed MySQL alongside a planned PostgreSQL migration.
+- PHP is inferred only through supported Laravel → PHP evidence.
+- Undated imported notes cannot become newly observed current state.
+- Instructions embedded in a transcript cannot invent a completed repetition.
+- Dreaming preserves source facts and promotes only supported candidate insights.
+- A habit repetition is one event-time regression example, using the same generic
+  entity/relation retrieval as projects, people, and services.
+
+The deterministic suite additionally exercises invalid quotes and schemas,
+concurrency/idempotency, namespace isolation, temporal conflicts, source adapters,
+HTTP headers/auth/Origin, dependency invalidation, structural repair, candidate
+replay, changed-diff acceptance, and concurrent-write promotion rejection.
+
+```sh
+uv sync
+# Explicit endpoint is mandatory; use an isolated Neo4j in CI.
+export MEMORY_TEST_NEO4J_URI=bolt://127.0.0.1:17687
+uv run pytest -q
+MEMORY_LLM=codex uv run python -m evals.run --runs 2 \
+  --output .local/baseline-candidate.json
+```
+
+The model runner first runs deterministic/Neo4j tests, then evaluates every
+fixture. Nonzero exit means failed checks. Every case gets a new `eval:<UUID>`
+namespace, cleaned in a finally block. The runner never updates the fixtures.
+Reports include actual results, engine and suite hashes, model, reasoning effort,
+repeat count, and the deterministic gate. An engine change during a run fails it.
+
+For model variance, repeat the suite; one pass is a smoke test, not a stability
+claim. Sensitive real-bank results remain under ignored `.local/`; only synthetic
+reports or aggregate evidence belong in version control.
+
+The [effort comparison](effort-study.md) records why Luna now defaults to medium,
+including failed trials and the schema correction they exposed.
+
+## Establishing the golden standard
+
+`baselines/candidate.json` records the current candidate, not an automatically
+approved baseline. Review the cases for product correctness and the repeated
+results for model variance before blessing them. Changes to `cases/*.json` are
+ordinary reviewable diffs and need a reason explaining the intended behavioral
+change. Never copy actual output into expected output merely to make a run pass.
+
+Add regressions before fixing newly discovered failures. Prefer semantic checks
+(e.g. a deployed database and its time) over exact prose or entity IDs. Expectation
+files may also be used for project-specific revision checks; see
+[the revision workflow](../docs/revisions.md).
+
+## What these checks do not prove
+
+Exact quote validation proves provenance, not that a model interpreted a quote
+correctly. These cases sample important behavior; they do not certify every
+transcript, language, ambiguous date, or provider. Replaying real sources in a
+candidate namespace and inspecting the diff is still part of an engine release.
+Unseen sessions and sources still waiting for extraction cannot be included in
+freshness claims.
+
+## Real Claude native-memory versus MCP E2E
+
+```sh
+MEMORY_LLM=codex uv run python -m evals.ab \
+  --memory-dir /path/to/claude/project/memory \
+  --output .local/claude-ab.json
+# Bind the E2E evidence into a repeated model-eval report for the same engine:
+MEMORY_LLM=codex uv run python -m evals.run --runs 2 \
+  --ab-report .local/claude-ab.json --output .local/release-candidate.json
+```
+
+The pinned Atlas question in `ab/atlas-postgres.json` asks about the last known
+migration status. Its expected answer is written from known source evidence,
+not generated from either response. No live production tools are provided, so
+claiming live verification fails the check.
+
+The runner copies and redacts the selected native memory bank, preserving mtime,
+then supplies identical source bytes to both arms. A focused known-answer bank
+can contain the original `MEMORY.md` index plus its relevant source documents;
+the report lists exact files and hashes so corpus scope is inspectable. The native arm enables Claude
+auto memory and permits read-only file tools. The graph arm disables auto memory,
+has no file tools, and uses only a namespace-scoped read-only MCP server. Separate
+working directories and new session IDs prevent conversational carryover. Both
+use the same Claude model. The graph's extraction/dream model is Luna; `MEMORY_REASONING_EFFORT` selects effort (default `medium`).
+The sources, tool events, evidence quotes, answers, exact model usage, and checks
+are written to ignored local reports, then the test graph is removed.
+
+Scoring checks the fixed answer fields, exact original evidence quotes, an actual
+successful source Read/content-Grep/native or memory_recall/MCP call, absence of denied tools, and the
+separation of last-known knowledge from live verification. This is a bounded
+product E2E, not a claim that either memory system is universally better. Add
+separate known-answer cases for habits, freshness, verification-enabled sessions,
+and source conflicts as the corpus grows; never replace expectations with the
+engine's output. Structural assertion fields complement human review of the full
+answer and tool trace.

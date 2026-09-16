@@ -1,0 +1,7 @@
+{
+  "id": "atlas-postgres-last-known",
+  "question": "What is the last known status of Atlas's PostgreSQL migration? Is it deployed? Distinguish what memory says from what you have verified live, and cite the evidence you used.",
+  "expected": {"migration_status": "paused", "deployment_confirmed": false, "live_verified": false, "needs_live_verification": true},
+  "source_files": ["project_workstream_summary.md"],
+  "note": "Human-authored expectations from the existing Claude Atlas workstream memory; not a claim about current production. No live production tools are available in this test."
+}

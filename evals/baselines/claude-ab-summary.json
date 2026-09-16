@@ -1,0 +1,70 @@
+{
+  "engine": "a10b79ae1605a9429538d7e4332d5f16be884a77cf004e63267db95aa95b5ea5",
+  "case": "atlas-postgres-last-known",
+  "passed": true,
+  "engine_unchanged": true,
+  "sessions_independent": true,
+  "corpus": [
+    {
+      "name": "MEMORY.md",
+      "sha256": "1af119c6c41a64cb3a9e7035a59a574529b16b0901a6a481c2813e4cc577c9dc",
+      "updated_at": 1786706765.625416
+    },
+    {
+      "name": "project_workstream_summary.md",
+      "sha256": "cbdd13945a619de5aaa8443c211e907f3e37f5baa8e6af19806cd789db3123cf",
+      "updated_at": 1786706765.6263087
+    }
+  ],
+  "sessions": [
+    {
+      "mode": "native",
+      "passed": true,
+      "checks": {
+        "answer.migration_status": true,
+        "answer.deployment_confirmed": true,
+        "answer.live_verified": true,
+        "answer.needs_live_verification": true,
+        "quoted_original_evidence": true,
+        "retrieved_memory": true,
+        "no_denied_tools": true,
+        "memory_source_isolation": true
+      },
+      "models": [
+        "claude-haiku-4-5-20251001",
+        "claude-sonnet-5"
+      ],
+      "tools": [
+        "Glob",
+        "Read",
+        "StructuredOutput"
+      ]
+    },
+    {
+      "mode": "graph",
+      "passed": true,
+      "checks": {
+        "answer.migration_status": true,
+        "answer.deployment_confirmed": true,
+        "answer.live_verified": true,
+        "answer.needs_live_verification": true,
+        "quoted_original_evidence": true,
+        "retrieved_memory": true,
+        "no_denied_tools": true,
+        "memory_source_isolation": true
+      },
+      "models": [
+        "claude-haiku-4-5-20251001",
+        "claude-sonnet-5"
+      ],
+      "tools": [
+        "StructuredOutput",
+        "mcp__graph-memory__memory_latest",
+        "mcp__graph-memory__memory_pending",
+        "mcp__graph-memory__memory_recall"
+      ]
+    }
+  ],
+  "report_digest": "6fb8e7d16004f295155f8cbbf02bd78be0296753ecc1ed0df50669ca6408e5d4",
+  "note": "Aggregate only; private source excerpts and complete tool traces excluded."
+}

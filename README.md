@@ -1,491 +1,207 @@
-# @robertogongora/graphiti
+# Graph Memory
 
-Temporal knowledge graph plugin for [OpenClaw](https://github.com/openclaw/openclaw) using [Graphiti](https://github.com/getzep/graphiti) + Neo4j.
+Standalone, evidence-backed temporal memory for any LLM through **MCP 2026-07-28**.
+The runtime talks directly to Neo4j. Its only direct Python dependencies are
+**Pydantic** and the **official Neo4j driver**. No Graphiti server, embeddings,
+agent framework, or Markdown lookup is required.
 
-> **⚠️ Upgrading from v0.2.x?** As of v0.3.0, Graphiti no longer claims the `plugins.slots.memory` slot. If you were using `plugins.slots.memory = "graphiti"`, you must re-enable `memory-core` manually — see [Migrating from v0.2.x](#migrating-from-v02x).
+Transcripts become typed entities and evidence-backed relationships. Retrieval
+recomputes current state by **when a fact was observed or an event happened**,
+across sessions. Projects, people, organizations, technologies, decisions,
+preferences, lessons, issues, and activities share the same graph and temporal
+rules. Plans, contradictions, undated claims, and inferences remain distinguishable.
 
-
-## What it does
-
-- **Knowledge graph tools**: `graphiti_search`, `graphiti_ingest`, `graphiti_forget`, and `graphiti_episodes` available as agent tools for on-demand entity/relationship queries, manual ingestion, fact deletion, and episode browsing
-- **Auto-capture**: Automatically ingests conversation content into the knowledge graph (per-turn in ContextEngine mode, on compaction/reset in hooks mode) for entity/relationship extraction (async, via Graphiti's LLM pipeline)
-- **Auto-index**: Automatically creates index episodes in Graphiti when files are written to `memory/`, bridging file-based memory with the knowledge graph
-- **Auto-recall**: Optionally injects relevant facts before each turn — off by default, see [Auto-recall vs on-demand search](#auto-recall-vs-on-demand-search)
-- **CLI**: `openclaw graphiti status|search|episodes|ingest|backfill`
-- **Slash command**: `/graphiti` for quick health check
-
-## Requirements
-
-- Graphiti server running (e.g., `http://localhost:8100`)
-- Neo4j database (Graphiti manages the connection)
-- `OPENAI_API_KEY` set in the Graphiti server environment — this is separate from OpenClaw's own key. Without it, ingestion returns `202 Accepted` but entity extraction never runs and no episodes appear.
-
-## Installation
-
-### From npm
-
-```bash
-openclaw plugins install @robertogongora/graphiti
+```text
+Transcript → durable episode → LLM extraction → Pydantic + quote validation
+                                                ↓ atomic commit
+                                       Neo4j entities + facts + evidence
+                                                ↓
+                                current context / latest evidence by entity and relation
+                                                ↓
+                           Luna dream → separate candidate → validated insights
 ```
 
-### From local directory
+## Run locally
 
-```bash
-git clone https://github.com/RobertoGongora/openclaw-graphiti-plugin.git
-ln -s /path/to/openclaw-graphiti-plugin ~/.openclaw/extensions/graphiti
+Python 3.11+ and Neo4j 5.26+ are required. `uv` is a convenient installer; ordinary
+`pip install .` also works. Docker Compose runs the full local system: Neo4j, its browser UI, the background worker, and the MCP server. See [Docker setup](docs/docker.md) for authentication and mounted sources. Docker is optional for a Python-only installation.
+
+```sh
+cp .env.example .env
+# Set your memory-bank path and a private MCP token in .env, then authenticate Codex.
+docker compose up -d --build
 ```
 
-The plugin declares `openclaw.extensions` in `package.json`, so OpenClaw discovers it automatically from `~/.openclaw/extensions/`.
+The MCP endpoint is `http://127.0.0.1:8765/mcp`. `serve` defaults to stdio for
+clients that launch subprocesses. See [MCP requests and client setup](docs/mcp.md).
+The development database binds only to localhost and persists in a named volume.
+Use Neo4j authentication and a private network for a shared installation.
 
-### Stable vs beta
+### Extraction and dreaming with Luna
 
-For production use, pin to an exact stable version:
+Log into your installed Codex CLI, then:
 
-```bash
-openclaw plugins install @robertogongora/graphiti@<stable-version>
+```sh
+export MEMORY_LLM=codex
+export MEMORY_MODEL=gpt-5.6-luna
+export MEMORY_REASONING_EFFORT=medium
+uv run graph-memory --namespace personal ingest /path/to/session.jsonl --extract
+uv run graph-memory --namespace personal recall Atlas
+uv run graph-memory --namespace personal latest Atlas --relation decided
+uv run graph-memory --namespace personal latest Atlas --relation resolved
 ```
 
-For development or early access to unreleased features:
+The CLI adapter uses `codex exec` with isolated working directories, read-only
+sandboxing, no inherited user configuration, no persistent session, disabled
+shell/web tools, and schema-constrained output. The generated JSON Schema includes the event-time constraints enforced at commit.
+A rejected schema or evidence candidate gets a bounded correction attempt. Present-tense state and plans use
+the originating message time; event occurrences require their own time evidence.
+Extraction failures remain visible and retryable.
 
-```bash
-openclaw plugins install @robertogongora/graphiti@beta
+Alternatively, `MEMORY_LLM=compatible` uses a configured chat-completions endpoint
+(`MEMORY_LLM_URL`, `MEMORY_MODEL`, optional `MEMORY_LLM_API_KEY`). No provider SDK is
+needed. The worker requires a configured model. MCP sessions only queue information;
+Python and CLI retain the prepare/commit operations for engine integrations.
+
+## MCP tools
+
+Every tool carries an explicit namespace and all necessary identifiers. No
+transport session, initialize handshake, sampling callback, or agent host is
+required for the 2026 protocol.
+
+| Tool | Advertised description |
+| --- | --- |
+| `memory_recall` | Use when the user asks about their projects, preferences, people, decisions, or past work. |
+| `memory_latest` | Use when the user asks when something last happened or what was most recently recorded about a subject. |
+| `memory_ingest` | Use when the user asks you to remember something or when saving new information from a conversation. |
+| `memory_retract` | Use when the user says a remembered fact is incorrect or should no longer inform answers. |
+| `memory_merge` | Use when separate memory entries are confirmed to refer to the same person, project, or thing. |
+
+Only these five operations are exposed through MCP. Read-only mode exposes recall
+and latest. Extraction, commit, repair, and dreaming stay inside the engine and CLI;
+calling an internal operation through MCP is rejected, even by name.
+
+`memory_recall` takes an entity name, key, or alias, not an arbitrary natural-language
+question. Tool-using LLMs turn a question into its subject. Ambiguous identities
+are returned explicitly. Default output limits are applied **after** temporal
+resolution. `memory_latest` takes `entity` and an optional typed `relation`; it
+resolves complete evidence before output limits and returns all co-latest facts
+instead of picking an arbitrary winner. It is not a replacement for the complete
+current-state neighborhood returned by `memory_recall`.
+
+### Temporal rules
+
+- Source messages retain their timestamps and IDs. Every relationship cites an
+  exact quote from an ingested message. Original content stays in the graph.
+- State assertions may use an exclusive `slot`, such as `production-primary`.
+  Multiple databases otherwise coexist. A planned migration cannot displace the
+  deployed database. Equal-time incompatible assertions remain conflicts.
+- Confirmed chronological events require timezone-aware occurrence times. Undated
+  event claims remain time-uncertain. `memory_latest` returns an uncertain status
+  when unresolved claims might be newer than its latest dated evidence.
+  Undated Markdown claims retain
+  filesystem modification time and creation time where available (birthtime, not
+  Unix ctime). They appear in a `documented` lane ordered by file date, labeled
+  `document_updated`/`document_created`. These dates never override explicit
+  observations or become occurrence times. No file date means uncertain.
+- Latest means **latest committed evidence**. Responses disclose pending and
+  failed ingestion. No system can know about a session it has never received.
+- Framework-to-language inference follows explicit supported graph edges.
+  Inferences disappear when their supporting facts stop being current.
+- Canonical keys and explicit aliases connect sessions. People, organizations,
+  projects, and habits with different keys are not merged merely because their
+  display names match. Broad-name ambiguity is returned for disambiguation;
+  explicit merges preserve sources.
+- Reads restore missing structural links when their durable endpoints and source
+  exist. Facts missing evidence are excluded and counted in freshness.
+
+## Dreaming
+
+Inspired by [Claude Managed Agents Dreams](https://platform.claude.com/docs/en/managed-agents/dreams),
+our implementation snapshots an existing graph plus selected ingested sessions,
+then asks Luna to identify useful patterns and contradictions. This is a local
+implementation of that workflow, not a call to Anthropic's Dreams API.
+
+```sh
+uv run graph-memory --namespace personal dream Atlas \
+  --episode EPISODE_ID --episode ANOTHER_EPISODE_ID
 ```
 
-The `@beta` tag resolves to the latest pre-release at install time. The resolved
-version is locked, but future `openclaw plugins update` runs will pull the newest
-beta. For reproducible deployments, always use an exact version.
+The output is a separate durable `MemoryDream`. `--apply` promotes supported
+**inferences**, preserving the input facts. Promotion rejects stale graph revisions.
+Dream operations are available through Python and CLI `call memory_dream_*`, not MCP.
+Dream scheduling and promotion remain explicit operator actions; the ingestion daemon
+does not silently generate or publish new insights.
 
-### Known issue: config overwrite on install/update
+## Import and continuous ingestion
 
-OpenClaw's plugin installer may overwrite your custom config values with schema
-defaults when you run `openclaw plugins install` or `openclaw plugins update`. As
-of v0.7.0-beta.5, this plugin removes schema defaults to mitigate the issue.
-
-If you are on an older plugin version, verify your settings after install/update:
-
-```bash
-openclaw config get plugins.entries.graphiti.config
+```sh
+# Inventory, then stage complete redacted source content in an isolated sandbox.
+uv run graph-memory --namespace sandbox:import import ~/.claude/projects ~/.codex/memories
+uv run graph-memory --namespace sandbox:import import ~/.claude/projects ~/.codex/memories --apply
+# Bounded, resumable extraction of the durable inbox.
+MEMORY_LLM=codex uv run graph-memory --namespace sandbox:import work --limit 10
 ```
 
-## Recommended setup
+Importers support Claude Code and Codex JSONL transcripts, `.md`, and `.txt`.
+Large sources are chunked; source paths are provenance, never retrieval targets.
+JSONL adapters skip duplicate event representations and non-message tool metadata.
+Known credential patterns are redacted, but redaction is not a universal secret detector.
 
-As of v0.3.0, Graphiti does **not** claim the exclusive memory slot. The recommended
-setup is to run Graphiti alongside `memory-core`:
+For continuous intake, Docker runs `daemon /bank`: it watches the mounted memory
+bank and drains queued messages independently. Pass `--transcripts /sessions` for
+append-only session files. Alternatively use `work --watch` with the generated
+Claude hooks or the host-neutral `follow` watcher. [Client integration](docs/clients.md) covers native
+memories off, hook installation, transcript cursors, retry behavior, and the
+calling-agent instructions. Installation does not change global host settings or
+modify either original memory bank. A complete extraction receipt marks when
+new facts are visible.
 
-- **`memory-core`** owns the memory slot → provides `memory_search` and `memory_get`
-  over your workspace Markdown files (`MEMORY.md`, `memory/*.md`)
-- **Graphiti** runs as a complementary plugin → provides `graphiti_search` and
-  `graphiti_ingest` for temporal knowledge graph queries, and auto-captures
-  conversation knowledge into the graph
+## Evals and safe revisions
 
-This gives you file-based semantic search (hybrid BM25 + vector) **and** a temporal
-knowledge graph, operating independently on different data.
+See [evals/README.md](evals/README.md). The harness uses pytest plus a small
+standard-library behavioral runner; Promptfoo/Node is not needed for the new runtime.
+Fixtures contain fixed expectations. Runs never regenerate expected outcomes.
+A real fresh-session Claude A/B runner compares native memory against MCP using
+identical source bytes, read-only access, fixed answers, and actual tool traces.
 
-```json
-{
-  "plugins": {
-    "slots": {
-      "memory": "memory-core"
-    },
-    "entries": {
-      "memory-core": { "enabled": true },
-      "graphiti": {
-        "enabled": true,
-        "config": {
-          "url": "http://localhost:8100",
-          "groupId": "core",
-          "autoCapture": true,
-          "autoRecall": false
-        }
-      }
-    }
-  }
-}
+```sh
+MEMORY_TEST_NEO4J_URI=bolt://127.0.0.1:17687 uv run pytest -q
+MEMORY_TEST_NEO4J_URI=bolt://127.0.0.1:17687 MEMORY_LLM=codex \
+  uv run python -m evals.run --runs 2 --output .local/baseline-candidate.json
 ```
 
-### When to use each tool
+Tests and model evals use unique namespaces and clean up only their own data.
+Reports bind to the engine source, installed dependency versions, golden suite,
+model, and reasoning effort. Use a separate test database for CI and shared deployments.
+The baseline remains a **candidate** until reviewed; passing tests are not
+proof that all real-world extraction is correct.
 
-| Need | Tool |
-|------|------|
-| "What did I write about X in my notes?" | `memory_search` (memory-core) |
-| "What's the relationship between X and Y?" | `graphiti_search` |
-| "What was the history of project X?" | `graphiti_search` (temporal queries) |
-| "Remember this fact long-term" | `graphiti_ingest` |
-| "Forget this outdated fact" | `graphiti_forget` |
-| "What was captured recently?" | `graphiti_episodes` |
+Engine updates replay selected sources into a candidate graph. They expose added
+and removed claims, rerun affected dreams, require golden and project-specific
+checks, and atomically promote only if both live and candidate revisions still
+match. Changed diffs require explicit acceptance; unchanged outcomes can promote
+automatically. See [revision workflow](docs/revisions.md).
 
 ## Configuration
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `url` | string | `http://localhost:8100` | Graphiti server URL |
-| `apiKey` | string | _(none)_ | Bearer token for authenticated Graphiti servers |
-| `groupId` | string | `core` | Graph namespace (use different IDs per agent) |
-| `autoRecall` | boolean | `false` | Inject relevant facts before each turn (opt-in) |
-| `autoCapture` | boolean | `true` | Automatically ingest conversation content into the graph |
-| `autoIndex` | boolean | `true` | Create index episodes when files are written to `memory/` |
-| `autoIndexExtensions` | string[] | `[".md", ".txt"]` | File extensions to index (non-matching files are skipped) |
-| `recallMaxFacts` | number | `10` | Max facts to inject per turn when auto-recall is on |
-| `minPromptLength` | number | `10` | Min prompt length to trigger auto-recall |
-| `debug` | boolean | `true` | Enable structured debug log file |
-| `logFile` | string | `~/.openclaw/logs/graphiti-plugin.log` | Custom debug log file path |
-
-## Auto-recall vs on-demand search
-
-By default, `autoRecall` is **off**. The agent can search the knowledge graph at any
-time using the `graphiti_search` tool — this is the recommended approach. The agent
-decides when graph context is relevant rather than injecting facts on every turn.
-
-When `autoRecall: true`, the plugin injects relevant knowledge graph facts before
-turns that need them. In **ContextEngine mode** (v0.7.0+), this uses Smart autoRecall —
-a two-stage pipeline that only fires on continuity gaps (bootstrap, compaction, reset,
-few messages) or when the user references prior context. Stage A recovers continuity
-from the session transcript or recent episodes; Stage B runs a targeted semantic recall
-(`/search` against recovered continuity, or `/get-memory` on the current window as
-fallback). In **hooks mode**, it fires `before_agent_start` on every turn. Useful when
-you want persistent background context without explicitly calling `graphiti_search`.
-
-```json
-{
-  "plugins": {
-    "entries": {
-      "graphiti": {
-        "config": {
-          "autoRecall": true,
-          "recallMaxFacts": 5
-        }
-      }
-    }
-  }
-}
-```
-
-## Auto-capture flow
-
-> **Note:** The flow below describes **hooks mode** (OpenClaw < v2026.3.7). In
-> **ContextEngine mode** (v2026.3.7+), auto-capture runs per-turn via `afterTurn()`
-> instead of waiting for compaction/reset — see [ContextEngine mode](#contextengine-mode-v060).
-
-```
-Session compacts or resets
-  -> before_compaction / before_reset fires
-  -> Plugin extracts user+assistant messages (min 4)
-  -> Session metadata (session key, agent, channel) embedded in source_description
-  -> POSTs up to 12,000 chars to Graphiti /messages
-  -> Graphiti extracts entities + relationships async (gpt-5-nano or configured model)
-  -> Facts become queryable via graphiti_search
-```
-
-## ContextEngine mode (v0.6.0+)
-
-On OpenClaw v2026.3.7+, the plugin manifest declares `kind: "context-engine"` instead of
-plain hooks. OpenClaw detects this and wires the plugin into the ContextEngine lifecycle
-automatically — **no configuration changes needed**. On older OpenClaw versions, the
-plugin falls back to the existing sidecar hooks (`before_agent_start`,
-`before_compaction`, `before_reset`), so there is no breaking change.
-
-### How it works
-
-Instead of event hooks that fire at fixed points, the ContextEngine exposes lifecycle
-methods that the runtime calls directly:
-
-| Lifecycle method | Replaces hook | Purpose |
-|------------------|---------------|---------|
-| `assemble()` | `before_agent_start` | Smart autoRecall — conditionally inject continuity and facts |
-| `ingest()` | _(new)_ | Ingest a single message into the graph |
-| `ingestBatch()` | _(new)_ | Batch-ingest multiple messages |
-| `afterTurn()` | _(new)_ | Ingest new messages after each turn (replaces batch fallback) |
-| `compact()` | `before_compaction` | Graph-aware compaction — ingest then truncate |
-| `bootstrap()` | _(new)_ | Health-check and report graph population on startup |
-| `onSubagentEnded()` | _(new)_ | Ingest a subagent's findings into the parent graph scope |
-| `prepareSubagentSpawn()` | _(new)_ | Inject relevant facts into a spawning subagent's context |
-
-The engine declares `ownsCompaction: false`, deferring session truncation to OpenClaw's
-built-in auto-compaction. The plugin captures conversation knowledge into the graph via
-`afterTurn()` after every turn, so long-term memory is preserved even after the context
-window is truncated by the runtime.
-
-### Backwards compatibility
-
-- **OpenClaw v2026.3.7+**: ContextEngine methods are used; hooks are not registered.
-- **Older OpenClaw**: Hooks fire as before. No behavioural change.
-- Config format is identical in both modes.
-
-## Source provenance
-
-Every ingested episode carries a JSON-encoded provenance object in `source_description` for traceability:
-
-```json
-{
-  "plugin": "openclaw-graphiti",
-  "event": "before_compaction",
-  "ts": "2026-03-05T10:30:00.000Z",
-  "group_id": "core",
-  "session_key": "sess-abc-123",
-  "thread_id": "thread-xyz",
-  "agent": "main",
-  "channel": "slack",
-  "session_start": "2026-03-06T10:00:00.000Z"
-}
-```
-
-| `event` value | Trigger |
-|---------------|---------|
-| `manual` | `graphiti_ingest` tool call |
-| `before_compaction` | Auto-capture on session compaction (hooks mode) |
-| `before_reset` | Auto-capture on `/new` session reset (hooks mode) |
-| `cli_ingest` | `openclaw graphiti ingest` CLI command |
-| `ingest` | ContextEngine single-message ingestion |
-| `ingest_batch` | ContextEngine batch ingestion |
-| `after_turn` | ContextEngine after-turn ingestion |
-| `after_turn_sweep` | ContextEngine after-turn sweep (post-compaction safety re-ingest) |
-| `compact` | ContextEngine graph-aware compaction |
-| `subagent_ended` | ContextEngine subagent result ingestion |
-
-Session fields (`session_key`, `thread_id`, `agent`, `channel`, `session_start`) are
-included when available and omitted otherwise. The `openclaw graphiti episodes` command
-parses this automatically and shows a human-readable summary. Legacy episodes
-with plain-text `source_description` still display gracefully.
-
-## Auto-index flow
-
-When the agent writes a file to `memory/` (e.g., `memory/2026-03-05.md` or `memory/topics/project.md`), the plugin automatically creates a lightweight index episode in Graphiti. This bridges file-based memory with the knowledge graph — Graphiti can extract entities and relationships from your memory files.
-
-Only prose files are indexed by default (`.md` and `.txt`). Structured data files (`.json`, `.png`, `.diff`, etc.) are skipped to avoid creating noise entities from metadata fields, file paths, and timestamps. Customize which extensions are indexed with the `autoIndexExtensions` config option.
-
-```
-Agent writes to memory/file.md
-  -> after_tool_call hook fires
-  -> Plugin detects memory/ path in tool params
-  -> Extension check: skip unless file matches autoIndexExtensions
-  -> Reads file metadata (mtime, size, first 500 chars)
-  -> Checks state file for idempotency (skips if mtime unchanged)
-  -> Ingests index episode with YAML frontmatter + excerpt
-  -> Updates state file (~/.openclaw/state/graphiti/graphiti-memory-index.json)
-```
-
-Index episodes are distinguishable from other episode types:
-
-| Type | name pattern | role | source_description |
-|------|-------------|------|--------------------|
-| Manual | `manual-<ts>` | `shiba` | `{"plugin":"openclaw-graphiti","event":"manual",...}` |
-| Compaction | `compaction-<ts>` | `conversation` | `{"plugin":"openclaw-graphiti","event":"before_compaction",...}` |
-| Reset | `session-reset-<ts>` | `conversation` | `{"plugin":"openclaw-graphiti","event":"before_reset",...}` |
-| CLI ingest | `<filename>` | `shiba` | `{"plugin":"openclaw-graphiti","event":"cli_ingest",...}` |
-| **Index** | `memory-index::memory/file.md` | `memory-index` | `{"plugin":"openclaw-graphiti","event":"memory_index","file_type":".md",...}` |
-
-> **Privacy note:** Indexed memory files are sent to the Graphiti server for entity extraction, which calls your configured LLM. Avoid storing secrets (API keys, passwords) in `memory/` files, or set `autoIndex: false` to disable this feature.
-
-### Backfill existing memory files
-
-To index memory files that were created before the plugin was installed:
-
-```bash
-openclaw graphiti backfill                  # Index all files in ./memory
-openclaw graphiti backfill --dir /path/to   # Custom memory directory
-openclaw graphiti backfill --dry-run        # Show what would be indexed
-```
-
-The backfill command checks the state file and only ingests new or modified files.
-
-To disable auto-indexing or customize which file types are indexed:
-
-```json
-{
-  "plugins": {
-    "entries": {
-      "graphiti": {
-        "config": {
-          "autoIndex": false
-        }
-      }
-    }
-  }
-}
-```
-
-```json
-{
-  "plugins": {
-    "entries": {
-      "graphiti": {
-        "config": {
-          "autoIndexExtensions": [".md", ".txt", ".org"]
-        }
-      }
-    }
-  }
-}
-```
-
-## Remote / non-localhost setup
-
-```json
-{
-  "plugins": {
-    "entries": {
-      "graphiti": {
-        "config": {
-          "url": "https://graphiti.example.com",
-          "groupId": "my-agent"
-        }
-      }
-    }
-  }
-}
-```
-
-For Docker, update Neo4j connection if using an external instance:
-
-```yaml
-NEO4J_URI: neo4j+s://your-neo4j-host:7687
-```
-
-## Authentication
-
-For Graphiti servers behind a reverse proxy or API gateway with bearer token auth:
-
-```json
-{
-  "plugins": {
-    "entries": {
-      "graphiti": {
-        "config": {
-          "url": "https://graphiti.example.com",
-          "apiKey": "your-secret-token"
-        }
-      }
-    }
-  }
-}
-```
-
-When `apiKey` is not set, no `Authorization` header is sent.
-
-## Deploying Graphiti
-
-Quick local setup with Docker Compose:
-
-```yaml
-services:
-  neo4j:
-    image: neo4j:5-community
-    environment:
-      NEO4J_AUTH: neo4j/your-password
-    ports:
-      - "7474:7474"
-      - "7687:7687"
-    volumes:
-      - neo4j_data:/data
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 || exit 1"]
-      interval: 10s
-      retries: 5
-
-  graphiti:
-    image: zepai/graphiti:latest
-    environment:
-      NEO4J_URI: bolt://neo4j:7687
-      NEO4J_USER: neo4j
-      NEO4J_PASSWORD: your-password
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      MODEL_NAME: gpt-5-nano
-    ports:
-      - "127.0.0.1:8100:8000"
-    depends_on:
-      neo4j:
-        condition: service_healthy
-
-volumes:
-  neo4j_data:
-```
-
-**Environment variables:**
-- `OPENAI_API_KEY` — required. Must be set in your shell or a `.env` file alongside `docker-compose.yml`. If missing, Graphiti silently accepts ingestion but skips extraction — check `docker logs openclaw-graphiti` if episodes are not appearing after ingest.
-- `MODEL_NAME` — the LLM used for entity and relationship extraction. Defaults to `gpt-4o-mini` if omitted. Recommended: `gpt-4.1-mini` or `gpt-5-nano` for a cost-efficient option that works well for extraction workloads.
-
-See the [Graphiti GitHub](https://github.com/getzep/graphiti) for full deployment options including Coolify, Railway, and cloud-hosted Neo4j.
-
-## Status commands
-
-```bash
-openclaw graphiti status          # Graphiti server health + episode count
-openclaw graphiti search "query"  # Search the knowledge graph
-openclaw graphiti episodes        # Recent episodes (human-readable provenance)
-openclaw graphiti episodes --json # Raw JSON output
-openclaw graphiti episodes -s <session-key>         # Filter by session key
-openclaw graphiti ingest --source-file ./notes.md   # Ingest a file
-openclaw graphiti ingest --content "key fact"        # Ingest text directly
-openclaw graphiti backfill                           # Index existing memory files into Graphiti
-openclaw memory status            # File-based memory index (memory-core)
-```
-
-## Debug logging
-
-The plugin writes a structured, append-only debug log for diagnostics. It records HTTP status codes, timing, and result counts -- **never** conversation content, search queries, or PII. Safe to paste in bug reports.
-
-```bash
-openclaw graphiti logs           # Show last 50 log entries
-openclaw graphiti logs --clear   # Truncate the log file
-```
-
-The `status` subcommand also shows the last 20 log entries.
-
-**Default log path:** `~/.openclaw/logs/graphiti-plugin.log`
-
-**Example output:**
-```
-2026-03-05T10:30:00.123Z [graphiti] healthcheck  status=200 ms=42
-2026-03-05T10:30:00.200Z [graphiti] search       status=200 group=core count=3 ms=150
-2026-03-05T10:30:01.000Z [graphiti] ingest       status=202 group=core messages=8 ms=320
-2026-03-05T10:30:01.500Z [graphiti] episodes     group=core error=unreachable ms=5002
-```
-
-### Configuration
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `debug` | boolean | `true` | Enable/disable the debug log file |
-| `logFile` | string | `~/.openclaw/logs/graphiti-plugin.log` | Custom log file path |
-
-To disable:
-```json
-{
-  "plugins": {
-    "entries": {
-      "graphiti": {
-        "config": { "debug": false }
-      }
-    }
-  }
-}
-```
-
-### Including in bug reports
-
-When filing a bug report, paste the output of `openclaw graphiti logs`. The log contains only operational metadata (status codes, timing, counts) and is safe to share publicly.
-
-## Migrating from v0.2.x
-
-In v0.2.x, Graphiti declared `kind: "memory"` and claimed the exclusive memory slot,
-auto-disabling `memory-core`. This is removed in v0.3.0.
-
-If you were using `plugins.slots.memory = "graphiti"`, update your config:
-
-```json
-{
-  "plugins": {
-    "slots": { "memory": "memory-core" },
-    "entries": {
-      "memory-core": { "enabled": true },
-      "graphiti": { "enabled": true }
-    }
-  }
-}
-```
-
-All Graphiti tools, hooks, and CLI remain unchanged.
-
-## License
-
-MIT
+| Variable | Default / meaning |
+| --- | --- |
+| `NEO4J_URI` | `bolt://127.0.0.1:7687` |
+| `NEO4J_USER`, `NEO4J_PASSWORD`, `NEO4J_DATABASE` | `neo4j`, unset, `neo4j` |
+| `MEMORY_NAMESPACE` | `personal`; a shared HTTP server is bound to one namespace |
+| `MEMORY_HTTP_TOKEN` | Optional bearer auth locally; required for non-loopback HTTP |
+| `MEMORY_LLM` | `caller`, `codex`, or `compatible` |
+| `MEMORY_MODEL` | `gpt-5.6-luna` for Codex |
+| `MEMORY_REASONING_EFFORT` | `medium` for Codex; configurable |
+
+HTTP validates Origin and routing headers. Its bearer authentication is a
+private-service option; a public OAuth/OIDC deployment requires an external auth
+layer. No public deployment or client auto-configuration is performed by installation.
+
+## Repository transition
+
+The old TypeScript/OpenClaw plugin remains available for migration reference and
+its existing tests. It is not imported by the Python service. Its original setup
+is documented in [legacy OpenClaw documentation](docs/legacy-openclaw.md).
+Existing Graphiti data is not silently reinterpreted under this schema.

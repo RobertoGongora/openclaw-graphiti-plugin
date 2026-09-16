@@ -1,0 +1,257 @@
+{
+  "default_effort": "medium",
+  "approved_golden_baseline": false,
+  "method": "Same six fixed cases repeated twice per effort; same Atlas source snapshot in independent native-memory and MCP-only Claude sessions. Timing includes model correction calls. Two effort jobs ran concurrently; latency is observational, not a controlled capacity benchmark.",
+  "before_schema_alignment": [
+    {
+      "engine": "0646c3492f085a23c117af8343fbde4e2b5cb855846318b1ec35853bac022f30",
+      "reasoning_effort": "xhigh",
+      "suite_passed": true,
+      "cases_passed": 12,
+      "cases_total": 12,
+      "real_note_ab_passed": false,
+      "failure": {
+        "stage": "graph_extraction",
+        "kind": "PydanticValidationError",
+        "invalid_facts": 22,
+        "reason": "Undated event claims remained chronologically eligible instead of uncertain after bounded correction attempts; commit was blocked."
+      },
+      "observed_whole_ab_lower_bound_seconds": 1260,
+      "timing_note": "Not instrumented from start; observed still running at 20m59s before final failure. This is a lower bound, not total duration."
+    },
+    {
+      "engine": "0646c3492f085a23c117af8343fbde4e2b5cb855846318b1ec35853bac022f30",
+      "suite": "ba11bb16f5e25bc2aa9a71568d660bdbd39ba8673dd9aa1af728f26715f4f48c",
+      "model": "gpt-5.6-luna",
+      "reasoning_effort": "high",
+      "suite_passed": true,
+      "cases_passed": 12,
+      "cases_total": 12,
+      "suite_seconds": 299.737,
+      "suite_model_calls": 20,
+      "suite_correction_calls": 0,
+      "dream_seconds_mean": null,
+      "real_note_ab_passed": true,
+      "real_note_model_seconds": 391.109,
+      "real_note_model_calls": 2,
+      "suite_report_digest": "39f1ff91d086c1d2384f4888c2063f6ee6b2b7e346538eb115fb2b0215a18bb4",
+      "ab_report_digest": "e57911db5bf27bf1c2d07f0f4b280e0f063bf29ea563bf443d1637f77adbe2c1",
+      "sessions": [
+        {
+          "mode": "native",
+          "passed": true,
+          "checks": {
+            "answer.migration_status": true,
+            "answer.deployment_confirmed": true,
+            "answer.live_verified": true,
+            "answer.needs_live_verification": true,
+            "quoted_original_evidence": true,
+            "retrieved_memory": true,
+            "no_denied_tools": true,
+            "memory_source_isolation": true
+          },
+          "models": [
+            "claude-haiku-4-5-20251001",
+            "claude-sonnet-5"
+          ],
+          "tools": [
+            "Glob",
+            "Read",
+            "StructuredOutput"
+          ]
+        },
+        {
+          "mode": "graph",
+          "passed": true,
+          "checks": {
+            "answer.migration_status": true,
+            "answer.deployment_confirmed": true,
+            "answer.live_verified": true,
+            "answer.needs_live_verification": true,
+            "quoted_original_evidence": true,
+            "retrieved_memory": true,
+            "no_denied_tools": true,
+            "memory_source_isolation": true
+          },
+          "models": [
+            "claude-haiku-4-5-20251001",
+            "claude-sonnet-5"
+          ],
+          "tools": [
+            "StructuredOutput",
+            "mcp__graph-memory__memory_latest",
+            "mcp__graph-memory__memory_recall"
+          ]
+        }
+      ]
+    },
+    {
+      "engine": "0646c3492f085a23c117af8343fbde4e2b5cb855846318b1ec35853bac022f30",
+      "suite": "ba11bb16f5e25bc2aa9a71568d660bdbd39ba8673dd9aa1af728f26715f4f48c",
+      "model": "gpt-5.6-luna",
+      "reasoning_effort": "medium",
+      "suite_passed": true,
+      "cases_passed": 12,
+      "cases_total": 12,
+      "suite_seconds": 250.847,
+      "suite_model_calls": 22,
+      "suite_correction_calls": 2,
+      "dream_seconds_mean": null,
+      "real_note_ab_passed": false,
+      "real_note_model_seconds": 159.332,
+      "real_note_model_calls": 2,
+      "suite_report_digest": "ff16203a247f86a62c992685c8b844e6b71606b06096778036013cd6be1b1dcc",
+      "ab_report_digest": "36e033455bf2f8b351647b77e2078a75c827fd38a3d8de945d7eed5e072bc17c",
+      "sessions": [
+        {
+          "mode": "native",
+          "passed": true,
+          "checks": {
+            "answer.migration_status": true,
+            "answer.deployment_confirmed": true,
+            "answer.live_verified": true,
+            "answer.needs_live_verification": true,
+            "quoted_original_evidence": true,
+            "retrieved_memory": true,
+            "no_denied_tools": true,
+            "memory_source_isolation": true
+          },
+          "models": [
+            "claude-haiku-4-5-20251001",
+            "claude-sonnet-5"
+          ],
+          "tools": [
+            "Glob",
+            "Read",
+            "StructuredOutput"
+          ]
+        }
+      ]
+    }
+  ],
+  "after_schema_alignment": [
+    {
+      "engine": "7832e9c9312f08c9d60f0d3bdd6a682cfa2d341440754cce26ab07929005274e",
+      "suite": "ba11bb16f5e25bc2aa9a71568d660bdbd39ba8673dd9aa1af728f26715f4f48c",
+      "model": "gpt-5.6-luna",
+      "reasoning_effort": "high",
+      "suite_passed": true,
+      "cases_passed": 12,
+      "cases_total": 12,
+      "suite_seconds": 303.871,
+      "suite_model_calls": 21,
+      "suite_correction_calls": 1,
+      "dream_seconds_mean": 11.342,
+      "real_note_ab_passed": false,
+      "real_note_model_seconds": 345.629,
+      "real_note_model_calls": 2,
+      "suite_report_digest": "c211b1e88d01f618c6c738cea6f07e91eb1367971f3dd3bbf90f5c39789c3ff2",
+      "ab_report_digest": "5ea11589670198aae5df07ebdfe11c32b5577a34bcaf135110526c0a38ff5cb0",
+      "sessions": [
+        {
+          "mode": "native",
+          "passed": true,
+          "checks": {
+            "answer.migration_status": true,
+            "answer.deployment_confirmed": true,
+            "answer.live_verified": true,
+            "answer.needs_live_verification": true,
+            "quoted_original_evidence": true,
+            "retrieved_memory": true,
+            "no_denied_tools": true,
+            "memory_source_isolation": true
+          },
+          "models": [
+            "claude-haiku-4-5-20251001",
+            "claude-sonnet-5"
+          ],
+          "tools": [
+            "Glob",
+            "Grep",
+            "Read",
+            "StructuredOutput"
+          ]
+        }
+      ],
+      "failure": "Exact quote evidence still mismatched after the bounded correction; no facts were committed."
+    },
+    {
+      "engine": "7832e9c9312f08c9d60f0d3bdd6a682cfa2d341440754cce26ab07929005274e",
+      "suite": "ba11bb16f5e25bc2aa9a71568d660bdbd39ba8673dd9aa1af728f26715f4f48c",
+      "model": "gpt-5.6-luna",
+      "reasoning_effort": "medium",
+      "suite_passed": true,
+      "cases_passed": 12,
+      "cases_total": 12,
+      "suite_seconds": 242.161,
+      "suite_model_calls": 21,
+      "suite_correction_calls": 1,
+      "dream_seconds_mean": 10.341,
+      "real_note_ab_passed": true,
+      "real_note_model_seconds": 136.406,
+      "real_note_model_calls": 2,
+      "suite_report_digest": "741e6fc54e155fa7a9e1dc65e5d84cc100d4a55d163aa9a511700d239924eb72",
+      "ab_report_digest": "8fc8c63ec09dbe5035f4449845f3e58e0d025195349a67855b3e7bbf7a976536",
+      "sessions": [
+        {
+          "mode": "native",
+          "passed": true,
+          "checks": {
+            "answer.migration_status": true,
+            "answer.deployment_confirmed": true,
+            "answer.live_verified": true,
+            "answer.needs_live_verification": true,
+            "quoted_original_evidence": true,
+            "retrieved_memory": true,
+            "no_denied_tools": true,
+            "memory_source_isolation": true
+          },
+          "models": [
+            "claude-haiku-4-5-20251001",
+            "claude-sonnet-5"
+          ],
+          "tools": [
+            "Glob",
+            "Read",
+            "StructuredOutput"
+          ]
+        },
+        {
+          "mode": "graph",
+          "passed": true,
+          "checks": {
+            "answer.migration_status": true,
+            "answer.deployment_confirmed": true,
+            "answer.live_verified": true,
+            "answer.needs_live_verification": true,
+            "quoted_original_evidence": true,
+            "retrieved_memory": true,
+            "no_denied_tools": true,
+            "memory_source_isolation": true
+          },
+          "models": [
+            "claude-haiku-4-5-20251001",
+            "claude-sonnet-5"
+          ],
+          "tools": [
+            "StructuredOutput",
+            "mcp__graph-memory__memory_latest",
+            "mcp__graph-memory__memory_recall"
+          ]
+        }
+      ]
+    }
+  ],
+  "note": "The schema change makes the existing event-time rule explicit to generators. Runtime validation and golden expected outcomes were not relaxed. No xhigh rerun after this change.",
+  "final_default_validation": {
+    "engine": "a10b79ae1605a9429538d7e4332d5f16be884a77cf004e63267db95aa95b5ea5",
+    "suite": "ba11bb16f5e25bc2aa9a71568d660bdbd39ba8673dd9aa1af728f26715f4f48c",
+    "reasoning_effort": "medium",
+    "effort_override": false,
+    "deterministic_tests_passed": 36,
+    "model_cases_passed": 12,
+    "e2e_passed": true,
+    "suite_report_digest": "20cd0d4815bd88055fd48ce5f4432c91a1be724296113f485ccf8eb424af113a",
+    "ab_report_digest": "6fb8e7d16004f295155f8cbbf02bd78be0296753ecc1ed0df50669ca6408e5d4"
+  }
+}

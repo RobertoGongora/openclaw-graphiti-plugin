@@ -1,0 +1,375 @@
+"""Typed application tools shared by HTTP, stdio, and CLI."""
+
+import json
+import uuid
+
+from . import models as m
+from .llm import DREAM_INSTRUCTIONS, EXTRACTION_INSTRUCTIONS
+from .version import engine_fingerprint
+
+
+class MemoryService:
+    def __init__(self, store, llm=None):
+        self.store, self.llm = store, llm
+
+    def ingest(self, request: m.Ingest):
+        receipt = self.store.stage(request.transcript)
+        if receipt["status"] == "complete":
+            return receipt
+        if request.extract:
+            return self.extract(
+                m.EpisodeRequest(
+                    namespace=request.transcript.namespace, episode_id=receipt["episode_id"]
+                )
+            )
+        return {
+            **receipt,
+            "namespace": request.transcript.namespace,
+            "available_for_recall": False,
+            "processing": "queued_for_worker",
+        }
+
+    def prepare(self, request: m.EpisodeRequest):
+        episode = self.store.episode(request.namespace, request.episode_id)
+        transcript = m.Transcript.model_validate_json(episode["payload"])
+        entities = self.store.extraction_context(request.namespace, transcript)
+        return {
+            "episode_id": request.episode_id,
+            "status": episode["status"],
+            "transcript": json.loads(episode["payload"]),
+            "existing_entities": entities,
+            "existing_relationships": self.store.relationship_context(request.namespace, entities),
+            "instructions": EXTRACTION_INSTRUCTIONS,
+            "schema": m.Extraction.model_json_schema(),
+            "next_tool": "memory_commit",
+        }
+
+    def extract(self, request: m.EpisodeRequest):
+        packet = self.prepare(request)
+        if packet["status"] == "complete":
+            return {"episode_id": request.episode_id, "status": "complete", "replayed": True}
+        if self.llm is None:
+            return {**packet, "status": "extraction_required"}
+        try:
+            payload = {
+                "transcript": packet["transcript"],
+                "existing_entities": packet["existing_entities"],
+                "existing_relationships": packet["existing_relationships"],
+            }
+            for attempt in range(2):
+                extraction = self.llm.generate(EXTRACTION_INSTRUCTIONS, payload, m.Extraction)
+                try:
+                    extraction.validate_evidence(m.Transcript.model_validate(packet["transcript"]))
+                    break
+                except ValueError as exc:
+                    if attempt:
+                        raise
+                    payload = {
+                        **payload,
+                        "rejected_candidate": extraction.model_dump(mode="json"),
+                        "validation_error": str(exc),
+                        "correction": "Correct exact quote/focus/time grounding against the original transcript. Do not invent evidence or change source text.",
+                    }
+            return self.store.commit(
+                request.namespace,
+                request.episode_id,
+                extraction,
+                model_info={
+                    "provider": type(self.llm).__name__,
+                    "model": getattr(self.llm, "model", None),
+                    "effort": getattr(self.llm, "effort", None),
+                },
+            )
+        except Exception as exc:
+            self.store.failed(request.namespace, request.episode_id, type(exc).__name__)
+            raise
+
+    def dream_create(self, request: m.DreamCreate):
+        # Snapshot and source transcripts are captured in one serializable graph transaction.
+        dream_id = str(uuid.uuid4())
+        context = self.store.recall(request.namespace, request.query, limit=100)
+        if any(n > 100 for n in context["totals"].values()) or context["entity_matches_truncated"]:
+            raise ValueError(
+                "Dream focus is too broad; narrow the query before creating a snapshot"
+            )
+        episodes = [self.store.episode(request.namespace, eid) for eid in request.episode_ids]
+        if any(e["status"] != "complete" for e in episodes):
+            raise ValueError("Dream inputs must be fully extracted episodes")
+        snapshot = {
+            "graph": context,
+            "transcripts": [json.loads(e["payload"]) for e in episodes],
+            "instructions": request.instructions,
+        }
+
+        def run(tx):
+            revision = self.store.lock(tx, request.namespace)
+            if revision != context["revision"]:
+                raise ValueError("Graph changed while snapshotting; retry dream_create")
+            tx.run(
+                "CREATE (d:MemoryDream {id:$id,namespace:$ns,status:'pending',snapshot:$snapshot,"
+                "base_revision:$revision,engine:$engine,created_at:$at})",
+                id=dream_id,
+                ns=request.namespace,
+                snapshot=json.dumps(snapshot),
+                revision=revision,
+                engine=self.store.engine,
+                at=m.now().isoformat(),
+            ).consume()
+
+        self.store.transaction(run)
+        return {"dream_id": dream_id, "status": "pending", "next_tool": "memory_dream_run"}
+
+    def dream_get(self, request: m.DreamRequest):
+        def run(tx):
+            row = tx.run(
+                "MATCH (d:MemoryDream {id:$id,namespace:$ns}) RETURN properties(d) AS d",
+                id=request.dream_id,
+                ns=request.namespace,
+            ).single()
+            if not row:
+                raise ValueError("Dream not found in namespace")
+            result = row["d"]
+            for key in ("snapshot", "output"):
+                if key in result:
+                    result[key] = json.loads(result[key])
+            return result
+
+        return self.store.transaction(run)
+
+    def dream_run(self, request: m.DreamRequest):
+        if self.llm is None:
+            raise ValueError("Configure MEMORY_LLM=codex for unattended dreaming")
+        dream = self.dream_get(request)
+        if dream.get("engine") != engine_fingerprint() or self.store.engine != engine_fingerprint():
+            raise ValueError("Dream engine changed; create a fresh dream")
+        if dream["status"] in ("completed", "applied"):
+            return dream
+        # Renewable jobs: a killed worker can be retried after its bounded lease.
+        token = str(uuid.uuid4())
+
+        def claim(tx):
+            self.store.lock(tx, request.namespace)
+            row = tx.run(
+                "MATCH (d:MemoryDream {id:$id,namespace:$ns}) "
+                "WHERE d.status IN ['pending','failed'] OR (d.status='running' AND d.lease_until<$now) "
+                "SET d.status='running',d.worker=$token,d.lease_until=$lease,d.error=null RETURN d.id AS id",
+                id=request.dream_id,
+                ns=request.namespace,
+                token=token,
+                now=m.now().timestamp(),
+                lease=m.now().timestamp() + max(900, getattr(self.llm, "timeout", 600) * 4 + 60),
+            ).single()
+            if not row:
+                raise ValueError("Dream is already running or finished")
+
+        self.store.transaction(claim)
+        try:
+            graph = dream["snapshot"]["graph"]
+            facts = {f["id"]: f for lane in ("current", "events") for f in graph[lane]}
+            payload = {**dream["snapshot"], "eligible_fact_ids": sorted(facts)}
+            for attempt in range(2):
+                output = self.llm.generate(DREAM_INSTRUCTIONS, payload, m.DreamOutput)
+                try:
+                    for insight in output.insights:
+                        if not set(insight.supporting_fact_ids) <= facts.keys():
+                            raise ValueError(
+                                "Dream cites facts outside its current evidence snapshot"
+                            )
+                        keys = {
+                            facts[fid][side]
+                            for fid in insight.supporting_fact_ids
+                            for side in ("subject", "target")
+                        }
+                        if not set(insight.entity_keys) <= keys:
+                            raise ValueError(
+                                "Dream insight entities must occur in its supporting facts"
+                            )
+                    break
+                except ValueError as exc:
+                    if attempt:
+                        raise
+                    payload = {
+                        **payload,
+                        "rejected_candidate": output.model_dump(mode="json"),
+                        "validation_error": str(exc),
+                        "correction": "Correct grounding using only eligible_fact_ids. Move unsupported conclusions to observations; never invent support.",
+                    }
+
+            def complete(tx):
+                row = tx.run(
+                    "MATCH (d:MemoryDream {id:$id,namespace:$ns,worker:$token,status:'running'}) "
+                    "SET d.status='completed',d.output=$output,d.completed_at=$at RETURN d.id AS id",
+                    id=request.dream_id,
+                    ns=request.namespace,
+                    token=token,
+                    output=output.model_dump_json(),
+                    at=m.now().isoformat(),
+                ).single()
+                if not row:
+                    raise ValueError("Dream worker lease was replaced")
+
+            self.store.transaction(complete)
+        except Exception as exc:
+            error_type = type(exc).__name__
+            self.store.transaction(
+                lambda tx: tx.run(
+                    "MATCH (d:MemoryDream {id:$id,namespace:$ns,worker:$token}) SET d.status='failed',d.error=$error",
+                    id=request.dream_id,
+                    ns=request.namespace,
+                    token=token,
+                    error=error_type,
+                ).consume()
+            )
+            raise
+        return self.dream_get(request)
+
+    def dream_apply(self, request: m.DreamRequest):
+        def run(tx):
+            revision = self.store.lock(tx, request.namespace)
+            row = tx.run(
+                "MATCH (d:MemoryDream {id:$id,namespace:$ns}) RETURN properties(d) AS d",
+                id=request.dream_id,
+                ns=request.namespace,
+            ).single()
+            if not row:
+                raise ValueError("Dream not found")
+            dream = row["d"]
+            if dream.get("engine") != engine_fingerprint():
+                raise ValueError("Dream engine changed; create a fresh dream")
+            if dream["status"] == "applied":
+                return {"dream_id": request.dream_id, "status": "applied", "replayed": True}
+            if dream["status"] != "completed":
+                raise ValueError("Only completed dreams can be applied")
+            if dream["base_revision"] != revision:
+                raise ValueError("Dream is stale: graph changed; create a new dream")
+            output = m.DreamOutput.model_validate_json(dream["output"])
+            for index, insight in enumerate(output.insights):
+                entities = tx.run(
+                    "MATCH (e:MemoryEntity {namespace:$ns}) WHERE e.key IN $keys AND e.merged_into IS NULL "
+                    "RETURN e.id AS id",
+                    ns=request.namespace,
+                    keys=insight.entity_keys,
+                ).data()
+                tx.run(
+                    "CREATE (i:MemoryInsight {id:$id,namespace:$ns,summary:$summary,entity_ids:$entities,"
+                    "supporting_fact_ids:$facts,confidence:$confidence,inferred:true,dream_id:$dream}) "
+                    "WITH i UNWIND $facts AS fid MATCH (f:MemoryFact {id:fid}) MERGE (i)-[:DERIVED_FROM]->(f)",
+                    id=f"{request.dream_id}:{index}",
+                    ns=request.namespace,
+                    summary=insight.summary,
+                    entities=[e["id"] for e in entities],
+                    facts=insight.supporting_fact_ids,
+                    confidence=insight.confidence,
+                    dream=request.dream_id,
+                ).consume()
+            tx.run(
+                "MATCH (d:MemoryDream {id:$id}) SET d.status='applied' "
+                "WITH d MATCH (s:MemorySpace {id:$ns}) SET s.revision=s.revision+1",
+                id=request.dream_id,
+                ns=request.namespace,
+            ).consume()
+            return {
+                "dream_id": request.dream_id,
+                "status": "applied",
+                "insights": len(output.insights),
+            }
+
+        return self.store.transaction(run)
+
+    def tools(self):
+        # The tuple owns both validation and dispatch, preventing schema/handler drift.
+        return {
+            "memory_ingest": (
+                m.Ingest,
+                self.ingest,
+                "Use when the user asks you to remember something or when saving new information from a conversation.",
+            ),
+            "memory_prepare": (
+                m.EpisodeRequest,
+                self.prepare,
+                "Get durable transcript, extraction instructions and Pydantic JSON Schema for any calling LLM.",
+            ),
+            "memory_extract": (
+                m.EpisodeRequest,
+                self.extract,
+                "Extract a pending episode with the configured LLM, or return caller extraction instructions.",
+            ),
+            "memory_commit": (
+                m.Commit,
+                lambda r: self.store.commit(r.namespace, r.episode_id, r.extraction),
+                "Validate typed relationships and exact source quotes, then atomically commit graph facts. Idempotent.",
+            ),
+            "memory_recall": (
+                m.Recall,
+                lambda r: self.store.recall(r.namespace, r.query, r.as_of, r.limit),
+                "Use when the user asks about their projects, preferences, people, decisions, or past work.",
+            ),
+            "memory_latest": (
+                m.Latest,
+                lambda r: self.store.latest(r.namespace, r.entity, r.as_of, r.relation),
+                "Use when the user asks when something last happened or what was most recently recorded about a subject.",
+            ),
+            "memory_pending": (
+                m.Pending,
+                lambda r: {"episodes": self.store.pending(r.namespace, r.limit)},
+                "List incomplete/failed extraction receipts for retry; they are not current graph knowledge.",
+            ),
+            "memory_retract": (
+                m.Retract,
+                lambda r: self.store.retract(r.namespace, r.fact_id, r.reason),
+                "Use when the user says a remembered fact is incorrect or should no longer inform answers.",
+            ),
+            "memory_merge": (
+                m.Merge,
+                lambda r: self.store.merge(r.namespace, r.source_key, r.target_key, r.reason),
+                "Use when separate memory entries are confirmed to refer to the same person, project, or thing.",
+            ),
+            "memory_repair": (
+                m.Scope,
+                lambda r: self.store.repair(r.namespace),
+                "Restore missing graph links from durable facts and report orphaned evidence. Never fabricate missing content.",
+            ),
+            "memory_dream_create": (
+                m.DreamCreate,
+                self.dream_create,
+                "Snapshot graph and 1-100 extracted transcripts for a separate consolidation dream. Original inputs remain unchanged.",
+            ),
+            "memory_dream_run": (
+                m.DreamRequest,
+                self.dream_run,
+                "Run or retry the durable dream using the configured model. May take minutes; CLI worker recommended.",
+            ),
+            "memory_dream_get": (
+                m.DreamRequest,
+                self.dream_get,
+                "Read a dream status, immutable snapshot and candidate output.",
+            ),
+            "memory_dream_apply": (
+                m.DreamRequest,
+                self.dream_apply,
+                "Promote completed dream insights only if graph revision still matches; facts stay unchanged.",
+            ),
+        }
+
+    def session_tools(self):
+        """The public MCP surface; orchestration remains in the engine and CLI."""
+        names = {
+            "memory_ingest",
+            "memory_recall",
+            "memory_latest",
+            "memory_retract",
+            "memory_merge",
+        }
+        catalog = {name: entry for name, entry in self.tools().items() if name in names}
+        catalog["memory_ingest"] = (
+            m.Remember,
+            lambda r: self.ingest(m.Ingest(transcript=r.transcript)),
+            catalog["memory_ingest"][2],
+        )
+        return catalog
+
+    def call(self, name, arguments):
+        if name not in self.tools():
+            raise KeyError(name)
+        schema, handler, _ = self.tools()[name]
+        return handler(schema.model_validate(arguments))

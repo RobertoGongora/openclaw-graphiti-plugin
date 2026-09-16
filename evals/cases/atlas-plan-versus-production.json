@@ -1,0 +1,68 @@
+{
+  "id": "atlas-plan-versus-production",
+  "description": "Preserve deployed MySQL alongside planned Postgres and infer PHP from explicit framework facts.",
+  "transcripts": [
+    {
+      "source_id": "atlas-state",
+      "session_id": "atlas-session",
+      "messages": [
+        {
+          "id": "a",
+          "role": "user",
+          "timestamp": "2026-09-14T10:00:00Z",
+          "content": "As of 2026-09-14T10:00:00Z the project Atlas uses Laravel in production. Laravel is implemented in PHP. Atlas uses MySQL as its production-primary database. We plan to replace that role with PostgreSQL, also called Postgres; PostgreSQL is not yet deployed."
+        }
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "tool": "memory_recall",
+      "arguments": {
+        "query": "Atlas"
+      },
+      "path": "current",
+      "contains": {
+        "relation": "uses_database",
+        "target_contains": "mysql"
+      }
+    },
+    {
+      "tool": "memory_recall",
+      "arguments": {
+        "query": "Atlas"
+      },
+      "path": "planned",
+      "contains": {
+        "relation": "uses_database",
+        "target_contains": "postgre"
+      }
+    },
+    {
+      "tool": "memory_recall",
+      "arguments": {
+        "query": "Atlas"
+      },
+      "path": "inferred",
+      "contains": {
+        "relation": "uses_language",
+        "target_contains": "php"
+      }
+    },
+    {
+      "tool": "memory_recall",
+      "arguments": {
+        "query": "Atlas"
+      },
+      "path": "current",
+      "excludes": {
+        "relation": "uses_database",
+        "target_contains": "postgre"
+      }
+    }
+  ],
+  "dream": {
+    "query": "Atlas",
+    "instructions": "Produce at least one conservative useful insight from the current facts. Explain the current stack and that a planned migration is not production evidence; cite only current fact IDs for actual stack claims. Do not present PostgreSQL as deployed."
+  }
+}

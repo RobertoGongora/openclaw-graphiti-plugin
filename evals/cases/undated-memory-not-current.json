@@ -1,0 +1,39 @@
+{
+  "id": "undated-memory-not-current",
+  "description": "An imported undated memory is uncertain evidence, never a newly verified state.",
+  "transcripts": [
+    {
+      "source_id": "undated",
+      "session_id": "old-notes",
+      "source_kind": "memory_import",
+      "messages": [
+        {
+          "id": "n",
+          "role": "note",
+          "content": "Project Atlas uses MySQL. This is an old undated memory note."
+        }
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "tool": "memory_recall",
+      "arguments": {
+        "query": "Atlas"
+      },
+      "path": "current",
+      "equals": []
+    },
+    {
+      "tool": "memory_recall",
+      "arguments": {
+        "query": "Atlas"
+      },
+      "path": "uncertain",
+      "contains": {
+        "relation": "uses_database",
+        "target_contains": "mysql"
+      }
+    }
+  ]
+}

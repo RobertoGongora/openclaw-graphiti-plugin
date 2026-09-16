@@ -1,0 +1,13 @@
+{
+  "id":"scoped-preference-correction",
+  "description":"A person's updated chat preference supersedes old evidence without changing a separate reporting preference.",
+  "transcripts":[
+    {"source_id":"morgan-new","session_id":"morgan-a","messages":[{"id":"a","role":"user","timestamp":"2026-09-15T10:00:00Z","content":"My name is Morgan. For my single exclusive preferred-chat-language role, I now prefer Spanish instead of English. My separate preferred-report-language role remains English. These are two different preference scopes."}]},
+    {"source_id":"morgan-old","session_id":"morgan-b","messages":[{"id":"b","role":"user","timestamp":"2026-09-12T10:00:00Z","content":"I am Morgan. My single exclusive preferred-chat-language is English. My separate preferred-report-language is also English."}]}
+  ],
+  "checks":[
+    {"tool":"memory_recall","arguments":{"query":"Morgan"},"path":"current","contains":{"relation":"prefers","slot":"preferred-chat-language","target_name_contains":"spanish"}},
+    {"tool":"memory_recall","arguments":{"query":"Morgan"},"path":"current","excludes":{"relation":"prefers","slot":"preferred-chat-language","target_name_contains":"english"}},
+    {"tool":"memory_recall","arguments":{"query":"Morgan"},"path":"current","contains":{"relation":"prefers","slot":"preferred-report-language","target_name_contains":"english"}}
+  ]
+}
