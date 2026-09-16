@@ -1,6 +1,6 @@
 # ADR-002: Knowledge journal and historical replay
 
-Status: implemented and validated in isolation; live activation pending.
+Status: implemented, validated, and activated on 2026-09-16.
 
 ## Decision
 
@@ -84,3 +84,13 @@ five representative subjects. Baseline creation took 0.17 seconds on that replic
 full head verification took 0.15 seconds. These are one-run measurements, not a
 scaling guarantee. Sanitized results are committed in
 `evals/baselines/journal-validation.json`; golden approval remains false.
+
+Live activation established change 0 at 2026-09-16T19:11:31.729247Z after stopping
+the previous writers and confirming zero active episode leases. One final model
+attempt was cancelled; normal cleanup released its durable job for retry. The
+baseline preserved all 1,677 knowledge records (848 episodes, 369 entities, 460
+facts). Current answers were unchanged, historical recall/latest passed through
+the live HTTP MCP endpoint, and four worker consumers resumed the existing queue.
+No production test facts were inserted. The complete memory bank is still being
+processed. The initial live verification covered the baseline and read paths;
+subsequent mutation history is covered by the isolated integration tests.

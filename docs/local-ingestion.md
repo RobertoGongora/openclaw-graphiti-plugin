@@ -38,13 +38,14 @@ counts below rather than treating the initial snapshot as a permanent total.
 ```
 
 The deployment uses engine
-`83adab46fb2115a44935d1cddbd5c83321e4cb795c4b82471412de0bda092dfa`.
-41 deterministic tests and 12/12 fixed Luna model cases passed in Docker. Two
-fresh Claude A/B attempts passed the native arm but were blocked during graph
+`21f973016d95c588342c3058334ceccb23259c4aa6da412f371683dc614859ed`.
+47 deterministic tests and 12/12 fixed Luna model cases passed in Docker for the
+journal upgrade. Two earlier Claude A/B attempts passed the native arm but were blocked during graph
 source extraction by exact-quote validation, before the MCP arm. This remains an
-open extraction-quality limitation; no new golden baseline was approved. The
-extractor, prompts, temporal projection, and graph store are unchanged from the
-previous deployment. Rejected candidates stay outside the fact graph and retry.
+open extraction-quality limitation; that A/B was not rerun for the journal upgrade
+and no new golden baseline was approved. The extractor, prompts, and current
+temporal projection are unchanged. The graph store now journals knowledge writes.
+Rejected candidates stay outside the fact graph and retry.
 
 All jobs must be complete, with none processing, queued, or retrying, before
 calling the bank fully ingested. A source may produce zero facts if it contains
@@ -73,6 +74,38 @@ Docker completes. Evidence and the graph snapshot are in
 The prototype sandbox was separately backed up before the original fresh import:
 `~/.local/share/graph-memory/backups/20260916T164612Z-prototype-graph.json`.
 The current shared scope is `personal`.
+
+## Journal activation
+
+The journal started at **2026-09-16T19:11:31.729247Z** with change **0**. Existing
+knowledge is preserved as that baseline; earlier changes cannot be reconstructed.
+At activation the graph held 848 source episodes (49 completed), 369 entities, and
+460 facts. Current answers and five representative historical queries matched.
+Live HTTP recall/latest worked with and without the new `at_change` argument.
+
+The worker and MCP service pin image
+`sha256:5d366fa3f10705a4744fd0c6b3b5697f2af8e6dd8c0582e4d0b545335c8c4c1a`.
+The stable host CLI is installed from the same engine build. Four consumers
+resumed the existing queue. One old model attempt was cancelled during shutdown;
+its job remained durable and its lease was released before activation.
+
+Private activation evidence is under `deployment/journal-validation/`:
+
+- `before-journal.json`: graph records, relationships, and normalized knowledge.
+- `baseline.json`: complete fixed model regression results.
+- `replica-check.json`: isolated bank-copy parity and baseline timing.
+- `activation.json`: baseline hash, preserved counts, and query parity.
+- `live-check.json`: journal integrity, live MCP historical queries, and Browser.
+- `compose-before.json`: previous private deployment configuration for reference.
+
+Use the [history commands](history.md) to inspect changes or materialize an isolated
+replay. All future knowledge writers must support the journal; restoring an old
+image alone is not a compatible rollback after new journaled changes exist.
+
+```sh
+~/.local/share/graph-memory/bin/compose exec worker graph-memory --namespace personal history list --limit 20
+~/.local/share/graph-memory/bin/compose exec worker graph-memory --namespace personal recall Atlas --at-change 0
+```
 
 ## UI and MCP
 
