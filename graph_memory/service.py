@@ -327,7 +327,14 @@ class MemoryService:
 
     def tools(self):
         # The tuple owns both validation and dispatch, preventing schema/handler drift.
+        from .render import render_graph
+
         return {
+            "memory_render": (
+                m.Render,
+                lambda r: render_graph(self.store, r),
+                "Use when the user wants to see their memory graph or how its facts connect. Shows the whole graph by default, or a selected view using optional Cypher.",
+            ),
             "memory_ingest": (
                 m.Ingest,
                 self.ingest,
@@ -417,6 +424,7 @@ class MemoryService:
     def session_tools(self):
         """The public MCP surface; orchestration remains in the engine and CLI."""
         names = {
+            "memory_render",
             "memory_ingest",
             "memory_recall",
             "memory_latest",

@@ -3,6 +3,8 @@ ARG CODEX_VERSION=0.154.0
 RUN npm install --prefix /opt/codex @openai/codex@${CODEX_VERSION}
 
 FROM python:3.13-slim-bookworm AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends graphviz fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=codex /usr/local/bin/node /usr/local/bin/node
 COPY --from=codex /opt/codex /opt/codex
 ENV PATH="/opt/codex/node_modules/.bin:${PATH}" \

@@ -73,4 +73,11 @@ has no `extract` switch and its response never delegates processing back to the 
 
 Recall/latest also accept optional `known_at` or `at_change` cutoffs for historical
 knowledge. `as_of` remains the separate event-time cutoff. Historical results
-include coverage metadata; see [history](history.md). The catalog remains five tools.
+include coverage metadata; see [history](history.md). The catalog has six tools, including `memory_render`.
+
+
+`memory_render` returns a standard PNG `image` content block plus text and
+`structuredContent` with dimensions, counts, timestamp, and truncation flags.
+Image bytes appear once, not repeated in structured metadata. Clients that cache
+the catalog may need a reconnect/refresh to discover newly deployed tools.
+See [rendering](rendering.md) for whole-graph and custom-Cypher examples.

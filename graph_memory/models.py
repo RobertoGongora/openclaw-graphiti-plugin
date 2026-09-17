@@ -269,6 +269,16 @@ class Pending(Scope):
     limit: Annotated[int, Field(ge=1, le=100)] = 20
 
 
+class Render(Scope):
+    cypher: Annotated[str, Field(min_length=1, max_length=20_000)] | None = Field(
+        default=None,
+        description="Optional read-only Cypher returning nodes, relationships, or paths. Omit for the whole namespace. $namespace and $ns are supplied automatically.",
+    )
+    parameters: dict = Field(default_factory=dict, description="Optional Cypher parameters.")
+    max_nodes: Annotated[int, Field(ge=1, le=20_000)] = 10_000
+    max_relationships: Annotated[int, Field(ge=1, le=60_000)] = 30_000
+
+
 class Merge(Scope):
     source_key: Key
     target_key: Key

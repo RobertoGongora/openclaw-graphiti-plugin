@@ -13,7 +13,7 @@ from . import __version__
 VERSION = "2026-07-28"
 PREFIX = "io.modelcontextprotocol/"
 MAX_BODY = 4_000_000
-READ_ONLY = {"memory_recall", "memory_latest"}
+READ_ONLY = {"memory_recall", "memory_latest", "memory_render"}
 
 
 def error(request_id, code, message, data=None):
@@ -150,11 +150,14 @@ class Protocol:
             try:
                 schema, handler, _ = self.service.session_tools()[name]
                 output = handler(schema.model_validate(arguments))
+                rendered_image = output.pop("image", None) if name == "memory_render" else None
                 result = {
                     "content": [{"type": "text", "text": json.dumps(output)}],
                     "structuredContent": output,
                     "isError": False,
                 }
+                if rendered_image is not None:
+                    result["content"].append({"type": "image", **rendered_image})
             except ValidationError as exc:
                 # Omit input values, which can include private transcript content.
                 detail = [

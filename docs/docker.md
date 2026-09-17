@@ -6,12 +6,13 @@
 | --- | --- | --- |
 | `neo4j` | Persistent graph, queue, evidence, and Neo4j Browser | http://127.0.0.1:17474/browser/; Bolt 127.0.0.1:17687 |
 | `worker` | Scan a read-only memory-bank mount; process queued messages with Terra low | No published port |
-| `mcp` | Five session-facing tools over stateless HTTP | http://127.0.0.1:8765/mcp |
+| `mcp` | Six session-facing tools over stateless HTTP | http://127.0.0.1:8765/mcp |
 
 Colima is the Linux VM running Docker on macOS; all three services are Docker
 containers. Source files and model credentials are never copied into the image.
 The production image has only the two direct Python dependencies plus the optional
-Codex CLI. The `eval` build target adds pytest and fixtures for isolated validation.
+Codex CLI. Graphviz and a font package provide local PNG graph rendering; no browser
+or additional Python visualization library is required. The `eval` build target adds pytest and fixtures for isolated validation.
 
 ## First installation
 
@@ -57,7 +58,7 @@ identical source content and retains the timestamps already in Neo4j.
 
 Extraction, commit, retry, structural repair, and dream operations remain Python
 engine/CLI responsibilities. The MCP catalog exposes only recall, latest, ingest,
-retract, and merge. Dream scheduling/promotion remains an explicit engine operator
+retract, merge, and rendering. Dream scheduling/promotion remains an explicit engine operator
 action (`graph-memory dream ...`), not an automatic ingestion side effect.
 
 ## Operations

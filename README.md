@@ -76,9 +76,10 @@ required for the 2026 protocol.
 | `memory_ingest` | Use when the user asks you to remember something or when saving new information from a conversation. |
 | `memory_retract` | Use when the user says a remembered fact is incorrect or should no longer inform answers. |
 | `memory_merge` | Use when separate memory entries are confirmed to refer to the same person, project, or thing. |
+| `memory_render` | Use when the user wants to see their memory graph or how its facts connect. Shows the whole graph by default, or a selected view using optional Cypher. |
 
-Only these five operations are exposed through MCP. Read-only mode exposes recall
-and latest. Extraction, commit, repair, and dreaming stay inside the engine and CLI;
+Only these six operations are exposed through MCP. Read-only mode exposes recall, latest,
+and rendering. Extraction, commit, repair, and dreaming stay inside the engine and CLI;
 calling an internal operation through MCP is rejected, even by name.
 
 `memory_recall` takes an entity name, key, or alias, not an arbitrary natural-language
@@ -214,3 +215,11 @@ The old TypeScript/OpenClaw plugin remains available for migration reference and
 its existing tests. It is not imported by the Python service. Its original setup
 is documented in [legacy OpenClaw documentation](docs/legacy-openclaw.md).
 Existing Graphiti data is not silently reinterpreted under this schema.
+
+### Render the graph in chat
+
+Call `memory_render` with `{"namespace":"personal"}` for the entire knowledge
+graph, including disconnected source episodes. Defaults are 10,000 nodes and
+30,000 relationships; any truncation is reported in the image and metadata.
+An optional `cypher` selects a subgraph. The response contains a PNG image block,
+ready for an MCP client to display. See [rendering examples](docs/rendering.md).
