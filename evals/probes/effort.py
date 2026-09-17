@@ -43,12 +43,17 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--inputs", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--effort", choices=("medium", "high"), required=True)
+    parser.add_argument("--effort", choices=("low", "medium", "high"), required=True)
+    parser.add_argument(
+        "--model", choices=("gpt-5.6-luna", "gpt-5.6-terra"), default="gpt-5.6-luna"
+    )
     args = parser.parse_args()
     cases = json.loads(args.inputs.read_text())
     if args.effort == "high":
         cases.reverse()  # Counterbalance two concurrent effort runs.
     report = {
+        "model": args.model,
+        "fast_mode_requested": False,
         "effort": args.effort,
         "engine": engine_fingerprint(),
         "scope": "schema_and_evidence_only",
@@ -57,8 +62,8 @@ def main():
     for case in cases:
         assert digest(case["packet"]) == case["input_hash"]
         sink = ValidationSink(case["packet"])
-        service = FrozenService(sink, CodexLLM(effort=args.effort))
-        result = {"input_hash": case["input_hash"], "effort": args.effort}
+        service = FrozenService(sink, CodexLLM(model=args.model, effort=args.effort))
+        result = {"input_hash": case["input_hash"], "effort": args.effort, "model": args.model}
         started = time.monotonic()
         try:
             result.update(

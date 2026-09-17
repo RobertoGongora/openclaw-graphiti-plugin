@@ -77,7 +77,7 @@ report contains aggregates and report digests, without private source excerpts.
 Use the same checkout, explicit isolated Neo4j endpoint, and source snapshot:
 
 ```sh
-export MEMORY_TEST_NEO4J_URI=bolt://127.0.0.1:17687
+export MEMORY_TEST_NEO4J_URI=bolt://127.0.0.1:27687 # separately started test instance
 export MEMORY_LLM=codex
 # Repeat with high and medium, keeping separate reports.
 export MEMORY_REASONING_EFFORT=medium
