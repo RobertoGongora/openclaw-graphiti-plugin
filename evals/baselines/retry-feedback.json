@@ -1,0 +1,65 @@
+{
+  "date": "2026-09-17",
+  "engine": "78e20fcdf6ffad4bc60785708d3d56d8d8fe6120a6596516d01c185e7fe41582",
+  "suite": "ba11bb16f5e25bc2aa9a71568d660bdbd39ba8673dd9aa1af728f26715f4f48c",
+  "model": "gpt-5.6-terra",
+  "effort": "low",
+  "fast_mode_requested": false,
+  "deterministic_tests_passed": 54,
+  "fixed_cases": [
+    {
+      "case": "atlas-plan-versus-production",
+      "passed": true
+    },
+    {
+      "case": "habit-out-of-order",
+      "passed": true
+    },
+    {
+      "case": "instruction-injection-is-data",
+      "passed": true
+    },
+    {
+      "case": "project-decision-history",
+      "passed": true
+    },
+    {
+      "case": "scoped-preference-correction",
+      "passed": true
+    },
+    {
+      "case": "undated-memory-not-current",
+      "passed": true
+    }
+  ],
+  "passed": true,
+  "report_sha256": "4ed6973849ea5e5740361eae0f10ba4131636c1f4593e736ee6cd2c21183f6e4",
+  "durable_feedback_canary": {
+    "model": "gpt-5.6-terra",
+    "effort": "low",
+    "engine": "78e20fcdf6ffad4bc60785708d3d56d8d8fe6120a6596516d01c185e7fe41582",
+    "status": "complete",
+    "feedback_received": true,
+    "feedback_cleared": true,
+    "journal_verified": true,
+    "current_mysql": true,
+    "planned_postgres": true,
+    "passed": true,
+    "seconds": 8.265
+  },
+  "approved_golden_baseline": false,
+  "deployment": {
+    "image": "sha256:5f227380263f5d3916a2d6219825f7c258f8c526f0534096d174c19e52941515",
+    "journal_verified_before_and_after": 152,
+    "journal_records_preserved": 2524,
+    "cancelled_model_calls": 0,
+    "mcp_discovery_and_recall_http_status": 200,
+    "host_cli_updated": true
+  },
+  "limitations": [
+    "Six fixed cases run once on the final engine; not a whole-bank quality benchmark.",
+    "Canary is synthetic, tests current MySQL versus planned Postgres and a persisted evidence rejection.",
+    "Existing failed jobs get feedback after the next validation rejection.",
+    "Native-memory versus MCP Claude comparison was not rerun."
+  ]
+}

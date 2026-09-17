@@ -26,7 +26,7 @@ class ValidationSink:
     def assert_writable(self, namespace):
         pass
 
-    def failed(self, *args):
+    def failed(self, *args, **kwargs):
         pass
 
     def commit(self, namespace, episode_id, extraction, **kwargs):
@@ -45,7 +45,9 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--effort", choices=("low", "medium", "high"), required=True)
     parser.add_argument(
-        "--model", choices=("gpt-5.6-luna", "gpt-5.6-terra"), default="gpt-5.6-luna"
+        "--model",
+        choices=("gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.3-codex-spark"),
+        default="gpt-5.6-luna",
     )
     args = parser.parse_args()
     cases = json.loads(args.inputs.read_text())

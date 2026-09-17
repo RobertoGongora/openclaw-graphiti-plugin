@@ -1,0 +1,45 @@
+{
+  "model": "gpt-5.3-codex-spark",
+  "fast_mode_requested": false,
+  "effort": "low",
+  "engine": "5cadbbca81d77be3e8d3ae8791f6708b1f2b6ec0213bdd86cc7ded3364a22b01",
+  "scope": "schema_and_evidence_only",
+  "results": [
+    {
+      "input_hash": "42294c70536cd76b426a868845a33cb6c2bc7470a720147c22a2dba21392da5b",
+      "effort": "low",
+      "model": "gpt-5.3-codex-spark",
+      "passed": false,
+      "diagnostic": {
+        "stage": "model_output",
+        "code": "model_invocation_failed",
+        "exit_code": 1,
+        "extraction_attempt": 1,
+        "duration_seconds": 8.123,
+        "engine": "5cadbbca81d77be3e8d3ae8791f6708b1f2b6ec0213bdd86cc7ded3364a22b01"
+      },
+      "seconds": 8.123
+    },
+    {
+      "input_hash": "78b8e6c94e98780aed0fd30326ba59134d0ef6fe7669715f5db9797dfe9f48c5",
+      "effort": "low",
+      "model": "gpt-5.3-codex-spark",
+      "passed": false,
+      "diagnostic": {
+        "stage": "model_output",
+        "code": "model_invocation_failed",
+        "exit_code": 1,
+        "extraction_attempt": 1,
+        "duration_seconds": 1.985,
+        "engine": "5cadbbca81d77be3e8d3ae8791f6708b1f2b6ec0213bdd86cc7ded3364a22b01"
+      },
+      "seconds": 1.986
+    }
+  ],
+  "outcome": "blocked_before_generation",
+  "backend_error": "The 'gpt-5.3-codex-spark' model is not supported when using Codex with a ChatGPT account.",
+  "worker_login_plan": "pro",
+  "host_and_worker_account_match": true,
+  "quality_evaluated": false,
+  "live_graph_writes": false
+}

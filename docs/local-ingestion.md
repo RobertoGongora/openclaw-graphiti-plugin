@@ -39,7 +39,14 @@ counts below rather than treating the initial snapshot as a permanent total.
 ```
 
 The deployment uses engine
-`5cadbbca81d77be3e8d3ae8791f6708b1f2b6ec0213bdd86cc7ded3364a22b01`.
+`78e20fcdf6ffad4bc60785708d3d56d8d8fe6120a6596516d01c185e7fe41582`.
+Queued retries now retain bounded rejection feedback across restarts; see
+[durable retry behavior](docker.md#durable-rejection-feedback). The final build
+passed 54 deterministic tests, six fixed Terra/low scenarios, and a real-model
+persisted-feedback canary. MCP discovery/recall and journal integrity were verified
+after deployment. The worker drained without cancelling any model calls.
+
+The diagnostics-only deployment described below preceded this update.
 The diagnostics update passed 50 deterministic tests in Docker. Its model prompts
 and extraction JSON schema match the preceding journal build exactly; no failed
 bank sources were reproduced and no model evaluations were rerun for this logging
@@ -87,9 +94,9 @@ in [Docker operations](docker.md). Episode error properties retain their previou
 class-only format; operational diagnostics do not enter the knowledge journal.
 Only future failures have the additional details.
 
-Worker and MCP now pin image
+At the diagnostics rollout, worker and MCP pinned image
 `sha256:a9005f9f1eb653d72f7b2ba609a6664945ffe80291b4e6a3d215d34d60fe2160`.
-The host CLI uses the same build. Two unfinished model attempts were cancelled
+The host CLI then used the same build. Two unfinished model attempts were cancelled
 during drain and their normal cleanup released the jobs for retry. Journal change
 112, containing 2,205 knowledge records, was verified before the switch. Private
 deployment verification is saved in `deployment/diagnostics-deployment.json`.
@@ -156,3 +163,13 @@ Compose restarts containers unless explicitly stopped. The machine must be awake
 and Colima/Docker running. Do not start the retired container against the same
 Neo4j volume while the Compose database is running. Do not use `down -v` when
 preserving data. Future engine changes should follow the eval/revision workflow.
+
+## Retry-feedback deployment — 2026-09-17
+
+Worker, MCP, and host CLI now use the retry-feedback engine above. Worker and MCP
+pin `sha256:5f227380263f5d3916a2d6219825f7c258f8c526f0534096d174c19e52941515`.
+The worker remains Terra low with fast mode off. Before and after the upgrade,
+journal change 152 verified with the same hash and all 2,524 knowledge records.
+No source, fact, or historical record was re-extracted or repaired during rollout.
+Evidence is in [the sanitized validation report](../evals/baselines/retry-feedback.json)
+and the private deployment's `retry-feedback/` folder. No golden expectations changed.

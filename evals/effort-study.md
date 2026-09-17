@@ -130,3 +130,23 @@ The schema implementation follows Pydantic's
 and the documented nested `anyOf` support in
 [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
 Runtime validation remains the final authority for every provider and MCP caller.
+
+## Spark access probe — 2026-09-17
+
+At the user's request, `gpt-5.3-codex-spark` with low effort was attempted against
+the same two frozen inputs using the earlier diagnostics image and engine. Both
+calls failed before generation (8.123 and 1.986 seconds), so these are availability
+failures, not failed extraction-quality tests. A synthetic `Reply with the word
+ready` call confirmed HTTP 400: `The 'gpt-5.3-codex-spark' model is not supported
+when using Codex with a ChatGPT account.` The worker's login and host login both
+identify as Pro and use the same account; credentials were not changed.
+
+The [official model catalog](https://learn.chatgpt.com/docs/models) describes Spark
+as a text-only research preview for near-instant coding iteration. Its
+[usage documentation](https://learn.chatgpt.com/docs/pricing) describes a separate
+usage allowance on specialized low-latency hardware. The
+[focused UI guidance](https://learn.chatgpt.com/use-cases/make-granular-ui-changes)
+notes lower capability than general-purpose models. These properties make a bounded
+extraction experiment worth trying, but do not establish quote fidelity or temporal
+reasoning quality. Current worker access blocks that comparison. Terra low remains
+the production choice; no Spark source facts were written.
