@@ -153,6 +153,7 @@ class CodexLLM:
                     return output.model_validate_json(raw)
                 except ValidationError as exc:
                     if attempt:
+                        exc.memory_rejected_candidate = raw
                         raise
                     issues = exc.errors(include_input=False, include_context=False)
                     prompt += (
@@ -192,7 +193,12 @@ class CompatibleLLM:
         request = Request(self.url, data=json.dumps(body).encode(), headers=headers, method="POST")
         with urlopen(request, timeout=300) as response:
             result = json.loads(response.read(4_000_000))
-        return output.model_validate_json(result["choices"][0]["message"]["content"])
+        raw = result["choices"][0]["message"]["content"]
+        try:
+            return output.model_validate_json(raw)
+        except ValidationError as exc:
+            exc.memory_rejected_candidate = raw
+            raise
 
 
 def configured_llm():

@@ -164,14 +164,16 @@ class GraphStore:
             ).data()
         )
 
-    def failed(self, namespace, episode_id, error):
+    def failed(self, namespace, episode_id, error, retry_feedback=None):
         self.transaction(
             lambda tx: tx.run(
                 "MATCH (e:MemoryEpisode {id:$id,namespace:$ns}) WHERE e.status <> 'complete' "
-                "SET e.status='failed',e.error=$error",
+                "SET e.status='failed',e.error=$error,"
+                "e.retry_feedback=coalesce($feedback,e.retry_feedback)",
                 id=episode_id,
                 ns=namespace,
                 error=error[:300],
+                feedback=json.dumps(retry_feedback) if retry_feedback is not None else None,
             ).consume()
         )
 
@@ -334,7 +336,7 @@ class GraphStore:
                 ).consume()
                 fact_ids.append(fid)
             tx.run(
-                "MATCH (e:MemoryEpisode {id:$id}) SET e.status='complete',e.error=null,"
+                "MATCH (e:MemoryEpisode {id:$id}) SET e.status='complete',e.error=null,e.retry_feedback=null,"
                 "e.extraction_hash=$hash,e.extraction_payload=$extraction,e.engine=$engine,e.model_info=$model_info,e.completed_at=$at,e.fact_count=$count "
                 "WITH e MATCH (s:MemorySpace {id:$ns}) SET s.revision=s.revision+1",
                 id=episode_id,

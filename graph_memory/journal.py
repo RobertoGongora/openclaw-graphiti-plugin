@@ -10,7 +10,15 @@ from .store import digest, normalized
 from .temporal import project
 
 LABELS = ("MemoryEpisode", "MemoryEntity", "MemoryFact", "MemoryDream", "MemoryInsight")
-VOLATILE = {"worker", "worker_lock", "lease_until", "retry_after", "attempts", "error"}
+VOLATILE = {
+    "worker",
+    "worker_lock",
+    "lease_until",
+    "retry_after",
+    "attempts",
+    "error",
+    "retry_feedback",
+}
 
 
 def capture(tx, namespace):

@@ -7,6 +7,7 @@ import uuid
 from . import models as m
 from .diagnostics import diagnostic
 from .llm import DREAM_INSTRUCTIONS, EXTRACTION_INSTRUCTIONS
+from .retry import feedback, restored_feedback
 from .version import engine_fingerprint
 
 
@@ -44,11 +45,15 @@ class MemoryService:
             "instructions": EXTRACTION_INSTRUCTIONS,
             "schema": m.Extraction.model_json_schema(),
             "next_tool": "memory_commit",
+            "previous_rejection": restored_feedback(
+                episode.get("retry_feedback"), self.store.engine
+            ),
         }
 
     def extract(self, request: m.EpisodeRequest):
         self.store.assert_writable(request.namespace)
         started, stage, attempt = time.monotonic(), "prepare", -1
+        extraction = None
         try:
             packet = self.prepare(request)
             if packet["status"] == "complete":
@@ -60,8 +65,11 @@ class MemoryService:
                 "existing_entities": packet["existing_entities"],
                 "existing_relationships": packet["existing_relationships"],
             }
+            if packet.get("previous_rejection"):
+                payload["previous_rejection"] = packet["previous_rejection"]
             for attempt in range(2):
                 stage = "model_output"
+                extraction = None
                 extraction = self.llm.generate(EXTRACTION_INSTRUCTIONS, payload, m.Extraction)
                 try:
                     stage = "evidence_validation"
@@ -74,6 +82,7 @@ class MemoryService:
                         **payload,
                         "rejected_candidate": extraction.model_dump(mode="json"),
                         "validation_error": str(exc),
+                        "validation_diagnostic": diagnostic(exc, stage),
                         "correction": "Correct exact quote/focus/time grounding against the original transcript. Do not invent evidence or change source text.",
                     }
             stage = "commit"
@@ -94,7 +103,17 @@ class MemoryService:
                 "duration_seconds": round(time.monotonic() - started, 3),
                 "engine": self.store.engine,
             }
-            self.store.failed(request.namespace, request.episode_id, type(exc).__name__)
+            self.store.failed(
+                request.namespace,
+                request.episode_id,
+                type(exc).__name__,
+                retry_feedback=feedback(
+                    exc,
+                    stage,
+                    self.store.engine,
+                    extraction.model_dump(mode="json") if extraction is not None else None,
+                ),
+            )
             raise
 
     def dream_create(self, request: m.DreamCreate):

@@ -5,7 +5,7 @@
 | Service | Responsibility | Local address |
 | --- | --- | --- |
 | `neo4j` | Persistent graph, queue, evidence, and Neo4j Browser | http://127.0.0.1:17474/browser/; Bolt 127.0.0.1:17687 |
-| `worker` | Scan a read-only memory-bank mount; process queued messages with Luna | No published port |
+| `worker` | Scan a read-only memory-bank mount; process queued messages with Terra low | No published port |
 | `mcp` | Five session-facing tools over stateless HTTP | http://127.0.0.1:8765/mcp |
 
 Colima is the Linux VM running Docker on macOS; all three services are Docker
@@ -101,3 +101,30 @@ worktree so ongoing edits cannot change the running engine.
 
 References: [Docker Compose service configuration](https://docs.docker.com/reference/compose-file/services/),
 [Codex headless authentication](https://developers.openai.com/codex/auth/).
+
+## Durable rejection feedback
+
+Queued extraction retries retain the latest actionable validation failure on the
+source episode as private `retry_feedback`. The next attempt receives its reason,
+field location, and rejected candidate alongside the original transcript and fresh
+graph context. Feedback is untrusted repair context, never evidence. Both Codex
+and compatible HTTP adapters retain final schema-rejected output; evidence failures
+retain the final rejected extraction. Immediate corrections also receive the
+structured diagnostic location.
+
+Only one failure context is kept. Candidates are limited to 64,000 encoded bytes
+and the complete serialized feedback to 80,000 bytes; oversized or malformed
+candidates are omitted while diagnostic feedback remains. Timeouts and invocation
+failures do not overwrite earlier validation feedback. Successful commits clear it.
+A new source version has a different episode ID and cannot inherit old feedback.
+An engine fingerprint change makes old feedback ineligible for reuse.
+
+Feedback is excluded from journal snapshots/deltas, current facts, and diagnostic
+logs. It is operational data, like leases and retry timing, not a new memory fact.
+Existing failed jobs acquire it after their next validation rejection; historical
+logs do not contain enough information to reconstruct rejected candidates.
+
+Upgrade all graph readers/writers (MCP, workers, and host CLI) before restarting
+workers, so every journal capture excludes this new operational field. Keep the
+validated image pinned. Rolling back to a build unaware of `retry_feedback` after
+new failures would misclassify that property as a knowledge change.
