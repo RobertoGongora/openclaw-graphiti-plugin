@@ -1,5 +1,9 @@
 # Local memory-bank ingestion
 
+This is the original markdown benchmark deployment. A separate
+[transcript source stack](transcript-sources.md) now runs on Browser port 27474,
+Bolt 27687 and MCP 8766. It does not replace or modify these workers.
+
 The local system now runs through Docker Compose on Colima. Colima is the Linux
 VM hosting Docker on macOS. Three services are deployed:
 

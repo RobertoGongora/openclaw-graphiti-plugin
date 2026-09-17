@@ -372,3 +372,22 @@ def test_memory_mcp_retrieval_is_not_fresh_verification(tmp_path):
     ms = list(records(p))
     assert ms[1].source_type == "memory_read"
     assert "derived_memory_retrieval_not_fresh_verification" in ms[1].gaps
+
+
+@pytest.mark.parametrize("origin", [{"subagent": "review"}, "exec"])
+def test_codex_delegated_and_automated_prompts_are_not_human_claims(tmp_path, origin):
+    p = tmp_path / "s.jsonl"
+    p.write_text(
+        json.dumps({"type": "session_meta", "payload": {"source": origin}})
+        + "\n"
+        + codex("message", role="user", content="Atlas uses MySQL.")
+    )
+    assert list(records(p))[0].source_type == "context"
+
+
+def test_claude_sidechain_instruction_is_context(tmp_path):
+    p = tmp_path / "s.jsonl"
+    r = json.loads(claude("user", "Atlas uses MySQL."))
+    r["isSidechain"] = True
+    p.write_text(json.dumps(r) + "\n")
+    assert list(records(p))[0].source_type == "context"

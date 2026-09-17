@@ -1,0 +1,139 @@
+{
+  "kind": "implementation-validation-not-benchmark",
+  "source_cases_sha256": "19e965a8de8495239b3a2ad76edd038e91533582b4b980943ebf4e4c659cb247",
+  "source_canaries": {
+    "engine": "4a967fcc2b87b7c51bd4c9681614f29e391afd09616067c17c7ca0a6b19a72eb",
+    "model": "gpt-5.6-terra",
+    "effort": "low",
+    "passed": true,
+    "results": [
+      {
+        "id": "stale_read_does_not_renew",
+        "passed": true,
+        "checks": {
+          "active_mysql": true,
+          "planned_postgres": true,
+          "no_active_postgres": true,
+          "no_redis": true
+        },
+        "facts": 2,
+        "seconds": 10.74
+      },
+      {
+        "id": "tool_output_cannot_originate_fact",
+        "passed": true,
+        "checks": {
+          "zero_facts": true
+        },
+        "facts": 0,
+        "seconds": 5.24
+      },
+      {
+        "id": "assistant_claim_validated_not_expanded",
+        "passed": true,
+        "checks": {
+          "active_mysql": true,
+          "no_redis": true
+        },
+        "facts": 1,
+        "seconds": 9.76
+      },
+      {
+        "id": "quoted_memory_not_user_assertion",
+        "passed": true,
+        "checks": {
+          "zero_facts": true
+        },
+        "facts": 0,
+        "seconds": 6.33
+      }
+    ]
+  },
+  "earlier_failures": [
+    {
+      "stage": "source_canaries",
+      "failure": "Assistant claim marked current without explicit supporting tool citation",
+      "fix": "Separate conversational evidence from validation_evidence; require both for validated assistant claims."
+    },
+    {
+      "stage": "legacy_regression",
+      "failure": "Transcript-only instruction caused an undated markdown claim to be omitted",
+      "fix": "Select source-format-specific instructions, preserving legacy extraction prompt."
+    },
+    {
+      "stage": "real-source-smoke",
+      "failure": "Delegated user-role messages incorrectly classified as direct user assertions",
+      "fix": "Distinguish sidechain, subagent and automated prompts; quarantine initial pilot volume and rebuild isolated candidate."
+    }
+  ],
+  "deterministic_tests": 86,
+  "legacy_regression": {
+    "engine": "912743162f6febd84ad459504b90ecccf032a7dac5ce73701110ef441c9fa903",
+    "suite": "ba11bb16f5e25bc2aa9a71568d660bdbd39ba8673dd9aa1af728f26715f4f48c",
+    "model": "gpt-5.6-terra",
+    "reasoning_effort": "low",
+    "passed": true,
+    "inputs_unchanged_during_run": true,
+    "cases": [
+      {
+        "id": "atlas-plan-versus-production",
+        "passed": true
+      },
+      {
+        "id": "habit-out-of-order",
+        "passed": true
+      },
+      {
+        "id": "instruction-injection-is-data",
+        "passed": true
+      },
+      {
+        "id": "project-decision-history",
+        "passed": true
+      },
+      {
+        "id": "scoped-preference-correction",
+        "passed": true
+      },
+      {
+        "id": "undated-memory-not-current",
+        "passed": true
+      }
+    ],
+    "unchanged_after_parser_only_fix": true,
+    "unchanged_extractor_files": {
+      "graph_memory/llm.py": "2501ba67ebf16db6f6819b70557f1140de46b143e01d23defd79c1970beb902c",
+      "graph_memory/models.py": "9dff234dc569377dc4210f79e164c86b6e49592b0f2861dcb5b295018aec6680",
+      "graph_memory/service.py": "e756d0e318939e8d9be78c290e1094526d8c19f430ea99835a7bf16b44cbbac5"
+    }
+  },
+  "deployment_smoke": {
+    "checked_at": "2026-09-17T11:35:45.288576+00:00",
+    "image": "graph-memory:transcripts-4a967fcc2b87",
+    "active_volume": "graph-memory-transcripts_source-v1",
+    "episodes": [
+      {
+        "status": "complete",
+        "count": 16
+      },
+      {
+        "status": "pending",
+        "count": 21
+      }
+    ],
+    "audit": {
+      "namespace": "transcripts",
+      "verified": true,
+      "sequence": 53,
+      "hash": "89cb0d3e19954f0bd2637ce9892f16ab5d71567e54566b9f3237a810ad97b2c9",
+      "records": 324
+    },
+    "invalid_claim_sources": 0,
+    "invalid_validation_sources": 0,
+    "mcp_tools": 6,
+    "mcp_recall_ok": true,
+    "mcp_render_ok": true,
+    "baseline_worker_image_and_start_unchanged": true,
+    "observed_warning": "One transient Neo4j deadlock retried by driver; subsequent episodes completed."
+  }
+}

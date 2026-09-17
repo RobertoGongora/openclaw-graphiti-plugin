@@ -1,6 +1,6 @@
 # ADR 004: Transcript claims with separate validation and artifact evidence
 
-Status: implementation under validation, 2026-09-17.
+Status: accepted and validated, 2026-09-17.
 
 The original deployment imports derived markdown memories. It cannot establish
 what was said, corrected, observed by tools, or merely repeated from old memory.
@@ -31,3 +31,11 @@ extraction is enabled only after these checks pass, with conservative handling
 of compound commands and unsupported artifact formats.
 
 Reference: https://neo4j.com/docs/operations-manual/current/database-administration/
+
+Validation: 86 deterministic tests and four frozen transcript-source model
+canaries passed on the release engine. All six existing model regression cases
+passed on Terra/low before the parser-only origin fix; the extraction contract
+files are byte-identical in the release. The initial
+source citation and legacy prompt failures, their fixes, and final evidence are
+recorded in `evals/reports/transcript-source-v1.json`. This establishes the input
+contract, not a native-memory versus transcript-graph benchmark result.

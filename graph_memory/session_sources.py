@@ -93,6 +93,8 @@ def records(path: Path):
     """Stable IDs use line/block/chunk positions, including tool arguments/results."""
     calls = {}
     cwd = None
+    delegated = "subagents" in path.parts
+    automated = False
     for line_number, line in enumerate(path.open(), 1):
         if not line.endswith("\n"):
             break  # writer may still be appending this record
@@ -107,6 +109,10 @@ def records(path: Path):
         kind = item.get("type")
         if kind in {"session_meta", "turn_context"}:
             cwd = item.get("payload", {}).get("cwd", cwd)
+        if kind == "session_meta":
+            origin = item.get("payload", {}).get("source")
+            delegated = delegated or (isinstance(origin, dict) and "subagent" in origin)
+            automated = origin == "exec"
         cwd = item.get("cwd", cwd)
         payload = item.get("payload", {}) if kind == "response_item" else item.get("message", {})
         entries = []
@@ -261,6 +267,12 @@ def records(path: Path):
                         for x in ("ingest", "write", "merge", "retract", "add", "delete")
                     ):
                         source_type = "memory_write"
+                if any(
+                    x in tool.lower()
+                    for x in ("spawn_agent", "wait_agent", "send_message", "followup_task")
+                ):
+                    source_type = "context"
+                    gaps.append("delegated_agent_report_not_execution_evidence")
                 if tool == "unknown tool":
                     gaps.append("tool_result_semantics_unknown")
                 for p, op, body, captured in recognized:
@@ -296,6 +308,13 @@ def records(path: Path):
                 role = entry.get("role", "note")
                 content = text_content(entry.get("content", ""))
                 source_type = "user_assertion" if role == "user" else "assistant_report"
+                if role == "user" and (delegated or item.get("isSidechain") or automated):
+                    source_type = "context"
+                    gaps.append(
+                        "delegated_instruction"
+                        if delegated or item.get("isSidechain")
+                        else "automated_prompt_not_direct_user_assertion"
+                    )
                 if entry_kind in {"context", "attachment"}:
                     source_type = "context"
                     gaps.append(

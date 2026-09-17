@@ -27,7 +27,8 @@ source parser, separate from the old text-only feed. Claude Code JSONL and Codex
 response-item JSONL are supported, including Codex custom tool calls/outputs.
 Memory MCP recall results also remain derived context, not fresh verification.
 Provider duplicate event mirrors, reasoning, and system/developer instructions
-are not claim sources. Non-text attachments are gaps, not interpreted content.
+are not claim sources. Delegated subagent instructions and automated Codex exec
+prompts are context, even when their provider role is `user`. Non-text attachments are gaps, not interpreted content.
 
 A session stays a single source identity with multiple bounded episodes. Each
 batch contains at most eight new text chunks (90,000 characters), four preceding
@@ -118,3 +119,20 @@ Ports 27474, 27687 and 8766 were added to its existing SSH control connection,
 without restarting Colima. Check forwarding again after a VM restart. The local
 private Compose helper is `~/.local/share/graph-memory/bin/compose-transcripts`;
 the original `compose` helper still operates the markdown stack.
+
+The first real-source pilot exposed delegated prompts being classified as direct
+user assertions. Its volume was quarantined, not merged or repaired into the
+candidate. The corrected release starts on `graph-memory-transcripts_source-v1`.
+The original pilot volume is retained for diagnosis; it is not served by MCP.
+The original markdown volume and worker image were unchanged.
+
+Release evidence is recorded in `evals/reports/transcript-source-v1.json`, including
+the initial failures. Successful model canaries validate specific expectations;
+they do not establish that every historical claim is correctly interpreted.
+
+Live smoke at 2026-09-17 11:35 UTC: both consumers completed episodes; 16 were
+complete and 21 pending. MCP discovery exposed six tools, recall succeeded, and
+the graph rendered without truncation. The audit journal matched the live graph.
+No fact used a tool/context message as its conversational citation. A transient
+Neo4j deadlock was retried by the driver and subsequent processing succeeded.
+These are checkpoint counts, not total archive coverage or a completion estimate.
