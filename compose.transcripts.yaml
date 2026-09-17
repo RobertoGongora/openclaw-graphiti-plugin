@@ -1,0 +1,60 @@
+# Independent database/volume: does not alter the markdown benchmark stack.
+name: graph-memory-transcripts
+services:
+  neo4j:
+    image: neo4j:5.26-community
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: none
+      NEO4J_server_memory_heap_initial__size: 256m
+      NEO4J_server_memory_heap_max__size: 512m
+      NEO4J_server_memory_pagecache_size: 256m
+      NEO4J_dbms_usage__report_enabled: 'false'
+    ports:
+      - '127.0.0.1:27687:7687'
+      - '127.0.0.1:27474:7474'
+    volumes:
+      - transcript_graph:/data
+    healthcheck:
+      test: ['CMD', 'cypher-shell', '-a', 'bolt://localhost:7687', 'RETURN 1']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  worker:
+    image: graph-memory:transcripts
+    build: .
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 45m
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    environment:
+      NEO4J_URI: bolt://neo4j:7687
+      MEMORY_NAMESPACE: transcripts
+      MEMORY_LLM: codex
+      MEMORY_MODEL: gpt-5.6-terra
+      MEMORY_REASONING_EFFORT: low
+      HOME: /home/memory
+    command: [daemon, --source-records, --transcripts, /sessions/claude, --transcripts, /sessions/codex, --workers, '${TRANSCRIPT_WORKERS:-2}']
+    volumes:
+      - '${CLAUDE_SESSIONS_PATH:?Set Claude session directory}:/sessions/claude:ro'
+      - '${CODEX_SESSIONS_PATH:?Set Codex session directory}:/sessions/codex:ro'
+      - '${TRANSCRIPT_AUTH_PATH:?Set Codex authentication directory}:/home/memory/.codex'
+  mcp:
+    image: graph-memory:transcripts
+    init: true
+    restart: unless-stopped
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    environment:
+      NEO4J_URI: bolt://neo4j:7687
+      MEMORY_NAMESPACE: transcripts
+      MEMORY_LLM: caller
+      MEMORY_HTTP_TOKEN: '${TRANSCRIPT_MCP_TOKEN:?Set a private MCP token}'
+    command: [serve, --transport, http, --host, 0.0.0.0]
+    ports:
+      - '127.0.0.1:8766:8765'
+volumes:
+  transcript_graph:

@@ -6,7 +6,7 @@ import uuid
 
 from . import models as m
 from .diagnostics import diagnostic
-from .llm import DREAM_INSTRUCTIONS, EXTRACTION_INSTRUCTIONS
+from .llm import DREAM_INSTRUCTIONS, extraction_instructions
 from .retry import feedback, restored_feedback
 from .version import engine_fingerprint
 
@@ -42,7 +42,7 @@ class MemoryService:
             "transcript": json.loads(episode["payload"]),
             "existing_entities": entities,
             "existing_relationships": self.store.relationship_context(request.namespace, entities),
-            "instructions": EXTRACTION_INSTRUCTIONS,
+            "instructions": extraction_instructions(transcript),
             "schema": m.Extraction.model_json_schema(),
             "next_tool": "memory_commit",
             "previous_rejection": restored_feedback(
@@ -70,7 +70,7 @@ class MemoryService:
             for attempt in range(2):
                 stage = "model_output"
                 extraction = None
-                extraction = self.llm.generate(EXTRACTION_INSTRUCTIONS, payload, m.Extraction)
+                extraction = self.llm.generate(packet["instructions"], payload, m.Extraction)
                 try:
                     stage = "evidence_validation"
                     extraction.validate_evidence(m.Transcript.model_validate(packet["transcript"]))
@@ -138,10 +138,11 @@ class MemoryService:
             if revision != context["revision"]:
                 raise ValueError("Graph changed while snapshotting; retry dream_create")
             tx.run(
-                "CREATE (d:MemoryDream {id:$id,namespace:$ns,status:'pending',snapshot:$snapshot,"
+                "CREATE (d:MemoryDream {id:$id,namespace:$ns,status:'pending',name:$name,snapshot:$snapshot,"
                 "base_revision:$revision,engine:$engine,created_at:$at})",
                 id=dream_id,
                 ns=request.namespace,
+                name="Dream · " + request.query[:130],
                 snapshot=json.dumps(snapshot),
                 revision=revision,
                 engine=self.store.engine,
@@ -296,7 +297,7 @@ class MemoryService:
                     keys=insight.entity_keys,
                 ).data()
                 tx.run(
-                    "CREATE (i:MemoryInsight {id:$id,namespace:$ns,summary:$summary,entity_ids:$entities,"
+                    "CREATE (i:MemoryInsight {id:$id,namespace:$ns,summary:$summary,name:$summary,entity_ids:$entities,"
                     "supporting_fact_ids:$facts,confidence:$confidence,inferred:true,dream_id:$dream}) "
                     "WITH i UNWIND $facts AS fid MATCH (f:MemoryFact {id:fid}) MERGE (i)-[:DERIVED_FROM]->(f)",
                     id=f"{request.dream_id}:{index}",

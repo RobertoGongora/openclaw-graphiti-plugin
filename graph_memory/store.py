@@ -69,6 +69,10 @@ class GraphStore:
                 "MemoryRevision",
                 "MemoryFeed",
                 "MemoryChange",
+                "MemorySession",
+                "MemoryMessage",
+                "MemoryArtifact",
+                "MemoryArtifactObservation",
             ):
                 tx.run(
                     f"CREATE CONSTRAINT {label.lower()}_id IF NOT EXISTS FOR (n:{label}) REQUIRE n.id IS UNIQUE"
@@ -122,15 +126,25 @@ class GraphStore:
             record = tx.run(
                 "MERGE (e:MemoryEpisode {id:$id}) ON CREATE SET e.namespace=$ns, "
                 "e.source_id=$source, e.session_id=$session, e.payload=$payload, "
-                "e.status='pending', e.ingested_at=$at "
+                "e.status='pending', e.ingested_at=$at, e.name=$name "
                 "RETURN e.id AS episode_id,e.status AS status",
                 id=episode_id,
                 ns=transcript.namespace,
                 source=transcript.source_id,
                 session=transcript.session_id,
                 payload=json.dumps(payload),
+                name=(transcript.title or transcript.source_uri or "Episode").rsplit("/", 1)[-1][
+                    :150
+                ]
+                + " · "
+                + next(
+                    (m.timestamp.isoformat() for m in transcript.messages if m.timestamp), "undated"
+                ),
                 at=timestamp,
             ).single()
+            from .source_graph import save
+
+            save(tx, transcript, episode_id)
             return dict(record)
 
         def operation(tx):
@@ -293,6 +307,13 @@ class GraphStore:
                     "relation": fact.relation.value,
                     "status": fact.status,
                     "summary": fact.summary,
+                    "name": fact.summary[:160],
+                    "message_refs": [
+                        digest([namespace, transcript.session_id, e.message_id])
+                        for e in fact.evidence
+                    ]
+                    if transcript.source_format == "session-records-v1"
+                    else [],
                     "slot": fact.slot,
                     "valid_at": fact.valid_at.isoformat() if fact.valid_at else None,
                     "valid_ts": fact.valid_at.timestamp() if fact.valid_at else None,
@@ -317,6 +338,13 @@ class GraphStore:
                     else None,
                     "confidence": fact.confidence,
                     "evidence": json.dumps(raw["evidence"]),
+                    "validation_evidence": json.dumps(raw["validation_evidence"]),
+                    "validation_message_refs": [
+                        digest([namespace, transcript.session_id, e.message_id])
+                        for e in fact.validation_evidence
+                    ]
+                    if transcript.source_format == "session-records-v1"
+                    else [],
                     "episode_id": episode_id,
                     "session_id": transcript.session_id,
                     "source_kind": transcript.source_kind,
@@ -333,6 +361,16 @@ class GraphStore:
                     tid=tid,
                     id=fid,
                     props=props,
+                ).consume()
+                tx.run(
+                    "MATCH (f:MemoryFact {id:$id}) UNWIND f.message_refs AS mid MATCH (m:MemoryMessage {id:mid,namespace:$ns}) MERGE (f)-[:CITES]->(m)",
+                    id=fid,
+                    ns=namespace,
+                ).consume()
+                tx.run(
+                    "MATCH (f:MemoryFact {id:$id}) UNWIND f.validation_message_refs AS mid MATCH (m:MemoryMessage {id:mid,namespace:$ns}) MERGE (f)-[:VALIDATED_BY]->(m)",
+                    id=fid,
+                    ns=namespace,
                 ).consume()
                 fact_ids.append(fid)
             tx.run(
@@ -672,6 +710,9 @@ class GraphStore:
     def repair(self, namespace, transaction=None):
         def run(tx):
             self.lock(tx, namespace)
+            from .source_graph import repair
+
+            repair(tx, namespace)
             # Facts are the durable source of truth: restore missing structural edges.
             repaired = tx.run(
                 "MATCH (f:MemoryFact {namespace:$ns}),(s:MemoryEntity),(t:MemoryEntity),(e:MemoryEpisode) "

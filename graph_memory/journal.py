@@ -6,10 +6,17 @@ from collections import Counter
 from datetime import UTC, datetime
 
 from .models import now
+from .source_graph import LABELS as SOURCE_LABELS
 from .store import digest, normalized
 from .temporal import project
 
-LABELS = ("MemoryEpisode", "MemoryEntity", "MemoryFact", "MemoryDream", "MemoryInsight")
+LABELS = (
+    "MemoryEpisode",
+    "MemoryEntity",
+    "MemoryFact",
+    "MemoryDream",
+    "MemoryInsight",
+) + SOURCE_LABELS
 VOLATILE = {
     "worker",
     "worker_lock",
@@ -250,6 +257,8 @@ class Journal:
             raise ValueError("Requested change does not exist")
         checkpoint = max(i for i, e in enumerate(selected) if "snapshot" in e)
         state = copy.deepcopy(selected[checkpoint]["snapshot"])
+        for label in LABELS:
+            state.setdefault(label, {})
         if digest(state) != selected[checkpoint]["state_hash"]:
             raise ValueError("Journal checkpoint integrity check failed")
         for event in selected[checkpoint + 1 :]:
@@ -402,10 +411,24 @@ class Journal:
             for label, nodes in state.items():
                 for original in nodes.values():
                     props = {**original, "id": mapping[original["id"]], "namespace": target}
-                    for key in ("subject_id", "target_id", "episode_id", "merged_into", "dream_id"):
+                    for key in (
+                        "subject_id",
+                        "target_id",
+                        "episode_id",
+                        "merged_into",
+                        "dream_id",
+                        "session_ref",
+                        "message_ref",
+                        "artifact_ref",
+                    ):
                         if props.get(key) in mapping:
                             props[key] = mapping[props[key]]
-                    for key in ("entity_ids", "supporting_fact_ids"):
+                    for key in (
+                        "entity_ids",
+                        "supporting_fact_ids",
+                        "message_refs",
+                        "validation_message_refs",
+                    ):
                         if key in props:
                             props[key] = [mapping.get(v, v) for v in props[key]]
                     # Dream snapshots retain their original evidence IDs for audit;

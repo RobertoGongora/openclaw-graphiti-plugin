@@ -21,6 +21,10 @@ COLORS = {
     "MemoryEpisode": "#ffd36d",
     "MemoryDream": "#ffb879",
     "MemoryInsight": "#f3a6cf",
+    "MemorySession": "#90caf9",
+    "MemoryMessage": "#b0bec5",
+    "MemoryArtifact": "#80cbc4",
+    "MemoryArtifactObservation": "#ce93d8",
 }
 # Tokenize quoted strings/identifiers and comments before checking query features.
 # EXPLAIN is the authority on whether the statement writes. Procedure calls and
@@ -81,8 +85,8 @@ class Snapshot:
             return
         label = next(k for k in COLORS if k in labels)
         # Explicit captions only: never render payloads, retry candidates, or credentials.
-        caption = props.get("name") if label == "MemoryEntity" else props.get("summary")
-        if label == "MemoryEpisode":
+        caption = props.get("name") or props.get("summary")
+        if label == "MemoryEpisode" and not caption:
             caption = str(props.get("source_id") or "Episode").rsplit("/", 1)[-1]
         self.nodes[identity] = {"kind": label, "caption": str(caption or label[6:])[:2000]}
 

@@ -91,7 +91,16 @@ def emit(event, **data):
     print(json.dumps({"event": event, **data}), flush=True)
 
 
-def run_daemon(service, namespace, roots, transcript_roots=(), workers=4, interval=30, once=False):
+def run_daemon(
+    service,
+    namespace,
+    roots,
+    transcript_roots=(),
+    workers=4,
+    interval=30,
+    once=False,
+    source_records=False,
+):
     if service.llm is None:
         raise ValueError("daemon requires MEMORY_LLM=codex or compatible")
     if not 1 <= workers <= 16 or interval < 1:
@@ -140,7 +149,9 @@ def run_daemon(service, namespace, roots, transcript_roots=(), workers=4, interv
                 emit("bank_scan", **result)
                 if transcript_roots:
                     try:
-                        feeds = follow_once(service, namespace, transcript_roots, feed_seen)
+                        feeds = follow_once(
+                            service, namespace, transcript_roots, feed_seen, source_records
+                        )
                         emit("transcript_scan", feeds=feeds)
                     except Exception as exc:
                         emit("transcript_scan_error", error=type(exc).__name__)

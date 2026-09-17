@@ -74,6 +74,11 @@ def main():
     daemon.add_argument("--workers", type=int, default=4)
     daemon.add_argument("--interval", type=float, default=30)
     daemon.add_argument("--once", action="store_true")
+    daemon.add_argument(
+        "--source-records",
+        action="store_true",
+        help="Preserve transcript tools and artifact provenance",
+    )
     scanner = commands.add_parser("scan", help="Stage new memory-bank content without extraction")
     scanner.add_argument("paths", nargs="+", type=Path)
     commands.add_parser("hook")
@@ -81,11 +86,13 @@ def main():
     follower.add_argument("paths", nargs="+", type=Path)
     follower.add_argument("--interval", type=float, default=5)
     follower.add_argument("--once", action="store_true")
+    follower.add_argument("--source-records", action="store_true")
     configure = commands.add_parser("claude-config")
     configure.add_argument("directory", type=Path)
     feeder = commands.add_parser("feed")
     feeder.add_argument("path", type=Path)
     feeder.add_argument("--session-id", required=True)
+    feeder.add_argument("--source-records", action="store_true")
     dream = commands.add_parser("dream")
     dream.add_argument("query")
     dream.add_argument("--episode", action="append", required=True)
@@ -233,6 +240,7 @@ def main():
                 args.workers,
                 args.interval,
                 args.once,
+                args.source_records,
             )
             if result is None:
                 return
@@ -260,9 +268,13 @@ def main():
             if not all(p.exists() for p in args.paths):
                 parser.error("All transcript paths must exist")
             if args.once:
-                result = {"feeds": follow_once(service, args.namespace, args.paths, {})}
+                result = {
+                    "feeds": follow_once(
+                        service, args.namespace, args.paths, {}, args.source_records
+                    )
+                }
             else:
-                follow_loop(service, args.namespace, args.paths, args.interval)
+                follow_loop(service, args.namespace, args.paths, args.interval, args.source_records)
                 return
         elif args.command == "hook":
             from .feeds import hook
@@ -270,6 +282,9 @@ def main():
             result = hook(service, args.namespace, json.load(sys.stdin))
         elif args.command == "feed":
             from .feeds import feed
+
+            if args.source_records:
+                from .session_sources import feed_records as feed
 
             result = feed(service, args.namespace, args.path, args.session_id)
         elif args.command == "dream":

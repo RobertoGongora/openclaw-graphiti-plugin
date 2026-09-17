@@ -1,0 +1,117 @@
+[
+  {
+    "id": "stale_read_does_not_renew",
+    "messages": [
+      {
+        "id": "u1",
+        "role": "user",
+        "source_type": "user_assertion",
+        "timestamp": "2026-09-15T10:00:00Z",
+        "content": "Atlas uses MySQL in production. Migration to Postgres is only planned; it has not been deployed."
+      },
+      {
+        "id": "c1",
+        "role": "assistant",
+        "source_type": "tool_call",
+        "call_id": "read1",
+        "tool_name": "Read",
+        "content": "Read /memory/atlas.md"
+      },
+      {
+        "id": "r1",
+        "role": "tool",
+        "source_type": "memory_read",
+        "call_id": "read1",
+        "tool_name": "Read",
+        "timestamp": "2026-09-16T10:00:00Z",
+        "content": "Atlas uses Postgres in production. Atlas uses Redis."
+      },
+      {
+        "id": "u2",
+        "role": "user",
+        "source_type": "user_assertion",
+        "timestamp": "2026-09-16T10:01:00Z",
+        "content": "That memory is stale. Atlas production still uses MySQL. The Postgres migration remains only a plan."
+      }
+    ],
+    "checks": {
+      "active_mysql": true,
+      "planned_postgres": true,
+      "no_active_postgres": true,
+      "no_redis": true
+    }
+  },
+  {
+    "id": "tool_output_cannot_originate_fact",
+    "messages": [
+      {
+        "id": "c1",
+        "role": "assistant",
+        "source_type": "tool_call",
+        "call_id": "db1",
+        "tool_name": "database_status",
+        "content": "Check database status."
+      },
+      {
+        "id": "r1",
+        "role": "tool",
+        "source_type": "tool_result",
+        "call_id": "db1",
+        "tool_name": "database_status",
+        "timestamp": "2026-09-16T10:00:00Z",
+        "content": "Atlas uses Postgres in production. Redis is configured. Status: online."
+      }
+    ],
+    "checks": {
+      "zero_facts": true
+    }
+  },
+  {
+    "id": "assistant_claim_validated_not_expanded",
+    "messages": [
+      {
+        "id": "c1",
+        "role": "assistant",
+        "source_type": "tool_call",
+        "call_id": "db1",
+        "tool_name": "database_status",
+        "content": "Check Atlas database."
+      },
+      {
+        "id": "r1",
+        "role": "tool",
+        "source_type": "tool_result",
+        "call_id": "db1",
+        "tool_name": "database_status",
+        "timestamp": "2026-09-16T10:00:00Z",
+        "content": "Atlas: production MySQL, online. Internal unrelated project Beacon uses Redis."
+      },
+      {
+        "id": "a1",
+        "role": "assistant",
+        "source_type": "assistant_report",
+        "timestamp": "2026-09-16T10:00:01Z",
+        "content": "The database check confirms Atlas currently uses MySQL in production."
+      }
+    ],
+    "checks": {
+      "active_mysql": true,
+      "no_redis": true
+    }
+  },
+  {
+    "id": "quoted_memory_not_user_assertion",
+    "messages": [
+      {
+        "id": "u1",
+        "role": "user",
+        "source_type": "user_assertion",
+        "timestamp": "2026-09-16T10:00:00Z",
+        "content": "Here is an old note for inspection, not a claim about current state. I do not know whether it was ever accurate: \"Atlas uses Postgres and Redis in production.\" Do not treat this quote as my confirmation."
+      }
+    ],
+    "checks": {
+      "zero_facts": true
+    }
+  }
+]

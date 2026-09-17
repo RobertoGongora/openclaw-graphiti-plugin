@@ -71,11 +71,36 @@ TARGETS = {
 EVENT_RELATIONS = {Relation.occurred, Relation.resolved, Relation.learned, Relation.worked_on}
 
 
+class ArtifactTouch(Model):
+    path: Annotated[str, Field(min_length=1, max_length=2000)]
+    operation: Literal["read", "write", "patch"]
+    captured: Literal["excerpt", "submitted_content", "patch", "unavailable"]
+    # Historical evidence comes only from the transcript, never today's filesystem.
+    content: Annotated[str, Field(max_length=120_000)] = ""
+    gap: str | None = None
+
+
 class Message(Model):
     id: Key
     role: Literal["user", "assistant", "tool", "note"]
     content: Annotated[str, Field(min_length=1, max_length=120_000)]
     timestamp: AwareDatetime | None = None
+    source_type: Literal[
+        "legacy",
+        "user_assertion",
+        "assistant_report",
+        "tool_call",
+        "tool_result",
+        "memory_read",
+        "memory_write",
+        "context",
+    ] = "legacy"
+    record_id: str | None = None
+    call_id: str | None = None
+    tool_name: str | None = None
+    tool_failed: bool | None = None
+    touches: list[ArtifactTouch] = Field(default_factory=list)
+    gaps: list[str] = Field(default_factory=list)
 
 
 class Transcript(Model):
@@ -86,6 +111,8 @@ class Transcript(Model):
     source_uri: Annotated[str, Field(max_length=2000)] | None = None
     source_created_at: AwareDatetime | None = None
     source_updated_at: AwareDatetime | None = None
+    source_format: str | None = None
+    title: Text | None = None
     focus_message_ids: list[Key] = Field(default_factory=list)
     messages: Annotated[list[Message], Field(min_length=1, max_length=500)]
 
@@ -124,6 +151,9 @@ class Fact(Model):
     valid_at: AwareDatetime | None = None
     confidence: Annotated[float, Field(ge=0, le=1)] = 1.0
     evidence: Annotated[list[Evidence], Field(min_length=1, max_length=20)]
+    validation_evidence: Annotated[list[Evidence], Field(max_length=20)] = Field(
+        default_factory=list
+    )
 
     @classmethod
     def __get_pydantic_json_schema__(cls, core_schema, handler):
@@ -188,18 +218,38 @@ class Extraction(Model):
         messages = {m.id: m for m in transcript.messages}
         for fact_index, fact in enumerate(self.facts):
             if transcript.focus_message_ids and not any(
-                e.message_id in transcript.focus_message_ids for e in fact.evidence
+                e.message_id in transcript.focus_message_ids
+                for e in [*fact.evidence, *fact.validation_evidence]
             ):
                 reject(
                     "A feed fact must cite at least one new focus message",
                     ["facts", fact_index, "evidence"],
                 )
-            for evidence_index, evidence in enumerate(fact.evidence):
+            for evidence_index, evidence in enumerate([*fact.evidence, *fact.validation_evidence]):
                 message = messages.get(evidence.message_id)
                 if message is None or evidence.quote not in message.content:
                     reject(
                         "Evidence must quote an exact substring of its source message",
                         ["facts", fact_index, "evidence", evidence_index, "quote"],
+                    )
+            if transcript.source_format == "session-records-v1":
+                cited = [messages[e.message_id] for e in fact.evidence]
+                claims = [
+                    m for m in cited if m.source_type in {"user_assertion", "assistant_report"}
+                ]
+                if not claims or len(claims) != len(cited):
+                    reject(
+                        "Facts must cite a conversational claim in evidence; tool outputs belong only in validation_evidence, and memory artifacts are context only",
+                        ["facts", fact_index, "evidence"],
+                    )
+                validation = [messages[e.message_id] for e in fact.validation_evidence]
+                primary = any(m.source_type == "user_assertion" for m in claims) or any(
+                    m.source_type == "tool_result" and m.tool_failed is not True for m in validation
+                )
+                if not primary and (fact.status != "uncertain" or fact.valid_at is not None):
+                    reject(
+                        "An unvalidated assistant claim requires status=uncertain and valid_at=null. To validate it, cite an exact corroborating tool-result quote in validation_evidence AND keep the assistant quote in evidence. Memory reads/writes cannot validate it.",
+                        ["facts", fact_index, "evidence"],
                     )
             if fact.valid_at and fact.valid_at > now() and fact.status == "active":
                 reject(

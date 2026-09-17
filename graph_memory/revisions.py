@@ -131,7 +131,29 @@ class Revisions:
                         raw = json.loads(props["payload"])
                         raw["namespace"] = candidate
                         props["payload"] = json.dumps(raw)
+                    if label == "MemoryFact" and props.get("message_refs"):
+                        from .models import Transcript
+
+                        ep = next(
+                            e
+                            for e in snapshot["MemoryEpisode"]
+                            if e["id"] == original["episode_id"]
+                        )
+                        source = Transcript.model_validate_json(ep["payload"])
+                        props["validation_message_refs"] = [
+                            digest([candidate, source.session_id, e["message_id"]])
+                            for e in json.loads(original.get("validation_evidence", "[]"))
+                        ]
+                        props["message_refs"] = [
+                            digest([candidate, source.session_id, e["message_id"]])
+                            for e in json.loads(original["evidence"])
+                        ]
                     tx.run(f"CREATE (n:{label}) SET n=$props", props=props).consume()
+                    if label == "MemoryEpisode":
+                        from .models import Transcript
+                        from .source_graph import save
+
+                        save(tx, Transcript.model_validate_json(props["payload"]), props["id"])
             selected = [mapping[eid] for eid in revision["episode_ids"]]
             tx.run(
                 "MATCH (f:MemoryFact {namespace:$ns}) WHERE f.episode_id IN $ids DETACH DELETE f",
@@ -387,7 +409,7 @@ class Revisions:
                         keys=insight["entity_keys"],
                     ).data()
                     tx.run(
-                        "CREATE (i:MemoryInsight {id:$id,namespace:$ns,summary:$summary,entity_ids:$entities,"
+                        "CREATE (i:MemoryInsight {id:$id,namespace:$ns,summary:$summary,name:$summary,entity_ids:$entities,"
                         "supporting_fact_ids:$facts,confidence:$confidence,inferred:true,dream_id:$dream,revision_id:$revision}) "
                         "WITH i UNWIND $facts AS fid MATCH (f:MemoryFact {id:fid}) MERGE (i)-[:DERIVED_FROM]->(f)",
                         id=f"{revision_id}:{index}:{new_id}",

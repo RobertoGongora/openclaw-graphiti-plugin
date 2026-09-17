@@ -223,3 +223,11 @@ graph, including disconnected source episodes. Defaults are 10,000 nodes and
 30,000 relationships; any truncation is reported in the image and metadata.
 An optional `cypher` selects a subgraph. The response contains a PNG image block,
 ready for an MCP client to display. See [rendering examples](docs/rendering.md).
+
+## Transcript source graph
+
+For conversational claims with separate tool validation and historical memory-file
+observations, see [transcript sources](docs/transcript-sources.md) and
+[ADR 004](docs/adr/004-transcript-source-provenance.md).
+`compose.transcripts.yaml` provides an independent database, worker, Browser and MCP
+endpoint while the original markdown benchmark continues unchanged.
