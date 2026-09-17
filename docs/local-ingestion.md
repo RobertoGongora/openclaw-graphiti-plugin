@@ -8,8 +8,8 @@ The local system now runs through Docker Compose on Colima. Colima is the Linux
 VM hosting Docker on macOS. Three services are deployed:
 
 - `graph-memory-neo4j-1`: existing graph and Neo4j Browser.
-- `graph-memory-worker-1`: read-only bank scanner and twelve Terra/low consumers
-  (retained after the 2026-09-17 comparison, fast mode off).
+- `graph-memory-worker-1`: read-only bank scanner and two Terra/low consumers
+  (concurrency reduced from twelve on 2026-09-17, fast mode off).
 - `graph-memory-mcp-1`: seven public tools over HTTP, with
   [compact recall and evidence on demand](compact-recall.md).
 
@@ -217,3 +217,25 @@ All 67 deterministic checks passed, including actual PNG responses and graph
 preservation. Live HTTP calls rendered 2,651 nodes / 2,916 relationships without
 truncation and a focused 39-node graph. Journal change 163 verified afterward.
 See [rendering](rendering.md) and [validation evidence](../evals/baselines/render-validation.json).
+
+
+## Allocation toward transcript ingestion
+
+On 2026-09-17 Rob requested more transcript consumers and fewer markdown-bank
+consumers. The local allocation changed from 2 transcript / 12 markdown to
+12 transcript / 2 markdown, retaining fourteen total consumers. This changes only
+Docker worker command arguments. Model, effort, image and ingestion semantics
+remain pinned independently for each deployment.
+
+Both worker services drain active jobs before recreation. MCP and Neo4j services
+continue running. Completed episode IDs and extraction hashes are compared before
+and after the restart, and the transcript queue is checked for resumed work.
+Private configuration backups and evidence live under
+`~/.local/share/graph-memory/deployment/workers-12-transcripts-2-bank/`.
+
+Verification after restart: both services were running with their requested
+`--workers` values, unchanged images, and zero active leases at the drain boundary.
+All 928 previously completed markdown episodes and 406 previously completed
+transcript episodes retained their extraction hashes. Transcript completions had
+reached 437 at the restart checkpoint. Configured consumer count is a ceiling;
+active model calls depend on ready jobs and retry backoff.

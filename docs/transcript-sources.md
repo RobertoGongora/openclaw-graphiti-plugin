@@ -1,6 +1,6 @@
 # Transcript source graph
 
-The markdown import remains on the original Docker stack with twelve Terra/low
+The markdown import remains on the original Docker stack with two Terra/low
 consumers. It continues toward completion and is not rewritten by this work.
 The transcript graph is a separate Neo4j Community container and persistent
 volume. Community supports one standard database per instance; namespaces are
@@ -92,8 +92,10 @@ RETURN p LIMIT 200;
 ## Deployment and validation
 
 `compose.transcripts.yaml` starts Neo4j, the transcript worker and MCP separately
-from the markdown stack. Default transcript concurrency is two; it does not
-change the twelve markdown workers or claim a throughput comparison.
+from the markdown stack. The portable template defaults to two consumers. The
+local deployment now runs twelve transcript consumers and two markdown consumers
+following the requested 2026-09-17 allocation change. This is not a throughput
+comparison.
 
 - Browser: http://127.0.0.1:27474/browser/
 - Bolt: bolt://127.0.0.1:27687
