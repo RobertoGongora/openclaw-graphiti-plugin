@@ -4,7 +4,7 @@ The local system now runs through Docker Compose on Colima. Colima is the Linux
 VM hosting Docker on macOS. Three services are deployed:
 
 - `graph-memory-neo4j-1`: existing graph and Neo4j Browser.
-- `graph-memory-worker-1`: read-only bank scanner and four Terra/low consumers
+- `graph-memory-worker-1`: read-only bank scanner and twelve Terra/low consumers
   (retained after the 2026-09-17 comparison, fast mode off).
 - `graph-memory-mcp-1`: six public tools over HTTP.
 
@@ -61,6 +61,32 @@ Rejected candidates stay outside the fact graph and retry.
 All jobs must be complete, with none processing, queued, or retrying, before
 calling the bank fully ingested. A source may produce zero facts if it contains
 no supported durable claims.
+
+## Ingestion concurrency
+
+On 2026-09-17 Rob requested tripling the live consumers from four to twelve.
+This is a deployment configuration change (`daemon --workers 12`), retaining
+the worker image, Terra/low model, prompts, and validation rules. The portable
+Compose template remains configurable through `MEMORY_WORKERS` (default four).
+
+Before the change, 211 of 938 episodes were complete. Recent throughput was
+45 completions in one hour and 112 in two hours. Twelve consumers are not a
+guarantee of three times the throughput; measure completed episodes after the
+change, including retry overhead. Recall changes and baseline experiments stay
+deferred until ingestion and outstanding failures are resolved.
+
+The old worker drained to zero active leases with 214 complete episodes. After
+restart, all 214 extraction hashes were preserved, twelve episodes held active
+leases, and the first scan staged zero duplicate episodes (820 files scanned,
+849 existing source chunks recognized, no scan failures).
+Consumers 6, 9, 10, and 11 then completed episodes, bringing the total to 218
+while twelve jobs remained active. One transient Neo4j deadlock triggered the
+driver's automatic transaction retry; completions continued. This short smoke
+check establishes resumed processing, not sustained throughput or a new ETA.
+
+Private configuration backup and restart evidence are stored under
+`~/.local/share/graph-memory/deployment/workers-12/`. The configuration backup
+contains credentials and must not be committed.
 
 ## Cutover evidence
 
