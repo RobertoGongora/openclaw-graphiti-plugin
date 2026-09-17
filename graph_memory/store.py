@@ -68,6 +68,7 @@ class GraphStore:
                 "MemoryInsight",
                 "MemoryRevision",
                 "MemoryFeed",
+                "MemoryInventory",
                 "MemoryChange",
                 "MemorySession",
                 "MemoryMessage",

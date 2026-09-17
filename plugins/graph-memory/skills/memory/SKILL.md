@@ -11,6 +11,7 @@ Consult memory before work that depends on the user's history, preferences, proj
 
 - Recall information with `memory_recall`, passing the subject as `entity` and the user's question as `question`. Start with the default compact response. Request more detail only when the returned facts leave a specific gap.
 - Find names and identities with `memory_search_entities` when needed. Search without a kind filter first; use returned entity keys for follow-up calls.
+- Use `memory_status` to check episode counts, processing, queued/failed work, and the latest saved or completed episode. Active leases do not prove worker liveness.
 - Use `memory_latest` for when something last happened, `memory_evidence` for sources, and `memory_render` to visualize connections.
 - Use `memory_ingest` to remember new information, `memory_retract` to withdraw an incorrect fact, and `memory_merge` for confirmed duplicate identities. Discover the input schema when using each tool.
 

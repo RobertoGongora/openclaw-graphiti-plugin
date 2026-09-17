@@ -67,14 +67,14 @@ consumer can launch `serve --read-only`. This filters the catalog and rejects
 mutating calls at the server, independently of the model's tool permissions.
 
 The public catalog contains `memory_recall`, `memory_latest`, `memory_evidence`,
-`memory_search_entities`, `memory_ingest`, `memory_retract`, `memory_merge`, and `memory_render`. Internal extraction and dream calls are
+`memory_search_entities`, `memory_status`, `memory_ingest`, `memory_retract`, `memory_merge`, and `memory_render`. Internal extraction and dream calls are
 rejected by MCP and remain accessible through the Python engine and CLI.
 `memory_ingest` accepts original messages and always queues them; its public schema
 has no `extract` switch and its response never delegates processing back to the agent.
 
 Recall/latest also accept optional `known_at` or `at_change` cutoffs for historical
 knowledge. `as_of` remains the separate event-time cutoff. Historical results
-include coverage metadata; see [history](history.md). The catalog has eight tools, including `memory_render` and `memory_evidence`.
+include coverage metadata; see [history](history.md). The catalog has nine tools, including `memory_render` and `memory_evidence`.
 
 
 `memory_render` returns a standard PNG `image` content block plus text and
@@ -85,6 +85,36 @@ See [rendering](rendering.md) for whole-graph and custom-Cypher examples.
 
 
 Recall/latest now default to [compact JSON with evidence on demand](compact-recall.md).
-The catalog contains eight tools, including the read-only `memory_evidence`.
+The catalog contains nine tools, including the read-only `memory_evidence`.
 The scoped server supplies namespace automatically. Supply an entity name in `entity` and optionally a question to select relevant
 facts. `detail:"full"` retains access to the legacy record format.
+
+
+`memory_status` is a read-only operational check. Call it with `{}` on a scoped
+server (or `{"namespace":"personal"}` on an unbound server). It returns:
+
+- Episode totals and counts by persisted status (`pending`, `complete`, `failed`).
+- Active extraction leases, work eligible for a worker, retry-delayed work, and
+  expired leases. Expired leases overlap the queued/retry-delayed counts. Active
+  jobs can have either pending or failed status; completed episodes never count
+  as processing. Up to five active episode summaries are included, with a
+  truncation flag.
+- Latest saved episode by ingestion time, latest completed episode by completion
+  time, and oldest incomplete episode; each is `null` for an empty result.
+- Counts of unmerged entities and unretracted facts (including historical facts).
+- `source_inventory`: cached transcript intake coverage, including unstaged chunks
+  and estimated episodes, files with unstaged content, scan timestamps, age,
+  staleness, and gaps. `state` is `unavailable` until a census is saved, `partial`
+  when some sources could not be fully counted, or `available`. Zero unstaged
+  episodes in a partial or stale inventory does not establish completion.
+- The namespace, check time, and coverage limitations.
+
+Episode summaries include IDs, name, status, ingestion/completion times, fact
+count, failed attempts, and lease/retry times (Unix seconds). Source payloads,
+extractions, and raw errors are excluded. Processing is inferred from leases,
+not worker heartbeats: a crashed worker can retain a lease until expiry. The
+check reads saved data only. The separate `inventory` process scans mounted
+transcripts and saves coverage without staging or extracting anything. Its counts
+are a snapshot, separate from the live saved-episode counts. Unmounted sources and
+scanner health remain unknown. Concurrent ingestion can change counts during the read. It performs
+no extraction, retry, or graph mutation and works on `serve --read-only`.

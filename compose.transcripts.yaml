@@ -8,8 +8,9 @@ services:
       NEO4J_AUTH: none
       NEO4J_server_bolt_advertised__address: 127.0.0.1:27687
       NEO4J_server_http_advertised__address: 127.0.0.1:27474
-      NEO4J_server_memory_heap_initial__size: 256m
-      NEO4J_server_memory_heap_max__size: 512m
+      # Journal transactions capture source records; 512m stalls larger imports.
+      NEO4J_server_memory_heap_initial__size: '${TRANSCRIPT_NEO4J_HEAP_INITIAL:-1g}'
+      NEO4J_server_memory_heap_max__size: '${TRANSCRIPT_NEO4J_HEAP_MAX:-2g}'
       NEO4J_server_memory_pagecache_size: 256m
       NEO4J_dbms_usage__report_enabled: 'false'
     ports:
@@ -43,6 +44,23 @@ services:
       - '${CLAUDE_SESSIONS_PATH:?Set Claude session directory}:/sessions/claude:ro'
       - '${CODEX_SESSIONS_PATH:?Set Codex session directory}:/sessions/codex:ro'
       - '${TRANSCRIPT_AUTH_PATH:?Set Codex authentication directory}:/home/memory/.codex'
+  inventory:
+    image: graph-memory:transcripts
+    build: .
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 2m
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    environment:
+      NEO4J_URI: bolt://neo4j:7687
+      MEMORY_NAMESPACE: transcripts
+      MEMORY_LLM: caller
+    command: [inventory, --transcripts, /sessions/claude, --transcripts, /sessions/codex, --interval, '300']
+    volumes:
+      - '${CLAUDE_SESSIONS_PATH:?Set Claude session directory}:/sessions/claude:ro'
+      - '${CODEX_SESSIONS_PATH:?Set Codex session directory}:/sessions/codex:ro'
   mcp:
     image: graph-memory:transcripts
     init: true

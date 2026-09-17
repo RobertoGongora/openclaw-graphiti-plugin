@@ -5,7 +5,7 @@ import time
 import uuid
 
 from . import models as m
-from . import retrieval
+from . import retrieval, status
 from .diagnostics import diagnostic
 from .llm import DREAM_INSTRUCTIONS, extraction_instructions
 from .retry import feedback, restored_feedback
@@ -391,6 +391,11 @@ class MemoryService:
                 ),
                 "Use when the user asks when something last happened or what was most recently recorded about a subject.",
             ),
+            "memory_status": (
+                m.Scope,
+                lambda r: status.status(self.store, r),
+                "Use when you want to check memory ingestion progress, how much remains unstaged, processing or failed work, and graph counts.",
+            ),
             "memory_pending": (
                 m.Pending,
                 lambda r: {"episodes": self.store.pending(r.namespace, r.limit)},
@@ -436,6 +441,7 @@ class MemoryService:
     def session_tools(self):
         """The public MCP surface; orchestration remains in the engine and CLI."""
         names = {
+            "memory_status",
             "memory_render",
             "memory_evidence",
             "memory_search_entities",

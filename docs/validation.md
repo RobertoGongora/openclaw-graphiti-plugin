@@ -112,3 +112,11 @@ or verification timestamps. Existing sandbox evidence was not backfilled.
 
 Full-bank extraction and switching global Claude/Codex memory settings have not
 been performed. The new runtime can be enabled through scoped client config.
+
+## Memory status — 2026-09-17
+
+`memory_status` adds scoped, read-only episode and processing visibility. All 100
+Python tests passed in a disposable Neo4j 5.26 container, plus 284 legacy
+TypeScript tests. Ruff lint/format checks and wheel/sdist builds passed. Lease,
+retry, empty graph, namespace, and metadata bounds are covered by
+`tests/test_status.py`; see [ADR 007](adr/007-memory-status.md).

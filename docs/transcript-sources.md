@@ -41,6 +41,34 @@ waits for completion. Up to four changed sources/four batches each are staged
 per scan. Intake pauses with 32 pending episodes to bound the extraction backlog.
 Source files must remain available until intake has caught up.
 
+### Backlog inventory
+
+The Compose `inventory` service independently scans the same read-only transcript
+mounts, compares them with durable feed cursors, and caches a census for
+`memory_status`. It waits 300 seconds between completed scans. It needs neither
+Codex credentials nor an LLM and does not modify episodes, cursors, or facts.
+
+For a one-time snapshot using the same paths as the intake worker:
+
+```sh
+graph-memory --namespace transcripts inventory --transcripts /sessions/claude --transcripts /sessions/codex --once
+```
+
+`unstaged_episodes` uses the current parser and the same eight-chunk/90,000-character
+batch limits as intake. It excludes invalid, inaccessible, rewritten, or changing
+files and flags incomplete trailing records. Inspect `state`, `gaps`, `stale`, and
+scan times before interpreting counts. Paths must match the worker's paths because
+feed identities include them. Source changes during a scan and concurrent staging
+make this an estimate at scan time, not a transactionally consistent total.
+An empty saved queue is not evidence that intake has caught up. A zero unstaged
+count is meaningful only for fully counted mounted sources at the recorded scan
+time; it says nothing about sessions outside those mounts.
+
+Inventory is operational metadata (`MemoryInventory`), excluded from knowledge
+journal snapshots and default graph renders. It becomes stale after two refresh
+intervals plus the last scan duration (at least 600 seconds). Servers without an
+inventory process report unavailable coverage rather than implying zero backlog.
+
 ## Historical memory artifacts
 
 Explicit Read/Write/Edit tools, apply_patch, static cat/sed/head/tail/rg/grep
@@ -138,3 +166,31 @@ the graph rendered without truncation. The audit journal matched the live graph.
 No fact used a tool/context message as its conversational citation. A transient
 Neo4j deadlock was retried by the driver and subsequent processing succeeded.
 These are checkpoint counts, not total archive coverage or a completion estimate.
+
+## Transcript database memory — 2026-09-17
+
+The import stalled at 739 completed episodes with a 512 MiB Neo4j heap.
+Journal transactions capture the source graph before and after writes and reached
+the default 358.4 MiB aggregate transaction-memory limit. Both intake and
+extraction commits failed with `MemoryPoolOutOfMemoryError`; concurrent work also
+reported retried deadlocks.
+
+The local transcript database now uses a 1 GiB initial / 2 GiB maximum heap,
+with the default transaction limit reporting 1.4 GiB. The Compose template uses
+the same defaults, configurable through `TRANSCRIPT_NEO4J_HEAP_INITIAL` and
+`TRANSCRIPT_NEO4J_HEAP_MAX`. Page cache remains 256 MiB. Size these settings for
+the Docker host's available memory and other workloads; transaction memory
+tracking and limits remain enabled.
+
+The worker drained to zero leases before the database restart. All 739 completed
+episode IDs and extraction hashes were preserved, and journal verification
+passed at change 1499 with 7,020 records. Only the ten database-error retry
+delays were released; validation failures retained their normal retry handling.
+The twelve-consumer worker resumed with its existing image and model settings.
+At 13:19:49 UTC, completions had increased to 748: nine of the ten database-error
+episodes had recovered and one was processing. No new memory-limit errors were
+logged in that first minute; five automatically retried deadlocks still occurred.
+Private configuration backup and checks are under
+`~/.local/share/graph-memory/deployment/memory-fix-20260917T131645Z/`.
+This capacity adjustment does not establish full archive coverage or resolve
+extraction-quality failures.

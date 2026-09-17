@@ -81,6 +81,12 @@ def main():
     )
     scanner = commands.add_parser("scan", help="Stage new memory-bank content without extraction")
     scanner.add_argument("paths", nargs="+", type=Path)
+    inventory = commands.add_parser(
+        "inventory", help="Cache transcript backlog counts without staging"
+    )
+    inventory.add_argument("--transcripts", action="append", type=Path, required=True)
+    inventory.add_argument("--interval", type=float, default=300)
+    inventory.add_argument("--once", action="store_true")
     commands.add_parser("hook")
     follower = commands.add_parser("follow")
     follower.add_argument("paths", nargs="+", type=Path)
@@ -260,6 +266,11 @@ def main():
                 if result["receipts"]:
                     print(json.dumps(result), flush=True)
                 time.sleep(args.interval)
+        elif args.command == "inventory":
+            from .inventory import run_inventory
+
+            run_inventory(service.store, args.namespace, args.transcripts, args.interval, args.once)
+            return
         elif args.command == "follow":
             from .follow import follow_loop, follow_once
 
