@@ -96,3 +96,33 @@ if a caller attempts one.
 Sources checked: [Claude hooks](https://code.claude.com/docs/en/hooks),
 [hook context output](https://code.claude.com/docs/en/hooks-guide), and
 [Claude memory settings](https://code.claude.com/docs/en/memory).
+
+
+## Local Codex registration
+
+On 2026-09-17, `graph-memory` was registered in the user-scoped Codex
+configuration at `~/.codex/config.toml`. It points to the transcript graph.
+Claude registration is deferred at Rob's request.
+
+```toml
+[mcp_servers.graph-memory]
+command = "/opt/homebrew/bin/docker"
+args = ["--context", "colima", "exec", "-i", "graph-memory-transcripts-mcp-1", "graph-memory", "--namespace", "transcripts", "serve"]
+```
+
+This launches the stdio MCP entrypoint inside the existing MCP container, using
+its pinned engine and database settings. It does not start another worker or
+copy a bearer token into the client configuration. The container and Colima must
+be running. Using the stable container name follows subsequent MCP image upgrades.
+The client uses the stdio compatibility handshake; the standalone 2026 HTTP
+endpoint remains available independently.
+
+A fresh Codex app-server process discovered all eight tools and successfully called
+`memory_search_entities`, `memory_recall`, and `memory_evidence`, omitting namespace
+from every call. This validates native Codex MCP integration, beyond direct HTTP
+checks. The test used an ephemeral thread and no model inference. Other configured
+MCP servers were disabled only in that test process. Existing global settings were
+verified unchanged apart from the new registration.
+
+Private configuration backup and verification evidence are under
+`~/.local/share/graph-memory/deployment/codex-registration/`.

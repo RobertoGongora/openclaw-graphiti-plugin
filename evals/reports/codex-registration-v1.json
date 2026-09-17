@@ -1,0 +1,18 @@
+{
+  "checked_at": "2026-09-17T12:34:57.365818+00:00",
+  "registered_client": "Codex",
+  "server": "graph-memory",
+  "namespace": "transcripts",
+  "transport": "stdio through Docker exec",
+  "native_codex_discovery": true,
+  "tool_count": 8,
+  "native_codex_tool_calls": [
+    "memory_search_entities",
+    "memory_recall",
+    "memory_evidence"
+  ],
+  "namespace_argument_omitted": true,
+  "claude_changed": false,
+  "model_inference_used": false,
+  "existing_codex_settings_preserved": true
+}
