@@ -1,0 +1,186 @@
+{
+  "approved_golden_baseline": false,
+  "date": "2026-09-17",
+  "scope": "schema_and_evidence_only",
+  "limitations": "Two selected previously failing sources, one run each; no graph writes or semantic completeness checks. Timings include corrections and CLI overhead with uncontrolled concurrent load.",
+  "profiles": [
+    {
+      "model": "gpt-5.6-luna",
+      "effort": "medium",
+      "engine": "5cadbbca81d77be3e8d3ae8791f6708b1f2b6ec0213bdd86cc7ded3364a22b01",
+      "fast_mode_requested": false,
+      "report_sha256": "87e8de0c3c9156dd4d3c6d024516a54ac83e25cacabbeef12e3b247336bf4eca",
+      "results": [
+        {
+          "input_hash": "42294c70536cd76b426a868845a33cb6c2bc7470a720147c22a2dba21392da5b",
+          "effort": "medium",
+          "passed": false,
+          "diagnostic": {
+            "stage": "model_output",
+            "code": "schema_validation",
+            "issue_count": 1,
+            "issues": [
+              {
+                "type": "value_error",
+                "location": [],
+                "code": "undeclared_endpoint"
+              }
+            ],
+            "extraction_attempt": 1,
+            "duration_seconds": 219.83,
+            "engine": "5cadbbca81d77be3e8d3ae8791f6708b1f2b6ec0213bdd86cc7ded3364a22b01"
+          },
+          "seconds": 219.831
+        },
+        {
+          "input_hash": "78b8e6c94e98780aed0fd30326ba59134d0ef6fe7669715f5db9797dfe9f48c5",
+          "effort": "medium",
+          "passed": false,
+          "diagnostic": {
+            "stage": "evidence_validation",
+            "code": "evidence_quote_mismatch",
+            "location": [
+              "facts",
+              0,
+              "evidence",
+              0,
+              "quote"
+            ],
+            "extraction_attempt": 2,
+            "duration_seconds": 330.159,
+            "engine": "5cadbbca81d77be3e8d3ae8791f6708b1f2b6ec0213bdd86cc7ded3364a22b01"
+          },
+          "seconds": 330.159
+        }
+      ]
+    },
+    {
+      "model": "gpt-5.6-luna",
+      "effort": "high",
+      "engine": "5cadbbca81d77be3e8d3ae8791f6708b1f2b6ec0213bdd86cc7ded3364a22b01",
+      "fast_mode_requested": false,
+      "report_sha256": "9b1cf568871585d8f6644b3462be8a54c816db97beafd001955e1aa7d67dc839",
+      "results": [
+        {
+          "input_hash": "78b8e6c94e98780aed0fd30326ba59134d0ef6fe7669715f5db9797dfe9f48c5",
+          "effort": "high",
+          "passed": false,
+          "diagnostic": {
+            "stage": "evidence_validation",
+            "code": "evidence_quote_mismatch",
+            "location": [
+              "facts",
+              1,
+              "evidence",
+              0,
+              "quote"
+            ],
+            "extraction_attempt": 2,
+            "duration_seconds": 474.015,
+            "engine": "5cadbbca81d77be3e8d3ae8791f6708b1f2b6ec0213bdd86cc7ded3364a22b01"
+          },
+          "seconds": 474.015
+        },
+        {
+          "input_hash": "42294c70536cd76b426a868845a33cb6c2bc7470a720147c22a2dba21392da5b",
+          "effort": "high",
+          "passed": false,
+          "diagnostic": {
+            "stage": "model_output",
+            "code": "schema_validation",
+            "issue_count": 1,
+            "issues": [
+              {
+                "type": "value_error",
+                "location": [],
+                "code": "undeclared_endpoint"
+              }
+            ],
+            "extraction_attempt": 1,
+            "duration_seconds": 434.761,
+            "engine": "5cadbbca81d77be3e8d3ae8791f6708b1f2b6ec0213bdd86cc7ded3364a22b01"
+          },
+          "seconds": 434.761
+        }
+      ]
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "effort": "low",
+      "engine": "5cadbbca81d77be3e8d3ae8791f6708b1f2b6ec0213bdd86cc7ded3364a22b01",
+      "fast_mode_requested": false,
+      "report_sha256": "c2fae2a72afb83058257cf337846e4d77ea3538327de8f70a838e98b813b4b5e",
+      "results": [
+        {
+          "input_hash": "42294c70536cd76b426a868845a33cb6c2bc7470a720147c22a2dba21392da5b",
+          "effort": "low",
+          "model": "gpt-5.6-terra",
+          "facts": 3,
+          "entities": 4,
+          "passed": true,
+          "seconds": 39.77
+        },
+        {
+          "input_hash": "78b8e6c94e98780aed0fd30326ba59134d0ef6fe7669715f5db9797dfe9f48c5",
+          "effort": "low",
+          "model": "gpt-5.6-terra",
+          "facts": 6,
+          "entities": 9,
+          "passed": true,
+          "seconds": 69.823
+        }
+      ]
+    }
+  ],
+  "terra_fixed_suite": {
+    "engine": "5cadbbca81d77be3e8d3ae8791f6708b1f2b6ec0213bdd86cc7ded3364a22b01",
+    "suite": "ba11bb16f5e25bc2aa9a71568d660bdbd39ba8673dd9aa1af728f26715f4f48c",
+    "model": "gpt-5.6-terra",
+    "reasoning_effort": "low",
+    "runs": 1,
+    "passed": true,
+    "deterministic_passed": true,
+    "inputs_unchanged_during_run": true,
+    "deterministic_tests_passed": 50,
+    "report_sha256": "789278af402196628bb7e4527a3615a45673db30e847fa97489c709a9b87e897",
+    "cases": [
+      {
+        "case": "atlas-plan-versus-production",
+        "passed": true
+      },
+      {
+        "case": "habit-out-of-order",
+        "passed": true
+      },
+      {
+        "case": "instruction-injection-is-data",
+        "passed": true
+      },
+      {
+        "case": "project-decision-history",
+        "passed": true
+      },
+      {
+        "case": "scoped-preference-correction",
+        "passed": true
+      },
+      {
+        "case": "undated-memory-not-current",
+        "passed": true
+      }
+    ],
+    "isolation": "Separate temporary Neo4j container with no host ports; no live graph access",
+    "native_memory_ab_rerun": false
+  },
+  "deployment_trial": {
+    "worker_model": "gpt-5.6-terra",
+    "worker_effort": "low",
+    "fast_mode_requested": false,
+    "consumers": 4,
+    "image_unchanged": true,
+    "cancelled_luna_calls_requeued": 3,
+    "generic_default_changed": false,
+    "journal_verified_before_and_after": 119,
+    "journal_records_preserved": 2264
+  }
+}

@@ -1,20 +1,56 @@
 # Luna reasoning-effort comparison
 
-**2026-09-17 live trial:** the deployed ingestion worker now uses `high` (not
-`xhigh`) following frequent real-bank validation rejections on medium. The engine
-image, prompts, schemas, retry policy, and four-consumer count are unchanged.
-The captured medium window had 2 successful attempts and 32 rejected attempts;
-manual shutdown interruptions are excluded. This trial does not approve a new
-golden baseline or establish high as faster without measurements.
+## 2026-09-17 real-bank failure comparison
 
-`evals/probes/effort.py` compares medium/high against frozen preparation packets
-from failed sources without connecting to a database. It runs production schema,
-evidence, and correction logic, but does not test graph commit identity resolution,
-retrieval correctness, or semantic completeness. Private inputs/results remain
-under `.local/high-trial/`. The two efforts run concurrently with reversed source
-order; timings include corrections and CLI overhead and are not controlled capacity
-benchmarks. Live before/after logs remain under the private deployment's
-`high-effort-trial/` directory.
+Two frozen preparation packets were selected from real-bank failures: one rejected
+for an undeclared relationship endpoint, the other for a non-verbatim evidence
+quote. Each profile ran once against identical packet bytes and production
+validation/correction logic, with no graph writes.
+
+| Profile | Endpoint case | Quote case | Total elapsed |
+| --- | --- | --- | --- |
+| Luna medium | Rejected, 219.831 s | Rejected, 330.159 s | 549.990 s |
+| Luna high | Rejected, 434.761 s | Rejected, 474.015 s | 908.776 s |
+| Terra low | Passed, 39.770 s (3 facts) | Passed, 69.823 s (6 facts) | 109.593 s |
+
+Fast mode was not requested for any profile. The engine, prompts, schema, evidence
+checks, and correction policy were unchanged. Higher Luna effort did not resolve
+either selected failure. Terra passed both schema/evidence checks, but these probes
+do not establish semantic completeness, graph identity resolution, or retrieval
+accuracy. They are two selected failures, not a representative model benchmark.
+Timings include corrections and CLI overhead with uncontrolled concurrent load;
+Luna runs used reversed source order, and Terra ran later.
+
+Sanitized results and private-report digests are in
+[the model probe report](baselines/2026-09-17-model-probe.json). Private source
+packets and reports stay under ignored `.local/high-trial/`.
+
+The live medium window captured 2 successful attempts and 32 rejected attempts;
+the subsequent high window captured 1 success and 7 rejections before shutdown.
+Their durations and queue contents differ, so these are operational observations,
+not comparable failure-rate estimates. Shutdown interruptions are excluded.
+Private logs remain in the deployment's `high-effort-trial/` directory.
+
+A proposed two-pass Luna design would separate source reading from structured
+relationship construction. It is not implemented or evaluated. Any such experiment
+must preserve source message IDs and verbatim quotes between passes, validate
+against the original transcript, and compare factual coverage as well as rejection
+rate and total latency. A formatting pass alone may not repair missing entities or
+inaccurate evidence.
+
+## Terra deployment trial
+
+Terra low subsequently passed all 50 deterministic tests and all six fixed model
+scenarios (one repetition), including the dreaming case, in a separate temporary
+Neo4j container. The native-memory versus MCP Claude A/B was not rerun. No golden
+baseline was approved, and general code/Compose defaults remain Luna medium.
+
+The local worker was switched to four Terra/low consumers with fast mode off.
+Three remaining Luna calls were cancelled during graceful drain; normal failure
+cleanup preserved their source jobs for retry. The deployment image and engine
+fingerprint remain unchanged. Journal integrity was verified through change 119
+before and after the switch, with 2,264 knowledge records preserved. This is an operational trial, not a conclusion that Terra has
+solved all real-bank extraction failures.
 
 ## Earlier default selection
 

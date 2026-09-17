@@ -4,8 +4,8 @@ The local system now runs through Docker Compose on Colima. Colima is the Linux
 VM hosting Docker on macOS. Three services are deployed:
 
 - `graph-memory-neo4j-1`: existing graph and Neo4j Browser.
-- `graph-memory-worker-1`: read-only bank scanner and four Luna/high consumers
-  (2026-09-17 reasoning-effort trial).
+- `graph-memory-worker-1`: read-only bank scanner and four Terra/low consumers
+  (2026-09-17 model trial, fast mode off).
 - `graph-memory-mcp-1`: five public tools over HTTP.
 
 Deployment configuration lives at
