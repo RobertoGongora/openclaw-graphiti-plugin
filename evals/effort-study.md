@@ -1,6 +1,24 @@
 # Luna reasoning-effort comparison
 
-The selected default is **`gpt-5.6-luna` with `medium` effort**. Both lower settings
+**2026-09-17 live trial:** the deployed ingestion worker now uses `high` (not
+`xhigh`) following frequent real-bank validation rejections on medium. The engine
+image, prompts, schemas, retry policy, and four-consumer count are unchanged.
+The captured medium window had 2 successful attempts and 32 rejected attempts;
+manual shutdown interruptions are excluded. This trial does not approve a new
+golden baseline or establish high as faster without measurements.
+
+`evals/probes/effort.py` compares medium/high against frozen preparation packets
+from failed sources without connecting to a database. It runs production schema,
+evidence, and correction logic, but does not test graph commit identity resolution,
+retrieval correctness, or semantic completeness. Private inputs/results remain
+under `.local/high-trial/`. The two efforts run concurrently with reversed source
+order; timings include corrections and CLI overhead and are not controlled capacity
+benchmarks. Live before/after logs remain under the private deployment's
+`high-effort-trial/` directory.
+
+## Earlier default selection
+
+The earlier selected default was **`gpt-5.6-luna` with `medium` effort**. Both lower settings
 passed the fixed suite; medium also passed the real-note retrieval comparison
 on the schema-aligned engine. Higher effort did not consistently improve the
 observed outcomes. This is a small local trial, not a general model ranking.
