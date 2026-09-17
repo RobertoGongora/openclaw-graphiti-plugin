@@ -1,0 +1,63 @@
+{
+  "date": "2026-09-17",
+  "mcp_engine": "ffd43cb63037cc715da34dbbb642f50209850f69596dbc35a555473dabed9dd9",
+  "mcp_image": "sha256:a3c9a8eb3163c61b2ef16fa5473abaec5d20f0ef16d38d0b19502c1401c3298e",
+  "tests_passed": 67,
+  "worker_restarted": false,
+  "extraction_and_dream_contract_unchanged": true,
+  "extraction_and_dream_contract_sha256": "f121b6da50c02fb6dae60730028aaa99413346f9aba759d38955b932056d2991",
+  "model_evals_rerun": false,
+  "journal_verified_sequence": 163,
+  "renders": [
+    {
+      "view": "whole-live",
+      "namespace": "personal",
+      "rendered_at": "2026-09-17T07:57:31.238025+00:00",
+      "nodes": 2651,
+      "relationships": 2916,
+      "node_types": {
+        "MemoryEpisode": 938,
+        "MemoryEntity": 741,
+        "MemoryFact": 972
+      },
+      "relationship_types": {
+        "SUPPORTED_BY": 972,
+        "TARGET": 972,
+        "HAS_FACT": 972
+      },
+      "truncated": false,
+      "limits_reached": [],
+      "max_nodes": 10000,
+      "max_relationships": 30000,
+      "labels": "major_entity_hubs",
+      "width": 2135,
+      "height": 2240,
+      "png_sha256": "08f65c2cb79927ee345ff4bca1518c8d6d03d98eb330ef239aa088315ce2c7de",
+      "transport": "live authenticated HTTP MCP image content"
+    },
+    {
+      "view": "alfred-live",
+      "namespace": "personal",
+      "rendered_at": "2026-09-17T07:57:31.388180+00:00",
+      "nodes": 39,
+      "relationships": 38,
+      "node_types": {
+        "MemoryEntity": 20,
+        "MemoryFact": 19
+      },
+      "relationship_types": {
+        "HAS_FACT": 19,
+        "TARGET": 19
+      },
+      "truncated": false,
+      "limits_reached": [],
+      "max_nodes": 10000,
+      "max_relationships": 30000,
+      "labels": "all",
+      "width": 2892,
+      "height": 2240,
+      "png_sha256": "9fb806c6eb17b9c04ed6d47f1a7f9019da84c57f107fdbaa96f316eb9b3ee181",
+      "transport": "live authenticated HTTP MCP image content"
+    }
+  ]
+}

@@ -60,7 +60,8 @@ Graphviz separately (`brew install graphviz` on macOS, or the `graphviz` package
 Debian); missing Graphviz produces an actionable tool error. No Python dependencies
 were added. Captions are quoted as plain DOT strings, not executable HTML or paths.
 
-The MCP result contains one `image` content block (`image/png`, base64 data).
+The MCP result follows the [2026-07-28 image content contract](https://modelcontextprotocol.io/specification/2026-07-28/server/tools#image-content):
+one `image` content block (`image/png`, base64 data).
 `structuredContent` contains only counts, dimensions, limits, and the render time.
 There is no server-side image session, persistent screenshot file, or screenshot
 cache. A client can save the returned bytes or display them directly in chat.

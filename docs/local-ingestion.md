@@ -38,7 +38,7 @@ counts below rather than treating the initial snapshot as a permanent total.
 ~/.local/share/graph-memory/bin/compose logs --tail 50 worker
 ```
 
-The deployment uses engine
+The ingestion worker and host CLI use engine
 `78e20fcdf6ffad4bc60785708d3d56d8d8fe6120a6596516d01c185e7fe41582`.
 Queued retries now retain bounded rejection feedback across restarts; see
 [durable retry behavior](docker.md#durable-rejection-feedback). The final build
@@ -166,10 +166,23 @@ preserving data. Future engine changes should follow the eval/revision workflow.
 
 ## Retry-feedback deployment — 2026-09-17
 
-Worker, MCP, and host CLI now use the retry-feedback engine above. Worker and MCP
-pin `sha256:5f227380263f5d3916a2d6219825f7c258f8c526f0534096d174c19e52941515`.
+At this rollout, worker, MCP, and host CLI used the retry-feedback engine above. Worker and MCP
+pinned `sha256:5f227380263f5d3916a2d6219825f7c258f8c526f0534096d174c19e52941515`.
 The worker remains Terra low with fast mode off. Before and after the upgrade,
 journal change 152 verified with the same hash and all 2,524 knowledge records.
 No source, fact, or historical record was re-extracted or repaired during rollout.
 Evidence is in [the sanitized validation report](../evals/baselines/retry-feedback.json)
 and the private deployment's `retry-feedback/` folder. No golden expectations changed.
+
+## Graph-render tool — 2026-09-17
+
+The MCP service now exposes `memory_render` and includes Graphviz. Its image is
+`sha256:a3c9a8eb3163c61b2ef16fa5473abaec5d20f0ef16d38d0b19502c1401c3298e`,
+with engine `ffd43cb63037cc715da34dbbb642f50209850f69596dbc35a555473dabed9dd9`.
+Worker and host CLI remain on the validated retry-feedback build. This read-only
+addition required no worker restart and preserves existing queued retry context.
+The extraction and dream prompts/schemas match exactly; model evals were not rerun.
+All 67 deterministic checks passed, including actual PNG responses and graph
+preservation. Live HTTP calls rendered 2,651 nodes / 2,916 relationships without
+truncation and a focused 39-node graph. Journal change 163 verified afterward.
+See [rendering](rendering.md) and [validation evidence](../evals/baselines/render-validation.json).
