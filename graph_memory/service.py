@@ -1,9 +1,11 @@
 """Typed application tools shared by HTTP, stdio, and CLI."""
 
 import json
+import time
 import uuid
 
 from . import models as m
+from .diagnostics import diagnostic
 from .llm import DREAM_INSTRUCTIONS, EXTRACTION_INSTRUCTIONS
 from .version import engine_fingerprint
 
@@ -46,20 +48,23 @@ class MemoryService:
 
     def extract(self, request: m.EpisodeRequest):
         self.store.assert_writable(request.namespace)
-        packet = self.prepare(request)
-        if packet["status"] == "complete":
-            return {"episode_id": request.episode_id, "status": "complete", "replayed": True}
-        if self.llm is None:
-            return {**packet, "status": "extraction_required"}
+        started, stage, attempt = time.monotonic(), "prepare", -1
         try:
+            packet = self.prepare(request)
+            if packet["status"] == "complete":
+                return {"episode_id": request.episode_id, "status": "complete", "replayed": True}
+            if self.llm is None:
+                return {**packet, "status": "extraction_required"}
             payload = {
                 "transcript": packet["transcript"],
                 "existing_entities": packet["existing_entities"],
                 "existing_relationships": packet["existing_relationships"],
             }
             for attempt in range(2):
+                stage = "model_output"
                 extraction = self.llm.generate(EXTRACTION_INSTRUCTIONS, payload, m.Extraction)
                 try:
+                    stage = "evidence_validation"
                     extraction.validate_evidence(m.Transcript.model_validate(packet["transcript"]))
                     break
                 except ValueError as exc:
@@ -71,6 +76,7 @@ class MemoryService:
                         "validation_error": str(exc),
                         "correction": "Correct exact quote/focus/time grounding against the original transcript. Do not invent evidence or change source text.",
                     }
+            stage = "commit"
             return self.store.commit(
                 request.namespace,
                 request.episode_id,
@@ -82,6 +88,12 @@ class MemoryService:
                 },
             )
         except Exception as exc:
+            exc.memory_diagnostic = {
+                **diagnostic(exc, stage),
+                "extraction_attempt": attempt + 1,
+                "duration_seconds": round(time.monotonic() - started, 3),
+                "engine": self.store.engine,
+            }
             self.store.failed(request.namespace, request.episode_id, type(exc).__name__)
             raise
 

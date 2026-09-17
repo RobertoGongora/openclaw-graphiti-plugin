@@ -71,7 +71,26 @@ docker compose up -d --build
 ```
 
 The worker logs scan counts, episode IDs, completion/failure status, and exception
-class names. It does not log private message text or model credentials. Compose
+class names. Failed `processed` events also include a bounded `diagnostic` object:
+stage, reason code, extraction attempt, elapsed seconds, engine fingerprint, and
+schema/evidence field locations where available. `failed_attempts` and `retry_after`
+identify the durable retry count and next eligible Unix timestamp. Examples of
+reason codes are `evidence_quote_mismatch`, `schema_validation`, `ambiguous_identity`,
+`model_timeout`, and `model_invocation_failed` (with its CLI exit code).
+
+Validation diagnostics include at most ten issues and twelve path components per
+issue. Unknown field names are masked. Raw exceptions, rejected model output,
+source quotes, Pydantic input/context, and credentials are excluded. Unknown errors
+use `unclassified_error`; this is not a claim that their cause was diagnosed.
+These details live in the existing Docker log stream, not the knowledge journal.
+Old errors cannot acquire details retroactively. Existing correction attempts,
+evidence/schema safeguards, and retry delays are unchanged. Review with:
+
+```sh
+~/.local/share/graph-memory/bin/compose logs --since 1h worker
+```
+
+The worker does not log private message text or model credentials. Compose
 rotates worker logs and restarts services unless explicitly stopped. Named database
 and credential volumes survive container replacement. Do not use `down -v` when
 preserving an installation.

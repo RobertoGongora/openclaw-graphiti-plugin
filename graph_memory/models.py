@@ -180,18 +180,31 @@ class Extraction(Model):
         return self
 
     def validate_evidence(self, transcript: Transcript):
+        def reject(message, location):
+            error = ValueError(message)
+            error.memory_location = location
+            raise error
+
         messages = {m.id: m for m in transcript.messages}
-        for fact in self.facts:
+        for fact_index, fact in enumerate(self.facts):
             if transcript.focus_message_ids and not any(
                 e.message_id in transcript.focus_message_ids for e in fact.evidence
             ):
-                raise ValueError("A feed fact must cite at least one new focus message")
-            for evidence in fact.evidence:
+                reject(
+                    "A feed fact must cite at least one new focus message",
+                    ["facts", fact_index, "evidence"],
+                )
+            for evidence_index, evidence in enumerate(fact.evidence):
                 message = messages.get(evidence.message_id)
                 if message is None or evidence.quote not in message.content:
-                    raise ValueError("Evidence must quote an exact substring of its source message")
+                    reject(
+                        "Evidence must quote an exact substring of its source message",
+                        ["facts", fact_index, "evidence", evidence_index, "quote"],
+                    )
             if fact.valid_at and fact.valid_at > now() and fact.status == "active":
-                raise ValueError("Future facts must be planned, not active")
+                reject(
+                    "Future facts must be planned, not active", ["facts", fact_index, "valid_at"]
+                )
         return self
 
 

@@ -6,6 +6,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from .diagnostics import diagnostic
 from .feeds import worker_tick
 from .follow import follow_once
 from .importers import memory_files, transcripts
@@ -109,9 +110,19 @@ def run_daemon(service, namespace, roots, transcript_roots=(), workers=4, interv
                         episode_id=receipt["episode_id"],
                         status=receipt["status"],
                         error=receipt.get("error"),
+                        **{
+                            key: receipt[key]
+                            for key in ("diagnostic", "failed_attempts", "retry_after")
+                            if key in receipt
+                        },
                     )
             except Exception as exc:
-                emit("worker_error", worker=number, error=type(exc).__name__)
+                emit(
+                    "worker_error",
+                    worker=number,
+                    error=type(exc).__name__,
+                    diagnostic=diagnostic(exc),
+                )
                 stop.wait(interval)
             if once:
                 return

@@ -101,6 +101,8 @@ def hook(service, namespace, payload):
 
 
 def worker_tick(service, namespace, limit=10):
+    from .diagnostics import diagnostic
+
     service.store.assert_writable(namespace)
     if service.llm is None:
         raise ValueError("Worker requires MEMORY_LLM=codex or compatible")
@@ -139,19 +141,26 @@ def worker_tick(service, namespace, limit=10):
                 service.extract(EpisodeRequest(namespace=namespace, episode_id=row["id"]))
             )
         except Exception as exc:
-            service.store.transaction(
+            retry = service.store.transaction(
                 lambda tx, eid=row["id"], token=token: tx.run(
                     "MATCH (e:MemoryEpisode {namespace:$ns,id:$id,worker:$token}) "
                     "SET e.attempts=coalesce(e.attempts,0)+1,e.retry_after=$now+"
-                    "CASE WHEN coalesce(e.attempts,0)>5 THEN 3600 ELSE 60*(2^coalesce(e.attempts,0)) END",
+                    "CASE WHEN coalesce(e.attempts,0)>5 THEN 3600 ELSE 60*(2^coalesce(e.attempts,0)) END "
+                    "RETURN e.attempts AS failed_attempts,e.retry_after AS retry_after",
                     ns=namespace,
                     id=eid,
                     token=token,
                     now=time.time(),
-                ).consume()
+                ).single()
             )
             receipts.append(
-                {"episode_id": row["id"], "status": "failed", "error": type(exc).__name__}
+                {
+                    "episode_id": row["id"],
+                    "status": "failed",
+                    "error": type(exc).__name__,
+                    "diagnostic": getattr(exc, "memory_diagnostic", None) or diagnostic(exc),
+                    **(dict(retry) if retry else {}),
+                }
             )
         finally:
             service.store.transaction(
