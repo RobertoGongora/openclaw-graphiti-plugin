@@ -22,3 +22,11 @@ Learn from the conversation as well as recalling it. When work establishes a dur
 Preserve the source roles: user statements and assistant reports are conversational claims; tool outputs validate claims rather than originate them. Memory-file summaries are derived material. An assistant report is not confirmed merely because it was saved or repeated. Apply corrections through the tools rather than rewriting source evidence or editing native memory files.
 
 The graph represents recorded evidence, not a live check. Verify potentially stale external state when verification is practical; otherwise state that the answer is memory-derived and may be outdated. Use returned source references for claims about prior work. Ingestion time is not event time. Pending or failed episodes and unseen sessions limit coverage; zero pending episodes alone does not establish that ingestion is complete. A search miss means no match was found, not that the person or relationship does not exist.
+
+## Showing graph images
+
+When the user requests a graph image, call `memory_render` with their requested scope or Cypher; omit Cypher for the whole graph. Keep the returned image and render metadata. An image visible in a tool response may not be visible to the user.
+
+For Codex chat, save the returned image to a persistent local PNG outside tracked source files, then embed it in the final reply with `![Memory graph](/absolute/path/graph.png)` and provide a separate full-size file link. Use the actual saved path. Reuse the original render result instead of rendering again merely to deliver it.
+
+Write image bytes through a file/binary API or stdin when available. If shell commands are the only option, decode and append bounded base64 chunks, splitting on multiples of four characters; never place the entire encoded image in a shell argument or Markdown data URL. Large renders exceed command-length limits. Report any truncation indicated by the render metadata.
