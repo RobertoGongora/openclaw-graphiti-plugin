@@ -1,0 +1,259 @@
+{
+  "experiment": "Fresh-session memory routing smoke test",
+  "date": "2026-09-17",
+  "codex_version": "0.154.0",
+  "model": "gpt-5.6-terra",
+  "effort": "medium",
+  "service_tier": "default",
+  "ephemeral": true,
+  "read_only": true,
+  "native_memory": "Disabled; ordinary-session diagnostic reports no injected summary or registry instructions",
+  "conditions": "Normal user MCP configuration retained. Fresh independent sessions in /tmp. Explicit read-only restriction; no additional memory routing instruction. Background ingestion remained active.",
+  "runs": {
+    "terra-recall-check": {
+      "actual_model": "gpt-5.6-terra",
+      "turns": [
+        {
+          "prompt": "What do you remember about my Atlas project?",
+          "duration_seconds": 6.7,
+          "status": "completed",
+          "memory_calls": [],
+          "shell_calls": 0
+        },
+        {
+          "prompt": "What evidence supports that? Please check the sources and tell me which parts are confirmed versus merely reported, and whether you can establish that this is the latest state.",
+          "duration_seconds": 21.61,
+          "status": "completed",
+          "memory_calls": [],
+          "shell_calls": 3
+        },
+        {
+          "prompt": "What do you remember about how Alfred, DailyAI, and Unearth are related?",
+          "duration_seconds": 11.05,
+          "status": "completed",
+          "memory_calls": [],
+          "shell_calls": 1
+        },
+        {
+          "prompt": "Diagnostic follow-up: Did this session receive a native memory summary or instructions to search a native MEMORY.md registry? Which memory tools did you actually use in our conversation? Answer briefly; do not read files or make additional calls for this question.",
+          "duration_seconds": 4.78,
+          "status": "completed",
+          "memory_calls": [],
+          "shell_calls": 0
+        }
+      ]
+    },
+    "terra-recall-directed": {
+      "actual_model": "gpt-5.6-terra",
+      "turns": [
+        {
+          "prompt": "Use our graph-memory MCP to recall what you know about my Atlas project. Discover its tools if necessary. Do not search local files or the web.",
+          "duration_seconds": 47.42,
+          "status": "completed",
+          "memory_calls": [
+            {
+              "tool": "memory_search_entities",
+              "status": "completed",
+              "duration_ms": 87,
+              "detail": null
+            },
+            {
+              "tool": "memory_search_entities",
+              "status": "failed",
+              "duration_ms": 7,
+              "detail": null
+            },
+            {
+              "tool": "memory_search_entities",
+              "status": "completed",
+              "duration_ms": 40,
+              "detail": null
+            },
+            {
+              "tool": "memory_recall",
+              "status": "completed",
+              "duration_ms": 15677,
+              "detail": "full"
+            },
+            {
+              "tool": "memory_recall",
+              "status": "completed",
+              "duration_ms": 15684,
+              "detail": "full"
+            },
+            {
+              "tool": "memory_recall",
+              "status": "completed",
+              "duration_ms": 1452,
+              "detail": "full"
+            },
+            {
+              "tool": "memory_recall",
+              "status": "completed",
+              "duration_ms": 1463,
+              "detail": "full"
+            },
+            {
+              "tool": "memory_recall",
+              "status": "completed",
+              "duration_ms": 1470,
+              "detail": "full"
+            },
+            {
+              "tool": "memory_recall",
+              "status": "completed",
+              "duration_ms": 1477,
+              "detail": "full"
+            },
+            {
+              "tool": "memory_recall",
+              "status": "completed",
+              "duration_ms": 1482,
+              "detail": "full"
+            }
+          ],
+          "shell_calls": 0
+        },
+        {
+          "prompt": "Check the evidence behind those recalled facts. What is confirmed versus merely reported, and can you establish that it is the latest state? Use the memory tools, not local files or the web.",
+          "duration_seconds": 42.44,
+          "status": "completed",
+          "memory_calls": [
+            {
+              "tool": "memory_evidence",
+              "status": "completed",
+              "duration_ms": 59,
+              "detail": null
+            },
+            {
+              "tool": "memory_latest",
+              "status": "failed",
+              "duration_ms": 1048,
+              "detail": "full"
+            },
+            {
+              "tool": "memory_latest",
+              "status": "failed",
+              "duration_ms": 1048,
+              "detail": "full"
+            },
+            {
+              "tool": "memory_latest",
+              "status": "failed",
+              "duration_ms": 1048,
+              "detail": "full"
+            },
+            {
+              "tool": "memory_latest",
+              "status": "failed",
+              "duration_ms": 1048,
+              "detail": "full"
+            },
+            {
+              "tool": "memory_recall",
+              "status": "completed",
+              "duration_ms": 1048,
+              "detail": "full"
+            },
+            {
+              "tool": "memory_latest",
+              "status": "completed",
+              "duration_ms": 824,
+              "detail": "full"
+            },
+            {
+              "tool": "memory_latest",
+              "status": "completed",
+              "duration_ms": 3225,
+              "detail": "full"
+            },
+            {
+              "tool": "memory_latest",
+              "status": "completed",
+              "duration_ms": 3250,
+              "detail": "full"
+            },
+            {
+              "tool": "memory_latest",
+              "status": "completed",
+              "duration_ms": 3266,
+              "detail": "full"
+            }
+          ],
+          "shell_calls": 0
+        },
+        {
+          "prompt": "Now use the same memory system to tell me how Alfred, DailyAI, and Unearth are related. If the graph does not establish a connection, say so.",
+          "duration_seconds": 36.54,
+          "status": "completed",
+          "memory_calls": [
+            {
+              "tool": "memory_search_entities",
+              "status": "completed",
+              "duration_ms": 4,
+              "detail": null
+            },
+            {
+              "tool": "memory_search_entities",
+              "status": "completed",
+              "duration_ms": 5,
+              "detail": null
+            },
+            {
+              "tool": "memory_search_entities",
+              "status": "completed",
+              "duration_ms": 9,
+              "detail": null
+            },
+            {
+              "tool": "memory_render",
+              "status": "completed",
+              "duration_ms": 253,
+              "detail": null
+            },
+            {
+              "tool": "memory_recall",
+              "status": "completed",
+              "duration_ms": 11622,
+              "detail": "full"
+            },
+            {
+              "tool": "memory_recall",
+              "status": "completed",
+              "duration_ms": 20167,
+              "detail": "full"
+            },
+            {
+              "tool": "memory_recall",
+              "status": "completed",
+              "duration_ms": 20173,
+              "detail": "full"
+            }
+          ],
+          "shell_calls": 0
+        }
+      ]
+    }
+  },
+  "observations": [
+    "Ordinary recall questions did not trigger graph memory calls; the model instead referenced the n8n skill and local operational configuration.",
+    "Explicit graph-memory requests triggered search, recall, evidence and latest calls across three turns.",
+    "The model recovered from a rejected search limit of 25 (maximum 20) and an empty project-kind search.",
+    "Directed evidence follow-up distinguished assistant reports from validated evidence and declined to establish Atlas current state.",
+    "The follow-up nevertheless described ingestion as caught up despite 21 failed episodes; freshness wording needs evaluation.",
+    "Directed relationship question found no Alfred or DailyAI search matches and did not invent the relationship, but overstated absence as no entities or facts rather than no search matches.",
+    "The model repeatedly opted into full-detail retrieval and large limits, defeating compact defaults."
+  ],
+  "limitations": [
+    "One run per condition; not a statistical benchmark or golden accuracy baseline.",
+    "No live-state claims independently verified by this test.",
+    "Luna runs were interrupted at user request and do not establish a model quality comparison.",
+    "Graph tools were callable; deferred loading as the cause of missed routing is not proven."
+  ],
+  "configuration_check": {
+    "per_server_always_load": "No documented setting found in official MCP config schema/reference",
+    "legacy_tool_search_flags": "Installed CLI lists tool_search and tool_search_always_defer_mcp_tools as removed",
+    "changes_applied": false
+  },
+  "next_experiment": "Repeat ordinary prompts with one always-visible graph-memory routing instruction, retaining concise tool descriptions."
+}
