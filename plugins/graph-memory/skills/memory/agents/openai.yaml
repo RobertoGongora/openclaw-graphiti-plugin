@@ -1,0 +1,12 @@
+interface:
+  display_name: "Memory"
+  short_description: "Recall, remember, and correct information."
+
+policy:
+  allow_implicit_invocation: true
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "graph-memory"
+      description: "Recall, remember, and correct information in your memory graph."

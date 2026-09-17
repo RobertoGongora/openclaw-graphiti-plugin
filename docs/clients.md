@@ -1,11 +1,13 @@
 # Clients with native memories disabled
 
-MCP exposes only recall, latest, ingest, retract, and merge. Background processing
-is owned by the Python engine. Docker can run the entire stack; see [Docker setup](docker.md).
+MCP exposes recall, latest, evidence, entity search, graph rendering, ingest,
+retract, and merge. Background processing is owned by the Python engine.
+Docker can run the entire stack; see [Docker setup](docker.md).
 
 The portable contract is MCP plus the instructions in
-`graph_memory.feeds.AGENT_INSTRUCTIONS`. Every request carries the namespace;
-MCP processes keep no conversational state. An LLM does not need a particular
+`graph_memory.feeds.AGENT_INSTRUCTIONS`. A scoped MCP connection supplies its
+namespace; session tools do not ask the model to choose one. MCP processes keep
+no conversational state. An LLM does not need a particular
 provider, agent framework, embedding model, or local Markdown memory directory.
 
 ## Claude Code hooks
@@ -98,11 +100,20 @@ Sources checked: [Claude hooks](https://code.claude.com/docs/en/hooks),
 [Claude memory settings](https://code.claude.com/docs/en/memory).
 
 
-## Local Codex registration
+## Codex plugin
 
-On 2026-09-17, `graph-memory` was registered in the user-scoped Codex
+The local Codex client now uses `graph-memory@personal`, which bundles the
+MCP connection with an automatically discoverable memory skill. The skill covers
+recall, learning durable new information, corrections, and graph exploration.
+See [Codex plugin setup and verification](codex-plugin.md).
+
+## Initial Codex registration (replaced by the plugin)
+
+Initially on 2026-09-17, `graph-memory` was registered in the user-scoped Codex
 configuration at `~/.codex/config.toml`. It points to the transcript graph.
-Claude registration is deferred at Rob's request.
+Claude registration is deferred at Rob's request. This standalone entry was
+removed after verifying the plugin's connection, so new sessions see one memory
+server. The following is retained as the manual fallback configuration.
 
 ```toml
 [mcp_servers.graph-memory]

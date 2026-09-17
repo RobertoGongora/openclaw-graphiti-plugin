@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "graph-memory": {
+      "command": "docker",
+      "args": [
+        "exec",
+        "-i",
+        "graph-memory-transcripts-mcp-1",
+        "graph-memory",
+        "--namespace",
+        "transcripts",
+        "serve"
+      ]
+    }
+  }
+}

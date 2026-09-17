@@ -1,0 +1,23 @@
+{
+  "name": "graph-memory",
+  "version": "0.1.0+codex.20260917130359",
+  "description": "Recall past work, learn new information, and correct memories across conversations using your memory graph.",
+  "author": {
+    "name": "Rob"
+  },
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Graph Memory",
+    "shortDescription": "Remember your projects, people, and past work.",
+    "longDescription": "Recall information from previous conversations, inspect its sources, remember new information, correct facts, and explore how they connect. Connects to your running Graph Memory Docker service.",
+    "developerName": "Rob",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": [
+      "What do you remember about my Atlas project?",
+      "When did we last work on this?",
+      "Show me how my memory graph connects."
+    ]
+  }
+}

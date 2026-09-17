@@ -1,0 +1,176 @@
+{
+  "experiment": "Codex plugin implicit recall and learning smoke test",
+  "date": "2026-09-17",
+  "codex_version": "0.154.0",
+  "plugin_id": "graph-memory@personal",
+  "plugin_version": "0.1.0+codex.20260917130359",
+  "model": "gpt-5.6-terra",
+  "effort": "medium",
+  "service_tier": "default",
+  "native_memories_enabled": false,
+  "ephemeral_sessions": true,
+  "plugin_skill_visible_in_initial_prompt": true,
+  "installed_files_match_source": true,
+  "plugin_tool_count": 8,
+  "plugin_entity_search_verified": true,
+  "duplicate_manual_registration_removed": true,
+  "unrelated_user_config_preserved": true,
+  "ingest_policy": "User plugin policy explicitly permits memory_ingest; fixture transport copies that per-tool policy for isolation.",
+  "runs": {
+    "plugin-recall-final": {
+      "model": "gpt-5.6-terra",
+      "turns": [
+        {
+          "prompt": "What do you remember about my Atlas project?",
+          "duration_seconds": 26.54,
+          "status": "completed",
+          "memory_calls": [
+            {
+              "tool": "memory_recall",
+              "status": "completed",
+              "detail": "compact"
+            },
+            {
+              "tool": "memory_recall",
+              "status": "completed",
+              "detail": "full"
+            }
+          ]
+        },
+        {
+          "prompt": "What evidence supports that? Please check the sources and tell me which parts are confirmed versus merely reported, and whether you can establish that this is the latest state.",
+          "duration_seconds": 29.35,
+          "status": "completed",
+          "memory_calls": [
+            {
+              "tool": "memory_latest",
+              "status": "failed",
+              "detail": "full"
+            },
+            {
+              "tool": "memory_evidence",
+              "status": "completed",
+              "detail": null
+            },
+            {
+              "tool": "memory_latest",
+              "status": "completed",
+              "detail": "full"
+            }
+          ]
+        },
+        {
+          "prompt": "What do you remember about how Alfred, DailyAI, and Unearth are related?",
+          "duration_seconds": 25.64,
+          "status": "completed",
+          "memory_calls": [
+            {
+              "tool": "memory_recall",
+              "status": "completed",
+              "detail": "full"
+            },
+            {
+              "tool": "memory_recall",
+              "status": "completed",
+              "detail": "full"
+            },
+            {
+              "tool": "memory_recall",
+              "status": "completed",
+              "detail": "full"
+            },
+            {
+              "tool": "memory_search_entities",
+              "status": "completed",
+              "detail": null
+            },
+            {
+              "tool": "memory_search_entities",
+              "status": "completed",
+              "detail": null
+            },
+            {
+              "tool": "memory_search_entities",
+              "status": "completed",
+              "detail": null
+            },
+            {
+              "tool": "memory_search_entities",
+              "status": "completed",
+              "detail": null
+            },
+            {
+              "tool": "memory_search_entities",
+              "status": "completed",
+              "detail": null
+            }
+          ]
+        },
+        {
+          "prompt": "Diagnostic follow-up: Did this session receive a native memory summary or instructions to search a native MEMORY.md registry? Which memory tools did you actually use in our conversation? Answer briefly; do not read files or make additional calls for this question.",
+          "duration_seconds": 3.33,
+          "status": "completed",
+          "memory_calls": []
+        }
+      ]
+    },
+    "plugin-learning-policy-check": {
+      "model": "gpt-5.6-terra",
+      "turns": [
+        {
+          "prompt": "For the Northstar pilot, we have decided to use SQLite for the prototype and review that decision on 1 October 2026. What are the next two planning steps?",
+          "duration_seconds": 32.43,
+          "status": "completed",
+          "memory_calls": [
+            {
+              "tool": "memory_recall",
+              "status": "completed",
+              "detail": "compact"
+            },
+            {
+              "tool": "memory_ingest",
+              "status": "completed",
+              "detail": null
+            }
+          ]
+        },
+        {
+          "prompt": "Is that decision already available for future recall, or is it still waiting to be processed?",
+          "duration_seconds": 6.34,
+          "status": "completed",
+          "memory_calls": [
+            {
+              "tool": "memory_recall",
+              "status": "completed",
+              "detail": "compact"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "results": {
+    "ordinary_recall_routes_to_graph": true,
+    "followup_uses_evidence_and_latest": true,
+    "pending_failed_unseen_coverage_limits_disclosed": true,
+    "new_decision_without_remember_request_triggers_ingest": true,
+    "synthetic_ingest_passes_real_tool_schema": true,
+    "queued_write_not_claimed_retrievable": true,
+    "live_graph_writes_performed_by_tests": false
+  },
+  "baseline": "terra-memory-routing-v1.json ordinary condition used zero graph-memory tools",
+  "methodology": [
+    "Live recall runs used the plugin connection and read-only developer instructions.",
+    "Learning used a capture-only stdio MCP fixture serving real engine tool schemas and pending receipts; it has no database connection.",
+    "The fixture overrides transport in the test process, so its per-tool approval policy is copied from the user plugin policy.",
+    "Raw tool outputs and source references are retained privately outside this repository."
+  ],
+  "limitations": [
+    "Small behavioral smoke test, not a golden accuracy benchmark or statistical model comparison.",
+    "Background ingestion continued; live facts were not frozen.",
+    "One latest call needed a retry after invalid arguments; tool use is not flawless.",
+    "Learning validates discovery and submission, not extraction, graph reconciliation, or eventual recall.",
+    "The synthetic write generated its own provenance identifiers; exact source timestamp fidelity is not certified.",
+    "An early fixture attempt was blocked by approval policy; corrected fixture policy was then tested successfully."
+  ]
+}
