@@ -38,9 +38,12 @@ counts below rather than treating the initial snapshot as a permanent total.
 ```
 
 The deployment uses engine
-`21f973016d95c588342c3058334ceccb23259c4aa6da412f371683dc614859ed`.
-47 deterministic tests and 12/12 fixed Luna model cases passed in Docker for the
-journal upgrade. Two earlier Claude A/B attempts passed the native arm but were blocked during graph
+`5cadbbca81d77be3e8d3ae8791f6708b1f2b6ec0213bdd86cc7ded3364a22b01`.
+The diagnostics update passed 50 deterministic tests in Docker. Its model prompts
+and extraction JSON schema match the preceding journal build exactly; no failed
+bank sources were reproduced and no model evaluations were rerun for this logging
+change. The preceding journal build passed 47 deterministic tests and 12/12 fixed
+Luna model cases. Two earlier Claude A/B attempts passed the native arm but were blocked during graph
 source extraction by exact-quote validation, before the MCP arm. This remains an
 open extraction-quality limitation; that A/B was not rerun for the journal upgrade
 and no new golden baseline was approved. The extractor, prompts, and current
@@ -75,6 +78,21 @@ The prototype sandbox was separately backed up before the original fresh import:
 `~/.local/share/graph-memory/backups/20260916T164612Z-prototype-graph.json`.
 The current shared scope is `personal`.
 
+## Failure diagnostics
+
+On 2026-09-17 the worker's existing log stream gained safe reason codes, validation
+locations, failure stages, elapsed time, and retry timing. Details are documented
+in [Docker operations](docker.md). Episode error properties retain their previous
+class-only format; operational diagnostics do not enter the knowledge journal.
+Only future failures have the additional details.
+
+Worker and MCP now pin image
+`sha256:a9005f9f1eb653d72f7b2ba609a6664945ffe80291b4e6a3d215d34d60fe2160`.
+The host CLI uses the same build. Two unfinished model attempts were cancelled
+during drain and their normal cleanup released the jobs for retry. Journal change
+112, containing 2,205 knowledge records, was verified before the switch. Private
+deployment verification is saved in `deployment/diagnostics-deployment.json`.
+
 ## Journal activation
 
 The journal started at **2026-09-16T19:11:31.729247Z** with change **0**. Existing
@@ -83,7 +101,7 @@ At activation the graph held 848 source episodes (49 completed), 369 entities, a
 460 facts. Current answers and five representative historical queries matched.
 Live HTTP recall/latest worked with and without the new `at_change` argument.
 
-The worker and MCP service pin image
+At initial journal activation, worker and MCP used image
 `sha256:5d366fa3f10705a4744fd0c6b3b5697f2af8e6dd8c0582e4d0b545335c8c4c1a`.
 The stable host CLI is installed from the same engine build. Four consumers
 resumed the existing queue. One old model attempt was cancelled during shutdown;
