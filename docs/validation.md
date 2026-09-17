@@ -22,7 +22,7 @@ lives under ignored `.local/`; these files can contain private source excerpts.
 
 ## Luna extraction and dreaming
 
-Codex CLI 0.154.0 was used with `gpt-5.6-luna` and the final default, `medium`. The pinned six-case
+Codex CLI 0.154.0 was used with `gpt-5.6-luna` and the then-selected default, `medium`. The pinned six-case
 suite passed twice: **12/12 model cases**. Each case uses a new isolated namespace.
 The Atlas case includes actual Luna dreaming, supported-insight promotion, and
 checks that the original facts stay unchanged. Engine source and suite hashes

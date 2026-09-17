@@ -37,14 +37,14 @@ clients that launch subprocesses. See [MCP requests and client setup](docs/mcp.m
 The development database binds only to localhost and persists in a named volume.
 Use Neo4j authentication and a private network for a shared installation.
 
-### Extraction and dreaming with Luna
+### Extraction and dreaming with Terra
 
 Log into your installed Codex CLI, then:
 
 ```sh
 export MEMORY_LLM=codex
-export MEMORY_MODEL=gpt-5.6-luna
-export MEMORY_REASONING_EFFORT=medium
+export MEMORY_MODEL=gpt-5.6-terra
+export MEMORY_REASONING_EFFORT=low
 uv run graph-memory --namespace personal ingest /path/to/session.jsonl --extract
 uv run graph-memory --namespace personal recall Atlas
 uv run graph-memory --namespace personal latest Atlas --relation decided
@@ -201,8 +201,8 @@ automatically. See [revision workflow](docs/revisions.md).
 | `MEMORY_NAMESPACE` | `personal`; a shared HTTP server is bound to one namespace |
 | `MEMORY_HTTP_TOKEN` | Optional bearer auth locally; required for non-loopback HTTP |
 | `MEMORY_LLM` | `caller`, `codex`, or `compatible` |
-| `MEMORY_MODEL` | `gpt-5.6-luna` for Codex |
-| `MEMORY_REASONING_EFFORT` | `medium` for Codex; configurable |
+| `MEMORY_MODEL` | `gpt-5.6-terra` for Codex |
+| `MEMORY_REASONING_EFFORT` | `low` for Codex; configurable |
 
 HTTP validates Origin and routing headers. Its bearer authentication is a
 private-service option; a public OAuth/OIDC deployment requires an external auth

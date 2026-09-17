@@ -43,7 +43,10 @@ inaccurate evidence.
 Terra low subsequently passed all 50 deterministic tests and all six fixed model
 scenarios (one repetition), including the dreaming case, in a separate temporary
 Neo4j container. The native-memory versus MCP Claude A/B was not rerun. No golden
-baseline was approved, and general code/Compose defaults remain Luna medium.
+baseline was approved. Rob subsequently chose to retain Terra low, with fast mode
+off. Code, Compose, and setup defaults now match that choice. The deployed image
+stays pinned with explicit Terra/low configuration; changing repository defaults
+does not require interrupting ingestion or rebuilding historical facts.
 
 The local worker was switched to four Terra/low consumers with fast mode off.
 Three remaining Luna calls were cancelled during graceful drain; normal failure

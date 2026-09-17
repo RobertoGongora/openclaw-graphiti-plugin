@@ -51,8 +51,11 @@ equal-time conflicts instead of choosing by import order.
 An explicit exclusive slot supports changing a primary database while allowing
 multiple databases where the source does not establish exclusivity.
 
-Use Codex CLI with `gpt-5.6-luna` and configurable effort for extraction and
-dreaming. The default was lowered from `xhigh` to `medium` after comparative evals. Any LLM
+Use Codex CLI with `gpt-5.6-terra` at `low` effort for extraction and
+dreaming, with fast mode off and model/effort configurable. On 2026-09-17 Rob chose
+to retain Terra after it passed both frozen real-bank failure probes and all six
+fixed scenarios; Luna medium and high failed both probes. This supersedes the
+earlier Luna medium choice. See [comparison evidence](../../evals/effort-study.md). Any LLM
 can instead supply the same extraction schema through the Python/CLI interface; an optional generic
 HTTP adapter supports unattended non-Codex models. Model output is validated and
 never executed as Cypher or shell. There is no Graphiti runtime dependency.

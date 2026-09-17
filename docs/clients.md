@@ -33,7 +33,7 @@ can include a database password. They belong outside version control.
 `SessionStart` and `UserPromptSubmit` inject the memory-use instructions.
 `UserPromptSubmit`, `Stop`, and `SessionEnd` feed available transcript messages.
 Hooks stage sources without running an LLM. The worker extracts independently
-with Luna/medium by default. Retrieval exposes pending/failed counts while it catches up.
+with Terra/low by default. Retrieval exposes pending/failed counts while it catches up.
 The worker finishes processing independently; MCP sessions do not invoke extraction
 steps. Queued information is not yet available to recall.
 

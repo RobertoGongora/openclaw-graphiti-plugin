@@ -90,7 +90,7 @@ the report lists exact files and hashes so corpus scope is inspectable. The nati
 auto memory and permits read-only file tools. The graph arm disables auto memory,
 has no file tools, and uses only a namespace-scoped read-only MCP server. Separate
 working directories and new session IDs prevent conversational carryover. Both
-use the same Claude model. The graph's extraction/dream model is Luna; `MEMORY_REASONING_EFFORT` selects effort (default `medium`).
+use the same Claude model. The graph's default extraction/dream model is Terra; `MEMORY_REASONING_EFFORT` selects effort (default `low`). Fast mode is not requested.
 The sources, tool events, evidence quotes, answers, exact model usage, and checks
 are written to ignored local reports, then the test graph is removed.
 

@@ -92,7 +92,7 @@ def strict_schema(schema: dict) -> dict:
 
 
 class CodexLLM:
-    def __init__(self, model="gpt-5.6-luna", effort="medium", timeout=600):
+    def __init__(self, model="gpt-5.6-terra", effort="low", timeout=600):
         self.model, self.effort, self.timeout = model, effort, timeout
 
     def generate(self, instructions: str, payload: dict, output: type[BaseModel]):
@@ -201,8 +201,8 @@ def configured_llm():
         return None
     if provider == "codex":
         return CodexLLM(
-            os.environ.get("MEMORY_MODEL", "gpt-5.6-luna"),
-            os.environ.get("MEMORY_REASONING_EFFORT", "medium"),
+            os.environ.get("MEMORY_MODEL", "gpt-5.6-terra"),
+            os.environ.get("MEMORY_REASONING_EFFORT", "low"),
         )
     if provider == "compatible":
         return CompatibleLLM(

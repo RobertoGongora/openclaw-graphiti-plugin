@@ -33,8 +33,8 @@ services:
       HOME: /home/memory
       MEMORY_NAMESPACE: ${MEMORY_NAMESPACE:-personal}
       MEMORY_LLM: ${MEMORY_LLM:-codex}
-      MEMORY_MODEL: ${MEMORY_MODEL:-gpt-5.6-luna}
-      MEMORY_REASONING_EFFORT: ${MEMORY_REASONING_EFFORT:-medium}
+      MEMORY_MODEL: ${MEMORY_MODEL:-gpt-5.6-terra}
+      MEMORY_REASONING_EFFORT: ${MEMORY_REASONING_EFFORT:-low}
       MEMORY_LLM_URL: ${MEMORY_LLM_URL:-}
       MEMORY_LLM_API_KEY: ${MEMORY_LLM_API_KEY:-}
     command: [daemon, /bank, --workers, '${MEMORY_WORKERS:-4}']
