@@ -65,15 +65,15 @@ native-memory-off setup; see [client integration](clients.md). A retrieval-only
 consumer can launch `serve --read-only`. This filters the catalog and rejects
 mutating calls at the server, independently of the model's tool permissions.
 
-The public catalog contains only `memory_recall`, `memory_latest`, `memory_ingest`,
-`memory_retract`, and `memory_merge`. Internal extraction and dream calls are
+The public catalog contains `memory_recall`, `memory_latest`, `memory_evidence`,
+`memory_ingest`, `memory_retract`, `memory_merge`, and `memory_render`. Internal extraction and dream calls are
 rejected by MCP and remain accessible through the Python engine and CLI.
 `memory_ingest` accepts original messages and always queues them; its public schema
 has no `extract` switch and its response never delegates processing back to the agent.
 
 Recall/latest also accept optional `known_at` or `at_change` cutoffs for historical
 knowledge. `as_of` remains the separate event-time cutoff. Historical results
-include coverage metadata; see [history](history.md). The catalog has six tools, including `memory_render`.
+include coverage metadata; see [history](history.md). The catalog has seven tools, including `memory_render` and `memory_evidence`.
 
 
 `memory_render` returns a standard PNG `image` content block plus text and
@@ -81,3 +81,9 @@ include coverage metadata; see [history](history.md). The catalog has six tools,
 Image bytes appear once, not repeated in structured metadata. Clients that cache
 the catalog may need a reconnect/refresh to discover newly deployed tools.
 See [rendering](rendering.md) for whole-graph and custom-Cypher examples.
+
+
+Recall/latest now default to [compact JSON with evidence on demand](compact-recall.md).
+The catalog contains seven tools, including the read-only `memory_evidence`.
+Supply an entity name in `query` and optionally a question to select relevant
+facts. `detail:"full"` retains access to the legacy record format.

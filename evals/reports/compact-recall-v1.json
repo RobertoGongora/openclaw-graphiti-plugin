@@ -1,0 +1,80 @@
+{
+  "kind": "payload-size-check-not-accuracy-benchmark",
+  "snapshot_sha256": "73e997eb8f9d4fc189ce3b3f0cf0a2f4be14eff3252323e65158fa6f19dca100",
+  "results": [
+    {
+      "case": 1,
+      "question_supplied": false,
+      "legacy_json_bytes": 186141,
+      "compact_json_bytes": 2134,
+      "reduction_percent": 98.9,
+      "formatting_ms": 4.86,
+      "returned_facts": 5,
+      "matching_unique": 519,
+      "facts_are_existing_records": true
+    },
+    {
+      "case": 2,
+      "question_supplied": true,
+      "legacy_json_bytes": 186141,
+      "compact_json_bytes": 2141,
+      "reduction_percent": 98.8,
+      "formatting_ms": 3.97,
+      "returned_facts": 5,
+      "matching_unique": 71,
+      "facts_are_existing_records": true
+    },
+    {
+      "case": 3,
+      "question_supplied": false,
+      "legacy_json_bytes": 201548,
+      "compact_json_bytes": 2300,
+      "reduction_percent": 98.9,
+      "formatting_ms": 7.14,
+      "returned_facts": 5,
+      "matching_unique": 817,
+      "facts_are_existing_records": true
+    },
+    {
+      "case": 4,
+      "question_supplied": true,
+      "legacy_json_bytes": 174979,
+      "compact_json_bytes": 1828,
+      "reduction_percent": 99.0,
+      "formatting_ms": 2.32,
+      "returned_facts": 3,
+      "matching_unique": 3,
+      "facts_are_existing_records": true
+    }
+  ],
+  "deployment": {
+    "checked_at": "2026-09-17T12:01:38.739105+00:00",
+    "engine": "6a5ac4442b314b35832c8c3f5b545845c0aebc2c78eea06fa0d89b7d60b0bef2",
+    "deterministic_tests": 94,
+    "ingestion_workers_unchanged": true,
+    "smoke_checks": [
+      {
+        "namespace": "personal",
+        "tools": 7,
+        "default_facts": 5,
+        "compact_bytes": 2134,
+        "full_bytes": 186141,
+        "http_recall_ms": 423.19,
+        "exact_evidence_ok": true,
+        "full_detail_ok": true,
+        "latest_ok": true
+      },
+      {
+        "namespace": "transcripts",
+        "tools": 7,
+        "default_facts": 2,
+        "compact_bytes": 1341,
+        "full_bytes": 4126,
+        "http_recall_ms": 259.94,
+        "exact_evidence_ok": true,
+        "full_detail_ok": true,
+        "latest_ok": true
+      }
+    ]
+  }
+}

@@ -78,7 +78,7 @@ def test_http_retrieves_committed_graph_without_initialization(graph):
             ) as response:
                 result = json.load(response)["result"]
                 assert not result["isError"]
-                assert result["structuredContent"]["current"][0]["target"] == MYSQL["key"]
+                assert result["structuredContent"]["facts"][0]["text"] == "Atlas uses MySQL."
                 assert "Mcp-Session-Id" not in response.headers
     finally:
         server.shutdown()

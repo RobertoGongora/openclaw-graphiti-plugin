@@ -5,6 +5,7 @@ import time
 import uuid
 
 from . import models as m
+from . import retrieval
 from .diagnostics import diagnostic
 from .llm import DREAM_INSTRUCTIONS, extraction_instructions
 from .retry import feedback, restored_feedback
@@ -356,6 +357,11 @@ class MemoryService:
                 lambda r: self.store.commit(r.namespace, r.episode_id, r.extraction),
                 "Validate typed relationships and exact source quotes, then atomically commit graph facts. Idempotent.",
             ),
+            "memory_evidence": (
+                retrieval.EvidenceRequest,
+                lambda r: retrieval.evidence(self.store, r),
+                "Use when you need to verify a recalled fact or inspect the evidence behind it.",
+            ),
             "memory_recall": (
                 m.Recall,
                 lambda r: self.store.recall(
@@ -426,6 +432,7 @@ class MemoryService:
         """The public MCP surface; orchestration remains in the engine and CLI."""
         names = {
             "memory_render",
+            "memory_evidence",
             "memory_ingest",
             "memory_recall",
             "memory_latest",
@@ -438,6 +445,15 @@ class MemoryService:
             lambda r: self.ingest(m.Ingest(transcript=r.transcript)),
             catalog["memory_ingest"][2],
         )
+        for name, schema, handler in (
+            ("memory_recall", retrieval.RecallView, retrieval.recall),
+            ("memory_latest", retrieval.LatestView, retrieval.latest),
+        ):
+            catalog[name] = (
+                schema,
+                lambda r, handler=handler: handler(self.store, r),
+                catalog[name][2],
+            )
         return catalog
 
     def call(self, name, arguments):

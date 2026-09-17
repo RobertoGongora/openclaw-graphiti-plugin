@@ -46,6 +46,7 @@ def test_mcp_stateless_discovery_metadata_headers_and_catalog():
         "memory_merge",
         "memory_retract",
         "memory_render",
+        "memory_evidence",
     }
     ingest_schema = next(t["inputSchema"] for t in result["tools"] if t["name"] == "memory_ingest")
     assert "extract" not in ingest_schema["properties"]
@@ -147,7 +148,7 @@ def test_retrieval_only_server_rejects_writes_before_dispatch():
     names = {t["name"] for t in protocol.dispatch(rpc())[1]["result"]["tools"]}
     assert "memory_recall" in names
     assert "memory_ingest" not in names
-    assert names == {"memory_recall", "memory_latest", "memory_render"}
+    assert names == {"memory_recall", "memory_latest", "memory_render", "memory_evidence"}
     attempted = rpc(
         "tools/call",
         name="memory_retract",

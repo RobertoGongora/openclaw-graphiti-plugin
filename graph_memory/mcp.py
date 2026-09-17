@@ -13,7 +13,7 @@ from . import __version__
 VERSION = "2026-07-28"
 PREFIX = "io.modelcontextprotocol/"
 MAX_BODY = 4_000_000
-READ_ONLY = {"memory_recall", "memory_latest", "memory_render"}
+READ_ONLY = {"memory_recall", "memory_latest", "memory_render", "memory_evidence"}
 
 
 def error(request_id, code, message, data=None):

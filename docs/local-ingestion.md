@@ -10,7 +10,8 @@ VM hosting Docker on macOS. Three services are deployed:
 - `graph-memory-neo4j-1`: existing graph and Neo4j Browser.
 - `graph-memory-worker-1`: read-only bank scanner and twelve Terra/low consumers
   (retained after the 2026-09-17 comparison, fast mode off).
-- `graph-memory-mcp-1`: six public tools over HTTP.
+- `graph-memory-mcp-1`: seven public tools over HTTP, with
+  [compact recall and evidence on demand](compact-recall.md).
 
 Deployment configuration lives at
 `~/.local/share/graph-memory/deployment/compose.json`, outside the changing worktree.
