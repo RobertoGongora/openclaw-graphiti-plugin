@@ -211,3 +211,81 @@ def test_specific_question_does_not_fill_budget_with_loose_matches():
     )
     result = retrieve(data, question="statement timeout")
     assert [f["id"] for f in result["facts"]] == ["exact"]
+
+
+@pytest.mark.integration
+def test_entity_search_alias_partial_scope_and_fixed_history(graph):
+    store, ns = graph
+    canonical = {**PROJECT, "name": "Atlas Command Center", "aliases": ["Atlas", "AtlasCC"]}
+    base = {"target": MYSQL["key"], "relation": "uses_database", "valid_at": "2026-09-01T00:00:00Z"}
+    ingest(
+        store,
+        ns,
+        "atlas",
+        "Atlas uses MySQL.",
+        [canonical, MYSQL],
+        [{**base, "subject": canonical["key"]}],
+    )
+    checkpoint = Journal(store).verify(ns)["sequence"]
+    other = {**PROJECT, "key": "project:other-atlas", "name": "Atlas Client"}
+    ingest(
+        store,
+        ns,
+        "client",
+        "Atlas Client uses MySQL.",
+        [other, MYSQL],
+        [{**base, "subject": other["key"]}],
+    )
+
+    def search(query, **kw):
+        return v.search_entities(store, v.EntitySearch(namespace=ns, query=query, **kw))
+
+    assert search("ATLAScc")["matches"][0]["key"] == canonical["key"]
+    assert search("command atlas")["matches"][0]["match"] == "words"
+    assert search("atla")["total"] == 2
+    first, second = search("Atlas", limit=1), search("Atlas", limit=1, offset=1)
+    assert first["next_offset"] == 1 and second["next_offset"] is None
+    assert first["matches"][0]["key"] != second["matches"][0]["key"]
+    assert search("Atlas", at_change=checkpoint)["total"] == 1
+    assert search("Atlas", kind="person")["total"] == 0
+    assert (
+        v.search_entities(store, v.EntitySearch(namespace="unrelated", query="Atlas"))["total"] == 0
+    )
+    assert search("postgres")["matches"] == []
+    protocol = Protocol(MemoryService(store), ns, read_only=True)
+    message = rpc(
+        "tools/call",
+        name="memory_recall",
+        arguments={"entity": canonical["key"], "question": "database"},
+    )
+    before = deepcopy(message)
+    output = protocol.dispatch(message)[1]["result"]
+    assert not output["isError"] and output["structuredContent"]["facts"]
+    assert message == before
+    for name, args in [
+        ("memory_search_entities", {"query": "Atlas"}),
+        ("memory_evidence", {"fact_ids": ["missing"]}),
+    ]:
+        bad = rpc("tools/call", name=name, arguments={"namespace": "unrelated", **args})
+        assert protocol.dispatch(bad)[0] == 403
+
+
+@pytest.mark.integration
+def test_bound_remember_injects_nested_namespace_without_mutating_input(graph):
+    store, ns = graph
+    protocol = Protocol(MemoryService(store), ns)
+    arguments = {
+        "transcript": {
+            "session_id": "chat",
+            "source_id": "remember-scoped",
+            "messages": [{"id": "m1", "role": "user", "content": "Remember this preference."}],
+        }
+    }
+    message = rpc("tools/call", name="memory_ingest", arguments=arguments)
+    before = deepcopy(message)
+    result = protocol.dispatch(message)[1]["result"]
+    assert not result["isError"], result
+    assert result["structuredContent"]["namespace"] == ns
+    assert message == before
+    arguments["transcript"]["namespace"] = "wrong"
+    assert protocol.dispatch(message)[0] == 403

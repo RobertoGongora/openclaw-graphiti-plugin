@@ -4,7 +4,7 @@ import json
 import re
 from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import AwareDatetime, Field, model_validator
 
 from . import models as m
 from .store import normalized
@@ -15,8 +15,11 @@ STOP = set(
 )
 
 
-class RecallView(m.Recall):
-    query: m.Text = Field(description="Entity name or key, such as Atlas.")
+class RecallView(m.HistoricalScope):
+    entity: m.Text = Field(
+        description="Entity name or key, such as Atlas. Use memory_search_entities when the identity is unclear."
+    )
+    as_of: AwareDatetime | None = None
     question: m.Text | None = Field(
         default=None,
         description="Optional question about this entity, used to rank relevant facts.",
@@ -25,6 +28,25 @@ class RecallView(m.Recall):
     limit: Annotated[int, Field(ge=1, le=100)] = 5
     offset: Annotated[int, Field(ge=0, le=100_000)] = 0
     include_history: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def legacy_query(cls, value):
+        if isinstance(value, dict) and "query" in value:
+            if "entity" in value and value["entity"] != value["query"]:
+                raise ValueError("Use entity; legacy query must not select a different entity")
+            value = dict(value)
+            value.setdefault("entity", value.pop("query"))
+        return value
+
+
+class EntitySearch(m.HistoricalScope):
+    query: m.Text = Field(
+        description="Name, alias, or words identifying a person, project, or other entity."
+    )
+    kind: m.Kind | None = None
+    limit: Annotated[int, Field(ge=1, le=20)] = 5
+    offset: Annotated[int, Field(ge=0, le=100_000)] = 0
 
 
 class LatestView(m.Latest):
@@ -73,7 +95,7 @@ def metadata(raw):
 def recall(store, r):
     raw = store.recall(
         r.namespace,
-        r.query,
+        r.entity,
         r.as_of,
         r.limit,
         _complete=r.detail == "compact",
@@ -82,7 +104,7 @@ def recall(store, r):
     )
     if r.detail == "full":
         return raw
-    terms = tokens(r.question or "") - tokens(r.query)
+    terms = tokens(r.question or "") - tokens(r.entity)
     # Match across all evidence BEFORE hiding history. A question mentioning the old
     # database must also retrieve the replacement in the same exclusive role.
     scores = {}
@@ -144,7 +166,7 @@ def recall(store, r):
             )
     room = max(0, r.limit - len(facts))
     return {
-        "query": r.query,
+        "entity": r.entity,
         **({"question": r.question} if r.question else {}),
         "status": "ambiguous"
         if raw["ambiguous"]
@@ -291,4 +313,66 @@ def evidence(store, r):
         "missing_fact_ids": [fid for fid in wanted if fid not in found],
         "scope": "stored evidence; use recall/latest for current state",
         **({"knowledge_history": history} if history is not None else {}),
+    }
+
+
+def search_entities(store, r):
+    needle = normalized(r.query)
+    terms = sorted(tokens(r.query)) or [needle]
+    history = None
+    if r.known_at is not None or r.at_change is not None:
+        from .journal import Journal
+
+        snapshot = Journal(store).snapshot(r.namespace, known_at=r.known_at, sequence=r.at_change)
+        candidates = list(snapshot["state"]["MemoryEntity"].values())
+        history = {k: v for k, v in snapshot.items() if k != "state"}
+    else:
+        candidates = store.transaction(
+            lambda tx: tx.run(
+                "MATCH (e:MemoryEntity {namespace:$ns}) WHERE e.merged_into IS NULL "
+                "AND ($kind IS NULL OR e.kind=$kind) "
+                "AND (any(a IN e.aliases WHERE a CONTAINS $needle) "
+                "OR all(term IN $terms WHERE any(a IN e.aliases WHERE a CONTAINS term))) "
+                "RETURN properties(e) AS entity",
+                ns=r.namespace,
+                kind=r.kind.value if r.kind else None,
+                needle=needle,
+                terms=terms,
+            ).data()
+        )
+        candidates = [row["entity"] for row in candidates]
+    ranked = []
+    for e in candidates:
+        if e.get("merged_into") or (r.kind and e["kind"] != r.kind.value):
+            continue
+        aliases = [normalized(a) for a in [e["key"], e["name"], *e.get("aliases", [])]]
+        exact = needle in aliases
+        partial = any(needle in a for a in aliases)
+        all_terms = all(any(term in a for a in aliases) for term in terms)
+        if not (exact or partial or all_terms):
+            continue
+        match = "exact" if exact else "substring" if partial else "words"
+        score = 0 if normalized(e["key"]) == needle else 1 if exact else 2 if partial else 3
+        ranked.append(
+            (
+                score,
+                e["key"],
+                {
+                    "key": e["key"],
+                    "name": e["name"],
+                    "kind": e["kind"],
+                    "match": match,
+                    "aliases": list(dict.fromkeys(e.get("aliases", [])))[:5],
+                },
+            )
+        )
+    ranked.sort(key=lambda x: (x[0], x[1]))
+    rows = [row for _, _, row in ranked[r.offset : r.offset + r.limit]]
+    end = r.offset + len(rows)
+    return {
+        "query": r.query,
+        "matches": rows,
+        "total": len(ranked),
+        "next_offset": end if end < len(ranked) else None,
+        **({"knowledge_history": history} if history else {}),
     }

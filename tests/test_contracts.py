@@ -47,6 +47,7 @@ def test_mcp_stateless_discovery_metadata_headers_and_catalog():
         "memory_retract",
         "memory_render",
         "memory_evidence",
+        "memory_search_entities",
     }
     ingest_schema = next(t["inputSchema"] for t in result["tools"] if t["name"] == "memory_ingest")
     assert "extract" not in ingest_schema["properties"]
@@ -148,7 +149,13 @@ def test_retrieval_only_server_rejects_writes_before_dispatch():
     names = {t["name"] for t in protocol.dispatch(rpc())[1]["result"]["tools"]}
     assert "memory_recall" in names
     assert "memory_ingest" not in names
-    assert names == {"memory_recall", "memory_latest", "memory_render", "memory_evidence"}
+    assert names == {
+        "memory_recall",
+        "memory_latest",
+        "memory_render",
+        "memory_evidence",
+        "memory_search_entities",
+    }
     attempted = rpc(
         "tools/call",
         name="memory_retract",
@@ -179,3 +186,28 @@ def test_session_remember_queues_without_extraction_or_internal_next_tool(graph)
     assert result["available_for_recall"] is False
     assert "next_tool" not in result
     assert len(store.pending(ns)) == 1
+
+
+def test_bound_schema_hides_scope_and_advertises_entity_not_query():
+    bound = Protocol(MemoryService(None), namespace="personal")
+    catalog = {t["name"]: t["inputSchema"] for t in bound.dispatch(rpc())[1]["result"]["tools"]}
+    for schema in catalog.values():
+        assert "namespace" not in schema.get("properties", {})
+        assert "namespace" not in schema.get("required", [])
+    transcript = catalog["memory_ingest"]["$defs"]["Transcript"]
+    assert "namespace" not in transcript["properties"]
+    assert "namespace" not in transcript["required"]
+    assert "entity" in catalog["memory_recall"]["required"]
+    assert "query" not in catalog["memory_recall"]["properties"]
+    assert "query" in catalog["memory_search_entities"]["required"]
+    unbound = Protocol(MemoryService(None))
+    exposed = {t["name"]: t["inputSchema"] for t in unbound.dispatch(rpc())[1]["result"]["tools"]}
+    assert "namespace" in exposed["memory_recall"]["required"]
+
+
+def test_recall_legacy_query_is_accepted_but_conflicting_selectors_rejected():
+    from graph_memory.retrieval import RecallView
+
+    assert RecallView(namespace="test", query="Atlas").entity == "Atlas"
+    with pytest.raises(ValueError, match="different entity"):
+        RecallView(namespace="test", query="Atlas", entity="Core")

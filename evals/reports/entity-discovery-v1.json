@@ -1,0 +1,32 @@
+{
+  "kind": "interface-and-deployment-validation",
+  "checked_at": "2026-09-17T12:25:17.925045+00:00",
+  "engine": "c9f05164db3dbbd693f2060e002c9f8f374a430af644c07434373be4eceb748f",
+  "tests_passed": 98,
+  "smoke": [
+    {
+      "namespace": "personal",
+      "tools": 8,
+      "scope_hidden": true,
+      "search_then_recall_ok": true,
+      "evidence_without_scope_ok": true,
+      "legacy_arguments_ok": true,
+      "namespace_override_rejected": true
+    },
+    {
+      "namespace": "transcripts",
+      "tools": 8,
+      "scope_hidden": true,
+      "search_then_recall_ok": true,
+      "evidence_without_scope_ok": true,
+      "legacy_arguments_ok": true,
+      "namespace_override_rejected": true
+    }
+  ],
+  "worker_counts": {
+    "/graph-memory-worker-1": 2,
+    "/graph-memory-transcripts-worker-1": 12
+  },
+  "workers_unchanged_during_mcp_upgrade": true,
+  "initial_test_failure": "Neo4j run query argument collided with search parameter; renamed parameter to needle before deployment."
+}

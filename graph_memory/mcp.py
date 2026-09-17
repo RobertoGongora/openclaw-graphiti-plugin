@@ -13,7 +13,13 @@ from . import __version__
 VERSION = "2026-07-28"
 PREFIX = "io.modelcontextprotocol/"
 MAX_BODY = 4_000_000
-READ_ONLY = {"memory_recall", "memory_latest", "memory_render", "memory_evidence"}
+READ_ONLY = {
+    "memory_recall",
+    "memory_latest",
+    "memory_render",
+    "memory_evidence",
+    "memory_search_entities",
+}
 
 
 def error(request_id, code, message, data=None):
@@ -33,6 +39,25 @@ class Protocol:
     def __init__(self, service, namespace=None, read_only=False):
         self.service, self.namespace = service, namespace
         self.read_only = read_only
+
+    def input_schema(self, schema):
+        result = schema.model_json_schema()
+        if self.namespace is None:
+            return result
+
+        def hide_scope(node):
+            if isinstance(node, dict):
+                if "properties" in node and "namespace" in node["properties"]:
+                    node["properties"].pop("namespace")
+                    node["required"] = [k for k in node.get("required", []) if k != "namespace"]
+                for child in node.values():
+                    hide_scope(child)
+            elif isinstance(node, list):
+                for child in node:
+                    hide_scope(child)
+
+        hide_scope(result)
+        return result
 
     def dispatch(self, message, headers=None):
         if (
@@ -116,7 +141,7 @@ class Protocol:
                     {
                         "name": name,
                         "description": description,
-                        "inputSchema": schema.model_json_schema(),
+                        "inputSchema": self.input_schema(schema),
                         "annotations": {
                             "readOnlyHint": name in READ_ONLY,
                             "destructiveHint": name in ("memory_merge", "memory_retract"),
@@ -140,6 +165,16 @@ class Protocol:
                 return 403, error(request_id, -32602, "This server permits retrieval only")
             if not isinstance(arguments, dict):
                 return 400, error(request_id, -32602, "Tool arguments must be an object")
+            # A bound endpoint supplies its scope; explicit legacy arguments must
+            # still agree, so hiding the field never weakens authorization.
+            arguments = dict(arguments)
+            if self.namespace is not None:
+                if name == "memory_ingest":
+                    if isinstance(arguments.get("transcript"), dict):
+                        arguments["transcript"] = dict(arguments["transcript"])
+                        arguments["transcript"].setdefault("namespace", self.namespace)
+                else:
+                    arguments.setdefault("namespace", self.namespace)
             ns = arguments.get("namespace")
             if name == "memory_ingest" and isinstance(arguments.get("transcript"), dict):
                 ns = arguments["transcript"].get("namespace")

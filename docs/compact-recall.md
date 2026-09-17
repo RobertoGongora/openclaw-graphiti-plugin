@@ -5,10 +5,10 @@ store and CLI retain their complete temporal projections, so this change does
 not alter extraction, persisted facts, freshness decisions, or benchmark inputs.
 
 ```json
-{"namespace":"transcripts","query":"Atlas","question":"Which database does Atlas use?"}
+{"entity":"Atlas","question":"Which database does Atlas use?"}
 ```
 
-`query` identifies an entity by name/key. Optional `question` selects relevant
+`entity` identifies an entity by name/key. Optional `question` selects relevant
 facts within its graph. This follows Context7's subject-plus-question interface;
 it is deterministic lexical selection, not a second LLM generating an answer.
 It does not resolve arbitrary natural-language prompts into entity names.
@@ -41,6 +41,32 @@ This is the legacy entity projection: compact-only `question`, `offset` and
 is available on `memory_latest`. Latest retains ties/conflicts/uncertainty before
 applying its response limit; truncation cannot manufacture a single winner.
 
+## Find the right entity
+
+The connected MCP server supplies its configured namespace. Scoped tool schemas
+omit that field, including inside `memory_ingest.transcript`. Explicit legacy
+namespaces remain accepted only when they match the server scope; mismatches
+are rejected. Unbound administrative servers still require explicit namespaces.
+The `personal` and `transcripts` endpoints remain separate; no cross-graph search
+or automatic cutover is implied.
+
+Recall already matches names, aliases and substrings. When identity is unclear:
+
+```json
+{"query":"atlas","kind":"project"}
+```
+
+Call `memory_search_entities` with this input. It returns up to five matching
+names, kinds, aliases and stable keys, with pagination. Exact keys/names/aliases
+rank before substrings and matches covering all query words. This is lexical
+lookup, not typo correction or semantic similarity. It does not merge identities
+or silently choose between similarly named projects. Use the selected result's
+`key` as recall's `entity`. The same historical cutoff options are supported.
+
+Recall's old `query` parameter remains accepted for cached clients but is no
+longer advertised. New clients see `entity` plus optional `question`. Search keeps
+`query` because it searches for candidate entities instead of selecting one.
+
 ## Verify a fact
 
 `memory_evidence` has the intent description:
@@ -48,7 +74,7 @@ applying its response limit; truncation cannot manufacture a single winner.
 > Use when you need to verify a recalled fact or inspect the evidence behind it.
 
 ```json
-{"namespace":"transcripts","fact_ids":["ID_RETURNED_BY_RECALL"]}
+{"fact_ids":["ID_RETURNED_BY_RECALL"]}
 ```
 
 It accepts up to ten fact IDs, returns exact conversational quotes separately
@@ -59,7 +85,8 @@ that it remains current. Missing IDs/sources are explicit. IDs from another
 namespace are not returned. For historical recall, pass the same `known_at` or
 `at_change` to evidence retrieval.
 
-This adds a seventh public tool, also permitted by retrieval-only MCP servers.
+Evidence and entity search are also permitted by retrieval-only MCP servers.
+The public catalog now has eight tools.
 Clients with cached catalogs may need to reconnect. Tool results remain JSON in
 both the MCP text and structured-content representations.
 

@@ -20,7 +20,7 @@ def compare(cases):
         raw = case["raw"]
         legacy = {**raw, **{k: raw[k][:30] for k in LANES}}
         request = RecallView(
-            namespace="snapshot", query=case["query"], question=case.get("question")
+            namespace="snapshot", entity=case["query"], question=case.get("question")
         )
         store = SimpleNamespace(recall=lambda *args, raw=raw, **kwargs: raw)
         started = time.perf_counter()

@@ -357,6 +357,11 @@ class MemoryService:
                 lambda r: self.store.commit(r.namespace, r.episode_id, r.extraction),
                 "Validate typed relationships and exact source quotes, then atomically commit graph facts. Idempotent.",
             ),
+            "memory_search_entities": (
+                retrieval.EntitySearch,
+                lambda r: retrieval.search_entities(self.store, r),
+                "Use when you need to find a remembered person, project, or thing and are unsure of its name or identity.",
+            ),
             "memory_evidence": (
                 retrieval.EvidenceRequest,
                 lambda r: retrieval.evidence(self.store, r),
@@ -433,6 +438,7 @@ class MemoryService:
         names = {
             "memory_render",
             "memory_evidence",
+            "memory_search_entities",
             "memory_ingest",
             "memory_recall",
             "memory_latest",

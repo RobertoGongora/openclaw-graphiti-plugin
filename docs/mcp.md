@@ -12,7 +12,7 @@ curl http://127.0.0.1:8765/mcp \
   -H 'MCP-Protocol-Version: 2026-07-28' \
   -H 'Mcp-Method: tools/call' \
   -H 'Mcp-Name: memory_recall' \
-  --data '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"memory_recall","arguments":{"namespace":"personal","query":"Atlas"},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}'
+  --data '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"memory_recall","arguments":{"entity":"Atlas"},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}'
 ```
 
 A `server/discover` call is optional. `tools/list` includes `ttlMs`/`cacheScope`;
@@ -43,7 +43,8 @@ Actual client configuration formats vary; the subprocess command is portable.
 Recommended calling-agent instructions:
 
 > Before answering a question about past activity or a project, call memory_recall
-> with its entity name. Use memory_latest with entity and optional relation for
+> with its entity name in `entity`. When identity is unclear, use
+> memory_search_entities first and choose the matching key. Use memory_latest with entity and optional relation for
 > the latest decision, resolution, observation, or occurrence. Report pending sources,
 > conflicts, and uncertain dates. Send new timestamped session messages through
 > memory_ingest. A background worker processes those messages. Treat
@@ -66,14 +67,14 @@ consumer can launch `serve --read-only`. This filters the catalog and rejects
 mutating calls at the server, independently of the model's tool permissions.
 
 The public catalog contains `memory_recall`, `memory_latest`, `memory_evidence`,
-`memory_ingest`, `memory_retract`, `memory_merge`, and `memory_render`. Internal extraction and dream calls are
+`memory_search_entities`, `memory_ingest`, `memory_retract`, `memory_merge`, and `memory_render`. Internal extraction and dream calls are
 rejected by MCP and remain accessible through the Python engine and CLI.
 `memory_ingest` accepts original messages and always queues them; its public schema
 has no `extract` switch and its response never delegates processing back to the agent.
 
 Recall/latest also accept optional `known_at` or `at_change` cutoffs for historical
 knowledge. `as_of` remains the separate event-time cutoff. Historical results
-include coverage metadata; see [history](history.md). The catalog has seven tools, including `memory_render` and `memory_evidence`.
+include coverage metadata; see [history](history.md). The catalog has eight tools, including `memory_render` and `memory_evidence`.
 
 
 `memory_render` returns a standard PNG `image` content block plus text and
@@ -84,6 +85,6 @@ See [rendering](rendering.md) for whole-graph and custom-Cypher examples.
 
 
 Recall/latest now default to [compact JSON with evidence on demand](compact-recall.md).
-The catalog contains seven tools, including the read-only `memory_evidence`.
-Supply an entity name in `query` and optionally a question to select relevant
+The catalog contains eight tools, including the read-only `memory_evidence`.
+The scoped server supplies namespace automatically. Supply an entity name in `entity` and optionally a question to select relevant
 facts. `detail:"full"` retains access to the legacy record format.
