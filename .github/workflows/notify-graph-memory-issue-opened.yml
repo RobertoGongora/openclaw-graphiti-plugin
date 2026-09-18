@@ -1,0 +1,30 @@
+name: Notify graph-memory on issue opened
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  forward:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Forward to Cursor webhook
+        env:
+          WEBHOOK_URL: ${{ secrets.CURSOR_ISSUE_WEBHOOK_URL }}
+          WEBHOOK_KEY: ${{ secrets.CURSOR_ISSUE_WEBHOOK_KEY }}
+          PAYLOAD: ${{ toJson(github.event) }}
+        run: |
+          set -euo pipefail
+          if [ -z "${WEBHOOK_URL:-}" ] || [ -z "${WEBHOOK_KEY:-}" ]; then
+            echo "Missing CURSOR_ISSUE_WEBHOOK_URL or CURSOR_ISSUE_WEBHOOK_KEY repo secrets."
+            exit 1
+          fi
+          code=$(curl -sS -o /tmp/webhook-body.txt -w "%{http_code}" \
+            -X POST "$WEBHOOK_URL" \
+            -H "Authorization: Bearer ${WEBHOOK_KEY}" \
+            -H "Content-Type: application/json" \
+            -H "X-Automation-Key: ${WEBHOOK_KEY}" \
+            --data "$PAYLOAD")
+          echo "webhook HTTP $code"
+          cat /tmp/webhook-body.txt || true
+          test "$code" = "200"
