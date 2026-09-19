@@ -194,3 +194,32 @@ Private configuration backup and checks are under
 `~/.local/share/graph-memory/deployment/memory-fix-20260917T131645Z/`.
 This capacity adjustment does not establish full archive coverage or resolve
 extraction-quality failures.
+
+## Direct MCP writes and evidence
+
+`memory_ingest` queues new information. Direct submissions now use the
+`direct-mcp-v1` contract: without a verified source, their claims can only become
+`uncertain` facts with no asserted effective date. Caller-supplied roles,
+source-format labels, or URLs cannot certify a claim.
+
+The optional `sources` object maps submitted message IDs to stored
+`MemoryMessage` IDs. `memory_evidence` returns these as `source_message_id`.
+The server checks that the referenced message exists in the same namespace and
+that submitted text is an exact excerpt. It inherits the stored source's role,
+time, and tool outcome. A stored user assertion supports an attributed claim;
+it is not independent proof of real-world correctness. Assistant claims still
+need corroborating tool evidence, while tool results may validate claims but
+cannot originate them. Memory reads and writes remain context only.
+
+For example, `"sources": {"m1": "<source_message_id>"}` associates submitted
+message `m1` with that existing source. A source URL alone remains provenance,
+not validation. Existing imported episodes are not retroactively reclassified.
+
+Unvalidated direct claims use the existing `uncertain` lane. A future background
+review can inspect these alongside their episode payload and verified source
+references: confirm supported claims through a sourced write, retract disproved
+claims with a reason, or retain uncertainty when evidence is missing. An LLM's
+agreement alone must not promote a claim. The autonomous review queue and
+validation/promotion workflow are not implemented by this contract change;
+`uncertain` also contains other forms of uncertainty and is not a dedicated
+validation-status field.

@@ -88,7 +88,9 @@ excerpt is partial evidence, not a complete file version. Preserve unresolved am
 
 def extraction_instructions(transcript):
     return EXTRACTION_INSTRUCTIONS + (
-        "\n" + SOURCE_INSTRUCTIONS if transcript.source_format == "session-records-v1" else ""
+        "\n" + SOURCE_INSTRUCTIONS
+        if transcript.source_format in {"session-records-v1", "direct-mcp-v1"}
+        else ""
     )
 
 

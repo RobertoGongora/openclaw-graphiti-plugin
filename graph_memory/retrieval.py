@@ -273,13 +273,21 @@ def evidence(store, r):
             source["source_uri"] = payload.get("source_uri")
         messages = {msg["id"]: msg for msg in payload.get("messages", [])}
 
-        def quotes(field, f=f, messages=messages):
+        def quotes(field, f=f, messages=messages, payload=payload):
             output = []
             for quote in json.loads(f.get(field) or "[]"):
                 message = messages.get(quote["message_id"], {})
+                source_ref = payload.get("verified_source_refs", {}).get(quote["message_id"])
+                if payload.get("source_format") == "session-records-v1" and message:
+                    from .store import digest
+
+                    source_ref = digest(
+                        [payload["namespace"], payload["session_id"], quote["message_id"]]
+                    )
                 output.append(
                     {
                         **quote,
+                        "source_message_id": source_ref,
                         **{
                             k: message[k]
                             for k in (

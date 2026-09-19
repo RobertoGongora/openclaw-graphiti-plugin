@@ -112,6 +112,7 @@ class Transcript(Model):
     source_created_at: AwareDatetime | None = None
     source_updated_at: AwareDatetime | None = None
     source_format: str | None = None
+    verified_source_refs: dict[str, Key] = Field(default_factory=dict)
     title: Text | None = None
     focus_message_ids: list[Key] = Field(default_factory=list)
     messages: Annotated[list[Message], Field(min_length=1, max_length=500)]
@@ -232,7 +233,7 @@ class Extraction(Model):
                         "Evidence must quote an exact substring of its source message",
                         ["facts", fact_index, "evidence", evidence_index, "quote"],
                     )
-            if transcript.source_format == "session-records-v1":
+            if transcript.source_format in {"session-records-v1", "direct-mcp-v1"}:
                 cited = [messages[e.message_id] for e in fact.evidence]
                 claims = [
                     m for m in cited if m.source_type in {"user_assertion", "assistant_report"}
@@ -264,6 +265,10 @@ class Scope(Model):
 
 class Remember(Model):
     transcript: Transcript
+    sources: dict[Key, Key] = Field(
+        default_factory=dict,
+        description="Optional mapping from submitted message IDs to stored MemoryMessage IDs returned by memory_evidence. The server verifies exact content and inherits source roles/timestamps. Without a verified source, claims remain unvalidated; URLs alone do not validate them.",
+    )
 
 
 class Ingest(Remember):

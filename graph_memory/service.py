@@ -33,6 +33,12 @@ class MemoryService:
             "processing": "queued_for_worker",
         }
 
+    def remember(self, request: m.Remember):
+        from .direct_ingest import prepare
+
+        transcript = prepare(self.store, request)
+        return self.ingest(m.Ingest(transcript=transcript))
+
     def prepare(self, request: m.EpisodeRequest):
         episode = self.store.episode(request.namespace, request.episode_id)
         transcript = m.Transcript.model_validate_json(episode["payload"])
@@ -454,7 +460,7 @@ class MemoryService:
         catalog = {name: entry for name, entry in self.tools().items() if name in names}
         catalog["memory_ingest"] = (
             m.Remember,
-            lambda r: self.ingest(m.Ingest(transcript=r.transcript)),
+            self.remember,
             catalog["memory_ingest"][2],
         )
         for name, schema, handler in (
