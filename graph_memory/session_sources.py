@@ -324,11 +324,17 @@ def records(path: Path):
             if not content.strip():
                 content = "[Empty tool or source record]"
             for offset in range(0, len(content), CHUNK):
+                chunk = content[offset : offset + CHUNK]
+                # Validation strips whitespace. A boundary can leave an empty
+                # chunk even when the complete record contains useful text.
+                # Keep source offsets stable for subsequent chunks.
+                if not chunk.strip():
+                    continue
                 yield Message(
                     id=f"{record_id}-{offset}",
                     record_id=record_id,
                     role=role,
-                    content=content[offset : offset + CHUNK],
+                    content=chunk,
                     timestamp=item.get("timestamp"),
                     source_type=source_type,
                     call_id=call_id,

@@ -181,6 +181,26 @@ def test_record_chunks_preserve_all_content_and_partial_line(tmp_path):
     assert len({m.id for m in ms}) == 3
 
 
+@pytest.mark.parametrize(
+    "content, offsets",
+    [
+        ("x" * 24_000 + " ", [0]),
+        ("x" * 24_000 + " " * 24_000 + "y", [0, 48_000]),
+        (" \n\t", [0]),
+    ],
+)
+def test_whitespace_chunks_do_not_reject_tool_records(tmp_path, content, offsets):
+    p = tmp_path / "s.jsonl"
+    p.write_text(codex("function_call_output", call_id="call-1", output=content))
+    messages = list(records(p))
+    assert [m.id for m in messages] == [f"line-1-block-0-{n}" for n in offsets]
+    assert all(m.content.strip() for m in messages)
+    if content.strip():
+        assert "".join(m.content for m in messages) == content.replace(" ", "")
+    else:
+        assert messages[0].content == "[Empty tool or source record]"
+
+
 def test_feed_restart_append_rewrite_and_provenance_replay(graph, tmp_path):
     store, ns = graph
     service = MemoryService(store)
