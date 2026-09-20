@@ -109,9 +109,11 @@ def worker_tick(service, namespace, limit=10):
     due = service.store.transaction(
         lambda tx: tx.run(
             "MATCH (e:MemoryEpisode {namespace:$ns}) WHERE e.status <> 'complete' "
+            "AND coalesce(e.quarantine_engine,'') <> $engine "
             "AND coalesce(e.retry_after,0)<=$now AND coalesce(e.lease_until,0)<=$now "
             "RETURN e.id AS id ORDER BY e.ingested_at,e.id LIMIT $limit",
             ns=namespace,
+            engine=service.store.engine,
             now=time.time(),
             limit=limit,
         ).data()
@@ -125,9 +127,11 @@ def worker_tick(service, namespace, limit=10):
                 "MATCH (e:MemoryEpisode {namespace:$ns,id:$id}) "
                 "SET e.worker_lock=coalesce(e.worker_lock,0)+1 "
                 "WITH e WHERE e.status <> 'complete' AND coalesce(e.lease_until,0)<=$now "
+                "AND coalesce(e.quarantine_engine,'') <> $engine "
                 "AND coalesce(e.retry_after,0)<=$now "
                 "SET e.lease_until=$lease,e.worker=$token RETURN e.id AS id",
                 ns=namespace,
+                engine=service.store.engine,
                 id=eid,
                 now=time.time(),
                 lease=lease,
@@ -141,24 +145,48 @@ def worker_tick(service, namespace, limit=10):
                 service.extract(EpisodeRequest(namespace=namespace, episode_id=row["id"]))
             )
         except Exception as exc:
+            issue = getattr(exc, "memory_diagnostic", None) or diagnostic(exc)
+            validation_failure = issue["stage"] == "evidence_validation" or (
+                issue["stage"] == "model_output"
+                and issue["code"]
+                not in {"unclassified_error", "model_timeout", "model_invocation_failed"}
+            )
+            # Canonical identity conflicts, damaged checkpoints, and journal
+            # integrity errors require review; regenerating won't repair them.
+            review = issue["stage"] == "cached_validation" or issue["code"] in {
+                "ambiguous_identity",
+                "journal_state_mismatch",
+                "extraction_conflict",
+            }
             retry = service.store.transaction(
-                lambda tx, eid=row["id"], token=token: tx.run(
-                    "MATCH (e:MemoryEpisode {namespace:$ns,id:$id,worker:$token}) "
-                    "SET e.attempts=coalesce(e.attempts,0)+1,e.retry_after=$now+"
-                    "CASE WHEN coalesce(e.attempts,0)>5 THEN 3600 ELSE 60*(2^coalesce(e.attempts,0)) END "
-                    "RETURN e.attempts AS failed_attempts,e.retry_after AS retry_after",
-                    ns=namespace,
-                    id=eid,
-                    token=token,
-                    now=time.time(),
-                ).single()
+                lambda tx, eid=row["id"], token=token, validation_failure=validation_failure, review=review, issue=issue: (
+                    tx.run(
+                        "MATCH (e:MemoryEpisode {namespace:$ns,id:$id,worker:$token}) "
+                        "WITH e, CASE WHEN e.validation_engine=$engine THEN coalesce(e.validation_failures,0) ELSE 0 END AS prior "
+                        "SET e.validation_engine=$engine,e.validation_failures=prior+$validation "
+                        "SET e.quarantine_engine=CASE WHEN $review OR e.validation_failures>=3 THEN $engine ELSE null END,"
+                        "e.quarantine_reason=CASE WHEN $review OR e.validation_failures>=3 THEN $reason ELSE null END "
+                        "SET e.attempts=coalesce(e.attempts,0)+1,e.retry_after=$now+"
+                        "CASE WHEN coalesce(e.attempts,0)>5 THEN 3600 ELSE 60*(2^coalesce(e.attempts,0)) END "
+                        "RETURN e.attempts AS failed_attempts,e.retry_after AS retry_after,"
+                        "e.quarantine_engine IS NOT NULL AS quarantined,e.validation_failures AS validation_failures",
+                        ns=namespace,
+                        id=eid,
+                        token=token,
+                        now=time.time(),
+                        engine=service.store.engine,
+                        validation=int(validation_failure),
+                        review=review,
+                        reason=issue["code"],
+                    ).single()
+                )
             )
             receipts.append(
                 {
                     "episode_id": row["id"],
                     "status": "failed",
                     "error": type(exc).__name__,
-                    "diagnostic": getattr(exc, "memory_diagnostic", None) or diagnostic(exc),
+                    "diagnostic": issue,
                     **(dict(retry) if retry else {}),
                 }
             )

@@ -25,6 +25,13 @@ VOLATILE = {
     "attempts",
     "error",
     "retry_feedback",
+    "cached_extraction",
+    "cached_engine",
+    "cached_model",
+    "validation_failures",
+    "validation_engine",
+    "quarantine_engine",
+    "quarantine_reason",
 }
 
 

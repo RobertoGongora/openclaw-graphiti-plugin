@@ -121,7 +121,13 @@ def run_daemon(
                         error=receipt.get("error"),
                         **{
                             key: receipt[key]
-                            for key in ("diagnostic", "failed_attempts", "retry_after")
+                            for key in (
+                                "diagnostic",
+                                "failed_attempts",
+                                "retry_after",
+                                "quarantined",
+                                "validation_failures",
+                            )
                             if key in receipt
                         },
                     )

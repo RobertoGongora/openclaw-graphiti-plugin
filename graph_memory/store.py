@@ -34,6 +34,9 @@ class GraphStore:
         self.database = database
         self.engine = engine_fingerprint()
         self._journal_local = threading.local()
+        # Model work remains concurrent. Journal writes already serialize on the
+        # namespace; avoid making this process's transactions contend for it.
+        self._transaction_lock = threading.RLock()
 
     def close(self):
         self.driver.close()
@@ -50,9 +53,12 @@ class GraphStore:
 
     def transaction(self, fn, *args):
         # Leader routing matters: a different MCP process must not read a lagging follower.
-        with self.driver.session(
-            database=self.database, default_access_mode=WRITE_ACCESS
-        ) as session:
+        with (
+            self._transaction_lock,
+            self.driver.session(
+                database=self.database, default_access_mode=WRITE_ACCESS
+            ) as session,
+        ):
             return session.execute_write(fn, *args)
 
     def setup(self):
@@ -191,6 +197,42 @@ class GraphStore:
                 feedback=json.dumps(retry_feedback) if retry_feedback is not None else None,
             ).consume()
         )
+
+    def cache_extraction(self, namespace, episode_id, extraction, model_info):
+        """Persist validated model work independently of the canonical graph commit."""
+        self.transaction(
+            lambda tx: tx.run(
+                "MATCH (e:MemoryEpisode {id:$id,namespace:$ns}) WHERE e.status <> 'complete' "
+                "SET e.cached_extraction=$candidate,e.cached_engine=$engine,e.cached_model=$model",
+                id=episode_id,
+                ns=namespace,
+                candidate=extraction.model_dump_json(),
+                engine=self.engine,
+                model=json.dumps(model_info),
+            ).consume()
+        )
+
+    def retry_quarantined(self, namespace, episode_id):
+        """Explicit operator retry; preserve candidate and rejection evidence."""
+        self.assert_writable(namespace)
+        row = self.transaction(
+            lambda tx: tx.run(
+                "MATCH (e:MemoryEpisode {id:$id,namespace:$ns}) "
+                "SET e.worker_lock=coalesce(e.worker_lock,0)+1 "
+                "WITH e WHERE e.status <> 'complete' AND e.quarantine_engine IS NOT NULL "
+                "AND coalesce(e.lease_until,0)<=$now "
+                "SET e.quarantine_engine=null,e.quarantine_reason=null,"
+                "e.validation_failures=0,e.validation_engine=$engine,e.retry_after=0 "
+                "RETURN e.id AS episode_id",
+                id=episode_id,
+                ns=namespace,
+                now=now().timestamp(),
+                engine=self.engine,
+            ).single()
+        )
+        if not row:
+            raise ValueError("No idle quarantined episode found in namespace")
+        return {"episode_id": episode_id, "queued": True}
 
     @staticmethod
     def canonical(tx, namespace, entity):
@@ -376,6 +418,8 @@ class GraphStore:
                 fact_ids.append(fid)
             tx.run(
                 "MATCH (e:MemoryEpisode {id:$id}) SET e.status='complete',e.error=null,e.retry_feedback=null,"
+                "e.cached_extraction=null,e.cached_engine=null,e.cached_model=null,"
+                "e.quarantine_engine=null,e.quarantine_reason=null,"
                 "e.extraction_hash=$hash,e.extraction_payload=$extraction,e.engine=$engine,e.model_info=$model_info,e.completed_at=$at,e.fact_count=$count "
                 "WITH e MATCH (s:MemorySpace {id:$ns}) SET s.revision=s.revision+1",
                 id=episode_id,

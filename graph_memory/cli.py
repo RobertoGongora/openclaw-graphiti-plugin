@@ -68,6 +68,8 @@ def main():
     worker.add_argument("--limit", type=int, default=10)
     worker.add_argument("--watch", action="store_true")
     worker.add_argument("--interval", type=float, default=5)
+    retry = commands.add_parser("retry-quarantined", help="Explicitly retry one paused episode")
+    retry.add_argument("episode_id")
     daemon = commands.add_parser("daemon", help="Watch memory banks and process the queue")
     daemon.add_argument("paths", nargs="*", type=Path)
     daemon.add_argument("--transcripts", action="append", type=Path, default=[])
@@ -250,6 +252,8 @@ def main():
             )
             if result is None:
                 return
+        elif args.command == "retry-quarantined":
+            result = service.store.retry_quarantined(args.namespace, args.episode_id)
         elif args.command == "work":
             if service.llm is None:
                 parser.error("work requires MEMORY_LLM=codex or compatible")

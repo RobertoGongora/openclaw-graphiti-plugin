@@ -223,3 +223,35 @@ agreement alone must not promote a claim. The autonomous review queue and
 validation/promotion workflow are not implemented by this contract change;
 `uncertain` also contains other forms of uncertainty and is not a dedicated
 validation-status field.
+
+## Reducing repeated model work
+
+Validated extractions are checkpointed on the episode before graph commit.
+If a database commit fails after the driver's transaction retries, the next
+worker attempt reuses that checkpoint, including across process restarts. Reuse
+requires the same engine fingerprint and model/provider/effort settings; evidence
+is checked again, and entity identities are resolved against the current graph at
+commit time. Completed episodes discard the temporary checkpoint. A database
+outage before the checkpoint itself is saved can still lose that model work.
+
+After three failed validation runs for an engine version, an episode is paused
+for review. A run includes the existing bounded schema/evidence correction calls;
+three runs does not mean three individual CLI calls. Transient infrastructure
+errors retain backoff and do not consume the validation budget or erase rejection
+feedback. Identity conflicts, journal integrity errors, and damaged checkpoints
+pause immediately. Source-role validation errors now carry specific diagnostics
+and correction feedback instead of being classified as unknown failures.
+
+`memory_status.processing` reports `quarantined` and `cached_extractions`.
+Paused episodes remain failed/incomplete and count against coverage. They become
+eligible again after an engine change, or an operator can deliberately release
+one using `graph-memory --namespace transcripts retry-quarantined EPISODE_ID`.
+The existing backoff may still delay an engine-change retry. Historical failure
+totals are not assumed to be validation failures: the new counter starts with
+this release. No source, fact, or rejection evidence is removed by quarantine.
+
+Within each worker process, database transactions execute one at a time while
+LLM calls remain concurrent. The graph's namespace lock already serialized
+canonical writes; local serialization avoids contention among those same worker
+threads. Other processes still use Neo4j locking and transaction retries.
+Checkpoint and retry bookkeeping is excluded from the knowledge audit journal.

@@ -8,11 +8,20 @@ from .models import now
 
 # Processing is a lease, not an episode status. Match worker_tick's eligibility rules.
 ACTIVE = "e.status <> 'complete' AND coalesce(e.lease_until,0)>$now"
+ELIGIBLE = "coalesce(e.quarantine_engine,'') <> $engine"
 QUEUED = (
-    "e.status <> 'complete' AND coalesce(e.lease_until,0)<=$now AND coalesce(e.retry_after,0)<=$now"
+    (
+        "e.status <> 'complete' AND coalesce(e.lease_until,0)<=$now AND coalesce(e.retry_after,0)<=$now"
+    )
+    + " AND "
+    + ELIGIBLE
 )
 DELAYED = (
-    "e.status <> 'complete' AND coalesce(e.lease_until,0)<=$now AND coalesce(e.retry_after,0)>$now"
+    (
+        "e.status <> 'complete' AND coalesce(e.lease_until,0)<=$now AND coalesce(e.retry_after,0)>$now"
+    )
+    + " AND "
+    + ELIGIBLE
 )
 EPISODE = (
     "e {episode_id:e.id, .name, .source_id, .session_id, .status, .ingested_at, "
@@ -24,7 +33,7 @@ EPISODE = (
 def status(store, request):
     def read(tx):
         checked = now()
-        params = {"ns": request.namespace, "now": checked.timestamp()}
+        params = {"ns": request.namespace, "now": checked.timestamp(), "engine": store.engine}
         rows = tx.run(
             "MATCH (e:MemoryEpisode {namespace:$ns}) RETURN e.status AS status, count(*) AS count",
             **params,
@@ -37,6 +46,8 @@ def status(store, request):
                 f"sum(CASE WHEN {ACTIVE} THEN 1 ELSE 0 END) AS active, "
                 f"sum(CASE WHEN {QUEUED} THEN 1 ELSE 0 END) AS queued, "
                 f"sum(CASE WHEN {DELAYED} THEN 1 ELSE 0 END) AS retry_delayed, "
+                "sum(CASE WHEN e.status <> 'complete' AND e.quarantine_engine=$engine THEN 1 ELSE 0 END) AS quarantined, "
+                "sum(CASE WHEN e.status <> 'complete' AND e.cached_engine=$engine AND e.cached_extraction IS NOT NULL THEN 1 ELSE 0 END) AS cached_extractions, "
                 "sum(CASE WHEN e.status <> 'complete' AND e.lease_until>0 "
                 "AND e.lease_until<=$now THEN 1 ELSE 0 END) AS expired_leases",
                 **params,

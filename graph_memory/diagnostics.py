@@ -7,6 +7,8 @@ from pydantic import ValidationError
 # Exact engine-owned messages only. Pydantic's msg/input/ctx can contain private
 # model output, so arbitrary exception text must never reach the error stream.
 REASONS = {
+    "Facts must cite a conversational claim in evidence; tool outputs belong only in validation_evidence, and memory artifacts are context only": "invalid_claim_source",
+    "An unvalidated assistant claim requires status=uncertain and valid_at=null. To validate it, cite an exact corroborating tool-result quote in validation_evidence AND keep the assistant quote in evidence. Memory reads/writes cannot validate it.": "unvalidated_assistant_claim",
     "Evidence must quote an exact substring of its source message": "evidence_quote_mismatch",
     "A feed fact must cite at least one new focus message": "evidence_focus_missing",
     "Future facts must be planned, not active": "future_fact_active",

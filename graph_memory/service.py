@@ -62,6 +62,26 @@ class MemoryService:
         started, stage, attempt = time.monotonic(), "prepare", -1
         extraction = None
         try:
+            episode = self.store.episode(request.namespace, request.episode_id)
+            if episode["status"] == "complete":
+                return {"episode_id": request.episode_id, "status": "complete", "replayed": True}
+            model_info = {
+                "provider": type(self.llm).__name__,
+                "model": getattr(self.llm, "model", None),
+                "effort": getattr(self.llm, "effort", None),
+            }
+            if (
+                episode.get("cached_engine") == self.store.engine
+                and episode.get("cached_model") == json.dumps(model_info)
+                and episode.get("cached_extraction")
+            ):
+                stage = "cached_validation"
+                extraction = m.Extraction.model_validate_json(episode["cached_extraction"])
+                extraction.validate_evidence(m.Transcript.model_validate_json(episode["payload"]))
+                stage = "commit"
+                return self.store.commit(
+                    request.namespace, request.episode_id, extraction, model_info=model_info
+                )
             packet = self.prepare(request)
             if packet["status"] == "complete":
                 return {"episode_id": request.episode_id, "status": "complete", "replayed": True}
@@ -92,16 +112,16 @@ class MemoryService:
                         "validation_diagnostic": diagnostic(exc, stage),
                         "correction": "Correct exact quote/focus/time grounding against the original transcript. Do not invent evidence or change source text.",
                     }
+            stage = "checkpoint"
+            self.store.cache_extraction(
+                request.namespace, request.episode_id, extraction, model_info
+            )
             stage = "commit"
             return self.store.commit(
                 request.namespace,
                 request.episode_id,
                 extraction,
-                model_info={
-                    "provider": type(self.llm).__name__,
-                    "model": getattr(self.llm, "model", None),
-                    "effort": getattr(self.llm, "effort", None),
-                },
+                model_info=model_info,
             )
         except Exception as exc:
             exc.memory_diagnostic = {
