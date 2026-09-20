@@ -1,0 +1,51 @@
+{
+  "kind": "operational_baseline_not_quality_eval",
+  "checked_at": "2026-09-20T09:11:23.407587+00:00",
+  "namespace": "transcripts",
+  "commit": "03708fa5300813308d2fc4c24a8490b02977bf99",
+  "engine": "b588063f1eba2dc8a33ae38c793a9c69b5c243d65bc9d35f388ad69e6293acf8",
+  "deployment": {
+    "image": "graph-memory:retry-budget-v1",
+    "worker_started_at": "2026-09-20T09:06:13.647361776Z",
+    "restarts": 0,
+    "workers": 12,
+    "provider": "codex",
+    "model": "gpt-5.6-terra",
+    "effort": "low"
+  },
+  "episodes": {"total_staged": 4985, "complete": 4916, "pending": 6, "failed": 63},
+  "processing": {
+    "active_leases": 12,
+    "queued": 0,
+    "retry_delayed": 57,
+    "quarantined": 0,
+    "cached_extractions": 0,
+    "expired_leases": 0
+  },
+  "graph": {"entities": 1989, "facts": 2399},
+  "inventory": {
+    "finished_at": "2026-09-20T09:06:37.912026+00:00",
+    "files": 861,
+    "files_caught_up": 288,
+    "unstaged_chunks": 115655,
+    "unstaged_episodes": 14816,
+    "reported_gaps": 0
+  },
+  "rolling_windows_minutes": {
+    "15": {"completed": 2, "staged": 0},
+    "60": {"completed": 38, "staged": 38}
+  },
+  "latest_completed_at": "2026-09-20T08:58:07.238852+00:00",
+  "subscription_usage": {
+    "percent": 57,
+    "basis": "Earlier user report; not freshly measured and not attributable exclusively to ingestion"
+  },
+  "limitations": [
+    "Rolling windows span the old engine and deployment transition; they are not optimized-engine throughput.",
+    "No post-deployment completion observed at this baseline. Worker logs show scans, with no processed events yet.",
+    "Active leases do not establish current model work; retained leases can delay retries after restart.",
+    "Cached extraction count is current backlog, not cumulative cache hits or model calls saved.",
+    "Exact model-call, token and subscription consumption counters are not available in this snapshot.",
+    "Inventory is a separate snapshot and changes as new transcripts arrive."
+  ]
+}
