@@ -1,0 +1,100 @@
+{
+  "namespace": "transcripts",
+  "checked_at": "2026-09-20T12:25:41.282462+00:00",
+  "episodes": {
+    "total": 5122,
+    "by_status": {
+      "pending": 3,
+      "complete": 5109,
+      "failed": 10
+    }
+  },
+  "processing": {
+    "active": 3,
+    "queued": 0,
+    "retry_delayed": 8,
+    "quarantined": 2,
+    "cached_extractions": 2,
+    "expired_leases": 0,
+    "is_processing": true,
+    "active_episodes_truncated": false,
+    "basis": "Unexpired episode leases; worker liveness is not monitored. Expired leases overlap queued/retry_delayed counts."
+  },
+  "graph": {
+    "entities": 2266,
+    "facts": 2806
+  },
+  "source_inventory": {
+    "state": "available",
+    "started_at": "2026-09-20T12:24:52.610527+00:00",
+    "finished_at": "2026-09-20T12:25:18.810427+00:00",
+    "source_format": "session-records-v1",
+    "files": 861,
+    "files_counted": 861,
+    "files_with_unstaged": 562,
+    "files_caught_up": 299,
+    "unstaged_chunks": 114855,
+    "unstaged_episodes": 14710,
+    "gaps": {
+      "inaccessible_roots": 0,
+      "traversal_errors": 0,
+      "unreadable_files": 0,
+      "parse_errors": 0,
+      "prefix_mismatches": 0,
+      "changed_files": 0,
+      "partial_files": 0
+    },
+    "basis": "Mounted transcripts at scan time against cursors at scan start. Unstaged counts exclude unreadable, invalid, rewritten or changing files; incomplete trailing records are not counted. Active ingestion and new messages can change the backlog after this snapshot.",
+    "refresh_interval_seconds": 300.0,
+    "age_seconds": 22.5,
+    "stale": false
+  },
+  "coverage": "Episode counts cover saved work. source_inventory separately estimates unstaged mounted transcripts at its scan time, when available; inspect its gaps and staleness. Scanner/worker liveness and unmounted sources are unknown. Counts may change during the read.",
+  "engine": "d32c0aa606ab9532f3a6cccf4202b69d769c94b85a8dbbb69e48c201cee3f467",
+  "prompt_sha256": "16279a0f461d461dd20e64217feffddb3ec646fc87ba2f0cfc97d113760c4883",
+  "model": {
+    "provider": "CodexLLM",
+    "model": "gpt-5.6-terra",
+    "effort": "low"
+  },
+  "rolling_windows_minutes": {
+    "15": {
+      "completed": 28,
+      "staged": 24
+    },
+    "60": {
+      "completed": 109,
+      "staged": 44
+    }
+  },
+  "cumulative_episode_failed_attempts": 68462,
+  "latest_completed_at": "2026-09-20T12:25:28.708878+00:00",
+  "kind": "operational_baseline_not_quality_eval",
+  "commit": "ac36c0be05e6c935f2e55479cd1fdb2efb68eac9",
+  "deployment": {
+    "image": "graph-memory:source-policy-v4",
+    "image_id": "sha256:5056d354b1ee33efc0379f819378ecd1c32bd9db58b023554480ae5ef9452e31",
+    "started_at": "2026-09-20T12:25:13.627739874Z",
+    "restarts": 0,
+    "command": [
+      "daemon",
+      "--source-records",
+      "--transcripts",
+      "/sessions/claude",
+      "--transcripts",
+      "/sessions/codex",
+      "--workers",
+      "8"
+    ],
+    "workers": 8
+  },
+  "limitations": [
+    "Deployment authorized by user despite open semantic coverage and attribution findings; not an approved golden quality baseline.",
+    "Rolling windows include four-worker work and the deployment transition; not eight-worker throughput.",
+    "Active counts are unexpired leases, not confirmed model calls. Restart can retain leases.",
+    "Failed-attempt counter counts episode worker failures, not all internal model or validation retries.",
+    "Inventory is a separate scan snapshot; new sessions and ingestion can change totals.",
+    "No token or subscription consumption counters; compare completions, failure deltas and elapsed time on follow-up.",
+    "Concurrency-only change: same extraction policy, model and engine as the four-worker deployment."
+  ]
+}
