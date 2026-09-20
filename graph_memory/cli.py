@@ -57,7 +57,14 @@ def main():
         cutoffs.add_argument("--known-at")
         cutoffs.add_argument("--at-change", type=int)
     history = commands.add_parser("history", help="Inspect and replay the knowledge journal")
-    history.add_argument("action", choices=("init", "list", "snapshot", "replay", "verify"))
+    history.add_argument(
+        "action", choices=("init", "list", "snapshot", "replay", "verify", "checkpoint")
+    )
+    history.add_argument(
+        "--accept-live",
+        action="store_true",
+        help="checkpoint: record a graph that differs from its journal as the new truth",
+    )
     history.add_argument("--after", type=int, default=-1)
     history.add_argument("--limit", type=int, default=100)
     cutoffs = history.add_mutually_exclusive_group()
@@ -221,6 +228,8 @@ def main():
                 result = journal.initialize(args.namespace)
             elif args.action == "verify":
                 result = journal.verify(args.namespace)
+            elif args.action == "checkpoint":
+                result = journal.checkpoint(args.namespace, args.accept_live)
             elif args.action == "list":
                 result = {"changes": journal.events(args.namespace, args.after, args.limit)}
             elif args.action == "snapshot":

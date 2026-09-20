@@ -180,35 +180,41 @@ def run_daemon(
         pid=os.getpid(),
         workers=workers,
         engine=service.store.engine,
-        reclaimed_leases=reclaim_leases(service, namespace),
+        # A one-shot run may share the namespace with a live daemon; leave its leases.
+        reclaimed_leases=0 if once else reclaim_leases(service, namespace),
     )
     try:
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = []
-            while not stop.is_set():
-                result = scan_bank(service, namespace, roots, seen)
-                emit("bank_scan", **result)
-                if transcript_roots:
-                    try:
-                        began = time.monotonic()
-                        feeds = follow_once(
-                            service, namespace, transcript_roots, feed_seen, source_records
-                        )
-                        emit(
-                            "transcript_scan",
-                            feeds=feeds,
-                            seconds=round(time.monotonic() - began, 3),
-                        )
-                    except Exception as exc:
-                        emit("transcript_scan_error", error=type(exc).__name__)
-                if not futures:
-                    futures = [pool.submit(consume, i + 1) for i in range(workers)]
-                if once:
-                    for future in futures:
-                        future.result()
-                    return result
-                stop.wait(interval)
-            emit("draining", message="Finishing active jobs before exit")
+            # Workers loop until stop is set; an error here must release them or the
+            # pool never finishes and the process hangs instead of restarting.
+            try:
+                while not stop.is_set():
+                    result = scan_bank(service, namespace, roots, seen)
+                    emit("bank_scan", **result)
+                    if transcript_roots:
+                        try:
+                            began = time.monotonic()
+                            feeds = follow_once(
+                                service, namespace, transcript_roots, feed_seen, source_records
+                            )
+                            emit(
+                                "transcript_scan",
+                                feeds=feeds,
+                                seconds=round(time.monotonic() - began, 3),
+                            )
+                        except Exception as exc:
+                            emit("transcript_scan_error", error=type(exc).__name__)
+                    if not futures:
+                        futures = [pool.submit(consume, i + 1) for i in range(workers)]
+                    if once:
+                        for future in futures:
+                            future.result()
+                        return result
+                    stop.wait(interval)
+                emit("draining", message="Finishing active jobs before exit")
+            finally:
+                stop.set()
     except BaseException as exc:
         reason["exit"] = type(exc).__name__
         raise

@@ -86,12 +86,25 @@ def test_undeclared_scoped_write_is_caught_by_the_audit_and_by_verify(graph, mon
     # A full-capture write still refuses to build on an untracked change.
     with pytest.raises(ValueError, match="differs from its journal"):
         store.retract(ns, "missing", "reason")
+    journal = Journal(store)
+    with pytest.raises(ValueError, match="differs from its journal"):
+        journal.checkpoint(ns)
+    # Accepting the live graph is the explicit way forward; history stays readable.
+    before = journal.snapshot(ns)["sequence"]
+    accepted = journal.checkpoint(ns, accept_live=True)
+    assert accepted["accepted_untracked_state"] and accepted["sequence"] == before + 1
+    assert journal.verify(ns)["verified"]
+    assert ns + ":x" in journal.snapshot(ns)["state"]["MemoryEntity"]
+    assert ns + ":x" not in journal.snapshot(ns, sequence=before)["state"]["MemoryEntity"]
+    fact(store, ns, "after", target=PG, day=18)
+    assert journal.verify(ns)["verified"]
 
 
 def test_legacy_full_digest_journal_migrates_and_replays(graph):
     store, ns = graph
-    receipt, _, _ = fact(store, ns, "one")
+    receipt, transcript, _ = fact(store, ns, "one")
     journal = Journal(store)
+    legacy = {}
 
     def legacy_baseline(tx):
         tx.run("MATCH (e:MemoryChange {scope:$ns}) DETACH DELETE e", ns=ns).consume()
@@ -111,6 +124,7 @@ def test_legacy_full_digest_journal_migrates_and_replays(graph):
             "changes": [],
             "snapshot": state,
         }
+        legacy["hash"] = event["state_hash"]
         tx.run(
             "CREATE (e:MemoryChange {id:$id,namespace:$audit,scope:$ns,sequence:0,kind:'baseline',"
             "recorded_at:$at,recorded_us:1,payload:$payload,hash:$hash}) WITH e "
@@ -126,8 +140,14 @@ def test_legacy_full_digest_journal_migrates_and_replays(graph):
         ).consume()
 
     store.transaction(legacy_baseline)
-    fact(store, ns, "two", target=PG, day=12)  # migrates on a full capture
-    assert "journal_set_hash" in head(store, ns)
+    # A first write that changes nothing still migrates, and moves both head hashes
+    # together: a process on the older code then stops at its own state check
+    # instead of appending to a journal it no longer understands.
+    store.stage(transcript)
+    migrated = head(store, ns)
+    assert migrated["journal_sequence"] == 0
+    assert migrated["journal_set_hash"] == migrated["journal_state_hash"] != legacy["hash"]
+    fact(store, ns, "two", target=PG, day=12)
     store.retract(ns, receipt["fact_ids"][0], "superseded")
     fact(store, ns, "three", day=14)  # scoped from here on
     assert [e["kind"] for e in journal.events(ns)][0] == "baseline"
@@ -152,13 +172,18 @@ def test_no_periodic_snapshot_and_replay_past_one_hundred_events(graph):
     for i in range(101):
         store.retract(ns, receipt["fact_ids"][0], f"note {i}")
     journal = Journal(store)
+    assert journal.checkpoint(ns)["accepted_untracked_state"] is False
+    marked = journal.snapshot(ns)
+    fact(store, ns, "later", target=PG, day=19)
+    assert journal.snapshot(ns, sequence=marked["sequence"])["state"] == marked["state"]
+    assert journal.verify(ns)["verified"]
     flagged = store.transaction(
         lambda tx: tx.run(
             "MATCH (e:MemoryChange {scope:$ns}) WHERE e.checkpoint RETURN collect(e.sequence) AS s",
             ns=ns,
         ).single()["s"]
     )
-    assert flagged == [0]
+    assert sorted(flagged) == [0, marked["sequence"]]  # never periodic
     final = journal.snapshot(ns)
     assert final["sequence"] > 100
     assert final["state"] == store.transaction(lambda tx: capture(tx, ns))
@@ -234,11 +259,12 @@ def test_restart_reclaims_leases_and_reports_timings(graph, tmp_path, capsys):
     from graph_memory.feeds import worker_tick
 
     assert worker_tick(service, ns)["receipts"] == []  # orphaned until the lease expires
+    assert reclaim_leases(service, ns) == 1  # what a long-running daemon does at start
     run_daemon(service, ns, [tmp_path], workers=1, once=True)
     assert store.pending(ns) == []
     events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     by_name = {e["event"]: e for e in events}
-    assert by_name["daemon_start"]["reclaimed_leases"] == 1
+    assert by_name["daemon_start"]["reclaimed_leases"] == 0  # one-shot runs leave leases alone
     assert by_name["daemon_exit"]["reason"] == "once"
     processed = by_name["processed"]
     assert processed["model_calls"] == 1 and processed["cached"] is False
@@ -254,15 +280,62 @@ def session(path, text):
     return path
 
 
-def test_intake_survives_restart_without_reparsing_or_starving(graph, tmp_path, monkeypatch):
+def long_session(path, messages):
+    path.write_text("".join(claude("user", f"{path.stem} note {i}.") for i in range(messages)))
+    return path
+
+
+def names(fed):
+    return [f["source"].rsplit("/", 1)[-1] for f in fed]
+
+
+def drain_queue(store, ns):
+    store.transaction(
+        lambda tx: tx.run(
+            "MATCH (e:MemoryEpisode {namespace:$ns,status:'pending'}) SET e.status='failed'", ns=ns
+        ).consume()
+    )
+
+
+def test_scan_budget_rotation_and_queue_gate(graph, tmp_path):
+    store, ns = graph
+    service = MemoryService(store)
+    # 40 messages need five batches of eight: one scan cannot finish such a file.
+    for i in range(8):
+        long_session(tmp_path / f"{i:02d}.jsonl", 40)
+    (tmp_path / "gone.jsonl").symlink_to(tmp_path / "missing.jsonl")
+    seen = {}
+    first = follow_once(service, ns, [tmp_path, tmp_path], seen, source_records=True)
+    assert names(first) == ["00.jsonl", "01.jsonl", "02.jsonl", "03.jsonl"]
+    # The next scan resumes after the cursor instead of revisiting unfinished files.
+    second = follow_once(service, ns, [tmp_path, tmp_path], seen, source_records=True)
+    assert names(second) == ["04.jsonl", "05.jsonl", "06.jsonl", "07.jsonl"]
+    assert sum(len(f["receipts"]) for f in first + second) == 32
+    # A full queue leaves the remaining source on disk.
+    assert follow_once(service, ns, [tmp_path], seen, source_records=True) == []
+    drain_queue(store, ns)
+    third = follow_once(service, ns, [tmp_path], seen, source_records=True)
+    assert names(third) == ["00.jsonl", "01.jsonl", "02.jsonl", "03.jsonl"]
+    assert all(f["caught_up"] for f in third)
+
+
+def test_many_small_files_cannot_flood_the_queue(graph, tmp_path):
+    store, ns = graph
+    service = MemoryService(store)
+    for i in range(50):
+        session(tmp_path / f"{i:02d}.jsonl", f"Note number {i}.")
+    fed = follow_once(service, ns, [tmp_path], {}, source_records=True)
+    assert len(fed) == 4  # every file that stages work spends budget
+    assert len(store.pending(ns, limit=100)) == 4
+
+
+def test_intake_survives_restart_without_reparsing(graph, tmp_path, monkeypatch):
     store, ns = graph
     service = MemoryService(store)
     files = [session(tmp_path / f"{i:02d}.jsonl", f"Note number {i}.") for i in range(7)]
     seen = {}
-    staged = []
-    for _ in range(3):
-        staged += follow_once(service, ns, [tmp_path], seen, source_records=True)
-    assert len(staged) == 7  # four files per scan, resuming after the cursor
+    assert len(follow_once(service, ns, [tmp_path], seen, source_records=True)) == 4
+    assert len(follow_once(service, ns, [tmp_path], seen, source_records=True)) == 3
     parsed = []
     from graph_memory import session_sources
 
@@ -276,12 +349,12 @@ def test_intake_survives_restart_without_reparsing_or_starving(graph, tmp_path, 
     # A new process has no memory of what it fed; the graph does.
     assert follow_once(service, ns, [tmp_path], {}, source_records=True) == []
     assert parsed == []
-    with files[0].open("a") as handle:
+    with files[3].open("a") as handle:
         handle.write(claude("user", "A later note."))
     restarted = {}
     fed = follow_once(service, ns, [tmp_path], restarted, source_records=True)
-    assert parsed == ["00.jsonl"] and len(fed) == 1
-    assert restarted[CURSOR].endswith("00.jsonl")
+    assert parsed == ["03.jsonl"] and names(fed) == ["03.jsonl"]
+    assert restarted[CURSOR].endswith("03.jsonl")
 
 
 def test_already_fed_files_do_not_spend_the_scan_budget(graph, tmp_path):

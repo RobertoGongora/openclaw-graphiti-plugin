@@ -1,6 +1,5 @@
 """Append-only knowledge changes, historical reconstruction, and isolated replay."""
 
-import copy
 import json
 import os
 from collections import Counter
@@ -58,18 +57,23 @@ def capture(tx, namespace, ids=None):
     for label in LABELS:
         if ids is None:
             rows = tx.run(
-                f"MATCH (n:{label} {{namespace:$ns}}) RETURN properties(n) AS props", ns=namespace
+                f"MATCH (n:{label} {{namespace:$ns}}) "
+                "RETURN labels(n) AS labels,properties(n) AS props",
+                ns=namespace,
             )
         elif ids.get(label):
             rows = tx.run(
                 f"MATCH (n:{label}) WHERE n.id IN $ids AND n.namespace=$ns "
-                "RETURN properties(n) AS props",
+                "RETURN labels(n) AS labels,properties(n) AS props",
                 ids=sorted(ids[label]),
                 ns=namespace,
             )
         else:
             continue
         for row in rows:
+            # A node belongs to its first journaled label only.
+            if next(name for name in LABELS if name in row["labels"]) != label:
+                continue
             props = {k: v for k, v in row["props"].items() if k not in VOLATILE}
             # Operational retries/leases aren't changes to knowledge. A staged source
             # remains pending until a validated extraction commits.
@@ -79,6 +83,16 @@ def capture(tx, namespace, ids=None):
                 props["status"] = "pending"
             state[label][props["id"]] = props
     return state
+
+
+def audited(sequence):
+    """MEMORY_JOURNAL_AUDIT=1 checks every scoped write against the whole graph;
+    N>1 checks the writes whose sequence is a multiple of N."""
+    try:
+        every = int(os.environ.get("MEMORY_JOURNAL_AUDIT", "0"))
+    except ValueError:
+        return False
+    return every > 0 and sequence % every == 0
 
 
 class Scope:
@@ -218,7 +232,12 @@ class Journal:
         mismatch = (
             "Graph differs from its journal; investigate an untracked write before continuing"
         )
-        if scoped and "journal_sequence" in head and "journal_set_hash" in head:
+        migrated = (
+            "journal_sequence" in head
+            and "journal_set_hash" in head
+            and head["journal_state_hash"] == head["journal_set_hash"]
+        )
+        if scoped and migrated:
             scope = Scope(tx, namespace)
             scopes = self.store.journal_scopes()
             scopes[(id(tx), namespace)] = scope
@@ -233,8 +252,9 @@ class Journal:
             )
             if changes:
                 self._append(tx, namespace, kind, details, state_hash, changes)
-            # Untracked writes are found by verify(), not on every scoped write.
-            if os.environ.get("MEMORY_JOURNAL_AUDIT") and state_hash != hexhash(
+            # Untracked writes are found by verify() and sampled audits, not on
+            # every scoped write.
+            if audited(head["journal_sequence"] + 1) and state_hash != hexhash(
                 set_hash(capture(tx, namespace))
             ):
                 raise ValueError(mismatch)
@@ -242,14 +262,15 @@ class Journal:
         before = capture(tx, namespace)
         if "journal_sequence" not in head:
             self._baseline(tx, namespace, {}, before)
-        elif (
-            "journal_set_hash" not in head or head["journal_state_hash"] != head["journal_set_hash"]
-        ):
+        elif not migrated:
             # Journals written before the set hash carry a digest of the whole state.
+            # Both head hashes move together, so a process still running the older
+            # code stops on its own state check and cannot append to this journal.
             if digest(before) != head["journal_state_hash"]:
                 raise ValueError(mismatch)
             tx.run(
-                "MATCH (s:MemorySpace {id:$ns}) SET s.journal_set_hash=$hash",
+                "MATCH (s:MemorySpace {id:$ns}) "
+                "SET s.journal_set_hash=$hash,s.journal_state_hash=$hash",
                 ns=namespace,
                 hash=hexhash(set_hash(before)),
             ).consume()
@@ -379,7 +400,7 @@ class Journal:
         )
         if "snapshot" not in events[0]:
             raise ValueError("Journal checkpoint integrity check failed")
-        state = copy.deepcopy(events[0]["snapshot"])
+        state = events[0]["snapshot"]
         for label in LABELS:
             state.setdefault(label, {})
         expected = digest(state) if events[0].get("version", 1) < 2 else hexhash(set_hash(state))
@@ -412,6 +433,46 @@ class Journal:
             "coverage_started_at": coverage,
             "hash": digest(events[-1]),
         }
+
+    def checkpoint(self, namespace, accept_live=False):
+        """Embed the current state so historical reads replay from here.
+
+        Reads the whole namespace under its lock: a maintenance action. With
+        accept_live, a graph that no longer matches its journal is recorded as the
+        new truth, which is the only way forward after an untracked write."""
+
+        def run(tx):
+            self.store.lock(tx, namespace)
+            head = self._head(tx, namespace)
+            if "journal_sequence" not in head:
+                raise ValueError("No journal exists for this namespace")
+            state = capture(tx, namespace)
+            expected = head.get("journal_set_hash")
+            matches = (
+                hexhash(set_hash(state)) == expected
+                if expected == head["journal_state_hash"]
+                else digest(state) == head["journal_state_hash"]
+            )
+            if not matches and not accept_live:
+                raise ValueError(
+                    "Graph differs from its journal; investigate an untracked write before continuing"
+                )
+            event = self._append(
+                tx,
+                namespace,
+                "checkpoint",
+                {"accepted_untracked_state": not matches},
+                hexhash(set_hash(state)),
+                snapshot=state,
+            )
+            return {
+                "namespace": namespace,
+                "sequence": event["sequence"],
+                "records": sum(map(len, state.values())),
+                "accepted_untracked_state": not matches,
+            }
+
+        return self.store.transaction(run)
 
     def _head_or_none(self, tx, namespace):
         row = tx.run(

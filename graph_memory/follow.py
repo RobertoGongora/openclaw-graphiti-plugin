@@ -25,7 +25,7 @@ def seed_seen(service, namespace, seen):
 
 def follow_once(service, namespace, roots: list[Path], seen: dict, source_records=False):
     outputs = []
-    examined = 0
+    examined = queued = 0
     if source_records:
         queued = service.store.transaction(
             lambda tx: tx.run(
@@ -37,10 +37,11 @@ def follow_once(service, namespace, roots: list[Path], seen: dict, source_record
             return outputs  # Leave unread source on disk until the durable queue drains.
         if SEEDED not in seen:
             seed_seen(service, namespace, seen)
-    paths = []
+    paths = set()
     for root in roots:
-        found = [root] if root.is_file() else sorted(root.rglob("*.jsonl"))
-        paths.extend(str(path.resolve()) for path in found)
+        found = [root] if root.is_file() else root.rglob("*.jsonl")
+        paths.update(str(path.resolve()) for path in found)
+    paths = sorted(paths)
     # Resume after the last file examined: files that keep changing must not
     # spend every scan's budget ahead of the files behind them.
     cursor = seen.get(CURSOR)
@@ -49,11 +50,14 @@ def follow_once(service, namespace, roots: list[Path], seen: dict, source_record
     started = time.monotonic()
     for name in paths:
         path = Path(name)
-        stat = path.stat()
+        try:
+            stat = path.stat()
+        except OSError:
+            continue  # Removed since listing, or a dangling link; not worth a whole scan.
         version = (stat.st_mtime_ns, stat.st_size)
         if seen.get(name) == version:
             continue
-        if source_records and (examined >= 4 or time.monotonic() - started > 120):
+        if source_records and (examined >= 4 or queued >= 32 or time.monotonic() - started > 120):
             return outputs
         seen[CURSOR] = name
         try:
@@ -80,11 +84,12 @@ def follow_once(service, namespace, roots: list[Path], seen: dict, source_record
                             size=version[1],
                         ).consume()
                     )
-            else:
+            # Only confirming that a file is already fed is free, so a restart cannot
+            # starve the queue; any file that staged work or has more left is budgeted.
+            if result["receipts"] or not result.get("caught_up", True):
                 examined += 1
-            # Confirming a file is already fed costs no budget; only files with
-            # work left behind do, so a restart cannot starve the queue.
             if result["receipts"]:
+                queued += len(result["receipts"])
                 outputs.append({"source": name, **result})
     return outputs
 
