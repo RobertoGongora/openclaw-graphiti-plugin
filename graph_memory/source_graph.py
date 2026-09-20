@@ -11,11 +11,30 @@ def caption(text, limit=140):
     return " ".join(text.split())[:limit]
 
 
-def save(tx, transcript, episode_id):
+def artifact_id(ns, transcript, touch):
+    return digest(
+        [ns, "artifact", touch.path, None if touch.path.startswith("/") else transcript.session_id]
+    )
+
+
+def save(tx, transcript, episode_id, declare=None):
+    """declare(label, ids) names the nodes about to be written to a scoped journal."""
     if transcript.source_format != "session-records-v1":
         return
     ns = transcript.namespace
     sid = digest([ns, "session", transcript.session_id])
+    if declare:
+        declare("MemorySession", [sid])
+        declare("MemoryEpisode", [episode_id])
+        written = {"MemoryMessage": [], "MemoryArtifact": [], "MemoryArtifactObservation": []}
+        for m in transcript.messages:
+            mid = digest([ns, transcript.session_id, m.id])
+            written["MemoryMessage"].append(mid)
+            for index, t in enumerate(m.touches):
+                written["MemoryArtifact"].append(artifact_id(ns, transcript, t))
+                written["MemoryArtifactObservation"].append(digest([mid, index, t.model_dump()]))
+        for label, ids in written.items():
+            declare(label, ids)
     tx.run(
         "MERGE (s:MemorySession {id:$id}) ON CREATE SET s.namespace=$ns,s.name=$name,s.source_uri=$uri,s.session_id=$session",
         id=sid,
@@ -57,14 +76,7 @@ def save(tx, transcript, episode_id):
             "MERGE (m:MemoryMessage {id:$id}) ON CREATE SET m=$props", id=mid, props=props
         ).consume()
         for index, touch in enumerate(m.touches):
-            aid = digest(
-                [
-                    ns,
-                    "artifact",
-                    touch.path,
-                    None if touch.path.startswith("/") else transcript.session_id,
-                ]
-            )
+            aid = artifact_id(ns, transcript, touch)
             oid = digest([mid, index, touch.model_dump()])
             tx.run(
                 "MERGE (a:MemoryArtifact {id:$id}) ON CREATE SET a.namespace=$ns,a.name=$name,a.path=$path",

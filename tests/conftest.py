@@ -5,6 +5,9 @@ import pytest
 
 from graph_memory.store import GraphStore
 
+# Every scoped journal write is cross-checked against a full capture of the graph.
+os.environ.setdefault("MEMORY_JOURNAL_AUDIT", "1")
+
 
 @pytest.fixture
 def graph():

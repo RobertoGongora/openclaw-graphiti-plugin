@@ -100,7 +100,7 @@ class GraphStore:
 
         self.transaction(run)
 
-    def mutate(self, tx, namespace, kind, details, operation):
+    def mutate(self, tx, namespace, kind, details, operation, scoped=False):
         from .journal import Journal
 
         active = getattr(self._journal_local, "active", set())
@@ -110,9 +110,21 @@ class GraphStore:
         self._journal_local.active = active
         active.add(key)
         try:
-            return Journal(self).mutate(tx, namespace, kind, details, operation)
+            return Journal(self).mutate(tx, namespace, kind, details, operation, scoped)
         finally:
             active.remove(key)
+
+    def journal_scopes(self):
+        if not hasattr(self._journal_local, "scopes"):
+            self._journal_local.scopes = {}
+        return self._journal_local.scopes
+
+    def touch(self, tx, namespace, label, ids):
+        """Declare journaled nodes before writing them. Only a scoped journal
+        write listens; under a full capture this is a no-op."""
+        scope = self.journal_scopes().get((id(tx), namespace))
+        if scope:
+            scope.touch(label, ids)
 
     @staticmethod
     def lock(tx, namespace):
@@ -130,6 +142,7 @@ class GraphStore:
 
         def run(tx):
             self.lock(tx, transcript.namespace)
+            self.touch(tx, transcript.namespace, "MemoryEpisode", [episode_id])
             record = tx.run(
                 "MERGE (e:MemoryEpisode {id:$id}) ON CREATE SET e.namespace=$ns, "
                 "e.source_id=$source, e.session_id=$session, e.payload=$payload, "
@@ -151,12 +164,22 @@ class GraphStore:
             ).single()
             from .source_graph import save
 
-            save(tx, transcript, episode_id)
+            save(
+                tx,
+                transcript,
+                episode_id,
+                lambda label, ids: self.touch(tx, transcript.namespace, label, ids),
+            )
             return dict(record)
 
         def operation(tx):
             return self.mutate(
-                tx, transcript.namespace, "source_saved", {"episode_id": episode_id}, run
+                tx,
+                transcript.namespace,
+                "source_saved",
+                {"episode_id": episode_id},
+                run,
+                scoped=True,
             )
 
         return operation(transaction) if transaction is not None else self.transaction(operation)
@@ -235,7 +258,7 @@ class GraphStore:
         return {"episode_id": episode_id, "queued": True}
 
     @staticmethod
-    def canonical(tx, namespace, entity):
+    def canonical(tx, namespace, entity, touch=None):
         names = list(
             dict.fromkeys(normalized(n) for n in [entity.key, entity.name, *entity.aliases])
         )
@@ -263,6 +286,8 @@ class GraphStore:
             )
         key = rows[0]["e"]["key"] if rows else entity.key
         eid = rows[0]["e"]["id"] if rows else digest([namespace, entity.kind.value, key])
+        if touch:
+            touch("MemoryEntity", [eid])
         tx.run(
             "MERGE (e:MemoryEntity {id:$id}) ON CREATE SET e.namespace=$ns,e.kind=$kind,"
             "e.key=$key,e.name=$name,e.aliases=[] "
@@ -318,6 +343,11 @@ class GraphStore:
 
         def run(tx):
             self.lock(tx, namespace)
+
+            def touch(label, ids):
+                self.touch(tx, namespace, label, ids)
+
+            touch("MemoryEpisode", [episode_id])
             row = tx.run(
                 "MATCH (e:MemoryEpisode {id:$id,namespace:$ns}) RETURN properties(e) AS e",
                 id=episode_id,
@@ -334,7 +364,13 @@ class GraphStore:
                 return {"episode_id": episode_id, "status": "complete", "replayed": True}
             transcript = Transcript.model_validate_json(episode["payload"])
             extraction.validate_evidence(transcript)
-            identities = {e.key: self.canonical(tx, namespace, e) for e in extraction.entities}
+            identities = {
+                e.key: self.canonical(tx, namespace, e, touch) for e in extraction.entities
+            }
+            touch(
+                "MemoryFact",
+                [digest([episode_id, f.model_dump(mode="json")]) for f in extraction.facts],
+            )
             fact_ids = []
             for fact in extraction.facts:
                 raw = fact.model_dump(mode="json")
@@ -446,6 +482,7 @@ class GraphStore:
                 "facts_committed",
                 {"episode_id": episode_id, "model": model_info or {"provider": "caller"}},
                 run,
+                scoped=True,
             )
 
         return operation(transaction) if transaction is not None else self.transaction(operation)
