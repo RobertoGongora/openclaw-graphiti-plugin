@@ -1,0 +1,17 @@
+[
+  {
+    "id": "control-user-state-and-plan",
+    "payload": {"transcript": {"namespace":"eval:prompt-study", "source_id":"control-user", "session_id":"control-user", "source_format":"session-records-v1", "messages":[{"id":"u","role":"user","source_type":"user_assertion","timestamp":"2026-09-01T10:00:00Z","content":"Atlas currently uses MySQL in production. We plan to replace it with Postgres next month; Postgres is not deployed yet."}], "focus_message_ids":["u"]},"existing_entities":[],"existing_relationships":[]},
+    "expectations": {"concepts":["MySQL","Postgres"],"min_facts":2,"required_statuses":["active","planned"]}
+  },
+  {
+    "id": "control-supported-assistant",
+    "payload": {"transcript": {"namespace":"eval:prompt-study", "source_id":"control-supported", "session_id":"control-supported", "source_format":"session-records-v1", "messages":[{"id":"t","role":"tool","source_type":"tool_result","timestamp":"2026-09-01T10:00:00Z","tool_failed":false,"content":"Atlas production database: MySQL. Connection verified."},{"id":"a","role":"assistant","source_type":"assistant_report","timestamp":"2026-09-01T10:00:01Z","content":"Atlas currently uses MySQL in production."}],"focus_message_ids":["a"]},"existing_entities":[],"existing_relationships":[]},
+    "expectations": {"concepts":["MySQL"],"min_facts":1,"required_statuses":["active"],"require_validation":true}
+  },
+  {
+    "id": "control-tool-only",
+    "payload": {"transcript": {"namespace":"eval:prompt-study", "source_id":"control-tool-only", "session_id":"control-tool-only", "source_format":"session-records-v1", "messages":[{"id":"t","role":"tool","source_type":"tool_result","timestamp":"2026-09-01T10:00:00Z","tool_failed":false,"content":"Atlas production database: MySQL. Connection verified."}],"focus_message_ids":["t"]},"existing_entities":[],"existing_relationships":[]},
+    "expectations": {"concepts":[],"min_facts":0,"max_facts":0}
+  }
+]

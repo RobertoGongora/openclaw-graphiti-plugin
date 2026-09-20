@@ -131,7 +131,8 @@ def test_feedback_survives_worker_restart_and_clears_only_on_success(graph, fail
     assert "retry_feedback" not in json.dumps(Journal(store).events(ns))
 
 
-def test_schema_rejection_retains_final_candidate_and_error(monkeypatch):
+@pytest.mark.parametrize("max_attempts", [1, 2])
+def test_schema_rejection_retains_final_candidate_and_error(monkeypatch, max_attempts):
     raw = candidate().model_dump(mode="json")
     raw["entities"] = []  # Both relationship endpoints are undeclared.
     seen = []
@@ -145,8 +146,10 @@ def test_schema_rejection_retains_final_candidate_and_error(monkeypatch):
 
     monkeypatch.setattr("graph_memory.llm.subprocess.run", run)
     with pytest.raises(ValidationError) as caught:
-        CodexLLM().generate("Extract", {"transcript": "source"}, Extraction)
-    assert len(seen) == 2
+        CodexLLM(max_attempts=max_attempts).generate(
+            "Extract", {"transcript": "source"}, Extraction
+        )
+    assert len(seen) == max_attempts
     result = feedback(caught.value, "model_output", "engine")
     assert result["rejected_candidate"] == raw
     assert result["diagnostic"]["issues"][0]["code"] == "undeclared_endpoint"

@@ -55,6 +55,7 @@ project-language links from those facts. Omit trivia and output empty arrays if 
 Do not treat a memory-summary snapshot as live production verification.
 """
 
+
 SOURCE_INSTRUCTIONS = """For source_format=session-records-v1, source_type identifies evidence origin:
 - user_assertion is a user message, not proof that an external action executed.
   Quoted memories, pasted transcripts, assistant-citation blocks and examples inside it are
@@ -131,8 +132,11 @@ def strict_schema(schema: dict) -> dict:
 
 
 class CodexLLM:
-    def __init__(self, model="gpt-5.6-terra", effort="low", timeout=600):
+    def __init__(self, model="gpt-5.6-terra", effort="low", timeout=600, max_attempts=2):
+        if max_attempts not in (1, 2):
+            raise ValueError("max_attempts must be 1 or 2")
         self.model, self.effort, self.timeout = model, effort, timeout
+        self.max_attempts = max_attempts
 
     def generate(self, instructions: str, payload: dict, output: type[BaseModel]):
         # No shell interpolation. Isolated working directory, no persisted agent session,
@@ -167,7 +171,7 @@ class CodexLLM:
                 "-",
             ]
             prompt = instructions + "\nINPUT DATA:\n" + json.dumps(payload)
-            for attempt in range(2):
+            for attempt in range(self.max_attempts):
                 result.unlink(missing_ok=True)
                 try:
                     run = subprocess.run(
@@ -191,7 +195,7 @@ class CodexLLM:
                 try:
                     return output.model_validate_json(raw)
                 except ValidationError as exc:
-                    if attempt:
+                    if attempt + 1 == self.max_attempts:
                         exc.memory_rejected_candidate = raw
                         raise
                     issues = exc.errors(include_input=False, include_context=False)
