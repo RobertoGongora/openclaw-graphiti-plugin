@@ -62,6 +62,14 @@ class MemoryService:
         self.store.assert_writable(request.namespace)
         started, stage, attempt = time.monotonic(), "prepare", -1
         extraction = None
+        timings, mark = {}, [started]
+
+        def lap(name):
+            # Seconds per stage, summed over retries; lock waits count where they occur.
+            current = time.monotonic()
+            timings[name] = round(timings.get(name, 0) + current - mark[0], 3)
+            mark[0] = current
+
         try:
             episode = self.store.episode(request.namespace, request.episode_id)
             if episode["status"] == "complete":
@@ -79,31 +87,42 @@ class MemoryService:
                 stage = "cached_validation"
                 extraction = m.Extraction.model_validate_json(episode["cached_extraction"])
                 extraction.validate_evidence(m.Transcript.model_validate_json(episode["payload"]))
+                lap("prepare")
                 stage = "commit"
-                return self.store.commit(
+                receipt = self.store.commit(
                     request.namespace, request.episode_id, extraction, model_info=model_info
                 )
+                lap("commit")
+                return {**receipt, "timings": timings, "model_calls": 0, "cached": True}
             packet = self.prepare(request)
             if packet["status"] == "complete":
                 return {"episode_id": request.episode_id, "status": "complete", "replayed": True}
             if self.llm is None:
                 return {**packet, "status": "extraction_required"}
-            payload = extraction_payload({
-                "transcript": packet["transcript"],
-                "existing_entities": packet["existing_entities"],
-                "existing_relationships": packet["existing_relationships"],
-            })
+            payload = extraction_payload(
+                {
+                    "transcript": packet["transcript"],
+                    "existing_entities": packet["existing_entities"],
+                    "existing_relationships": packet["existing_relationships"],
+                }
+            )
             if packet.get("previous_rejection"):
                 payload["previous_rejection"] = packet["previous_rejection"]
+            lap("prepare")
             for attempt in range(2):
                 stage = "model_output"
                 extraction = None
-                extraction = self.llm.generate(packet["instructions"], payload, m.Extraction)
+                try:
+                    extraction = self.llm.generate(packet["instructions"], payload, m.Extraction)
+                finally:
+                    lap("model")
                 try:
                     stage = "evidence_validation"
                     extraction.validate_evidence(m.Transcript.model_validate(packet["transcript"]))
+                    lap("validation")
                     break
                 except ValueError as exc:
+                    lap("validation")
                     if attempt:
                         raise
                     payload = {
@@ -117,16 +136,20 @@ class MemoryService:
             self.store.cache_extraction(
                 request.namespace, request.episode_id, extraction, model_info
             )
+            lap("checkpoint")
             stage = "commit"
-            return self.store.commit(
+            receipt = self.store.commit(
                 request.namespace,
                 request.episode_id,
                 extraction,
                 model_info=model_info,
             )
+            lap("commit")
+            return {**receipt, "timings": timings, "model_calls": attempt + 1, "cached": False}
         except Exception as exc:
             exc.memory_diagnostic = {
                 **diagnostic(exc, stage),
+                "timings": timings,
                 "extraction_attempt": attempt + 1,
                 "duration_seconds": round(time.monotonic() - started, 3),
                 "engine": self.store.engine,

@@ -122,6 +122,7 @@ def worker_tick(service, namespace, limit=10):
     for row in due:
         lease = time.time() + max(900, getattr(service.llm, "timeout", 600) * 4 + 60)
         token = str(uuid.uuid4())
+        claiming = time.monotonic()
         claimed = service.store.transaction(
             lambda tx, eid=row["id"], lease=lease, token=token: tx.run(
                 "MATCH (e:MemoryEpisode {namespace:$ns,id:$id}) "
@@ -140,9 +141,13 @@ def worker_tick(service, namespace, limit=10):
         )
         if not claimed:
             continue
+        claim_seconds = round(time.monotonic() - claiming, 3)
         try:
             receipts.append(
-                service.extract(EpisodeRequest(namespace=namespace, episode_id=row["id"]))
+                {
+                    **service.extract(EpisodeRequest(namespace=namespace, episode_id=row["id"])),
+                    "claim_seconds": claim_seconds,
+                }
             )
         except Exception as exc:
             issue = getattr(exc, "memory_diagnostic", None) or diagnostic(exc)

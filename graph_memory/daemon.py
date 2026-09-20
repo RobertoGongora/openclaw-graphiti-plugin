@@ -1,8 +1,11 @@
 """Independent memory-bank scanner and durable queue consumers. No MCP caller needed."""
 
 import json
+import os
+import resource
 import signal
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -88,7 +91,23 @@ def scan_bank(service, namespace, roots: list[Path], seen: dict):
 
 
 def emit(event, **data):
-    print(json.dumps({"event": event, **data}), flush=True)
+    print(json.dumps({"event": event, "ts": round(time.time(), 3), **data}), flush=True)
+
+
+def reclaim_leases(service, namespace):
+    """Release leases left by a previous process; one daemon owns a namespace's queue.
+
+    Without this a restart leaves in-flight episodes unclaimable until their
+    lease (four model timeouts) expires."""
+    return service.store.transaction(
+        lambda tx: tx.run(
+            "MATCH (e:MemoryEpisode {namespace:$ns}) WHERE e.status <> 'complete' "
+            "AND coalesce(e.lease_until,0)>$now SET e.lease_until=0,e.worker=null "
+            "RETURN count(e) AS n",
+            ns=namespace,
+            now=time.time(),
+        ).single()["n"]
+    )
 
 
 def run_daemon(
@@ -122,6 +141,10 @@ def run_daemon(
                         **{
                             key: receipt[key]
                             for key in (
+                                "timings",
+                                "model_calls",
+                                "cached",
+                                "claim_seconds",
                                 "diagnostic",
                                 "failed_attempts",
                                 "retry_after",
@@ -143,10 +166,22 @@ def run_daemon(
                 return
             stop.wait(1)
 
-    previous = {}
+    previous, reason = {}, {"exit": "once" if once else "stopped"}
+
+    def handle(number, _frame):
+        reason["exit"] = signal.Signals(number).name
+        stop.set()
+
     if threading.current_thread() is threading.main_thread():
         for sig in (signal.SIGTERM, signal.SIGINT):
-            previous[sig] = signal.signal(sig, lambda *_: stop.set())
+            previous[sig] = signal.signal(sig, handle)
+    emit(
+        "daemon_start",
+        pid=os.getpid(),
+        workers=workers,
+        engine=service.store.engine,
+        reclaimed_leases=reclaim_leases(service, namespace),
+    )
     try:
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = []
@@ -155,10 +190,15 @@ def run_daemon(
                 emit("bank_scan", **result)
                 if transcript_roots:
                     try:
+                        began = time.monotonic()
                         feeds = follow_once(
                             service, namespace, transcript_roots, feed_seen, source_records
                         )
-                        emit("transcript_scan", feeds=feeds)
+                        emit(
+                            "transcript_scan",
+                            feeds=feeds,
+                            seconds=round(time.monotonic() - began, 3),
+                        )
                     except Exception as exc:
                         emit("transcript_scan_error", error=type(exc).__name__)
                 if not futures:
@@ -169,7 +209,16 @@ def run_daemon(
                     return result
                 stop.wait(interval)
             emit("draining", message="Finishing active jobs before exit")
+    except BaseException as exc:
+        reason["exit"] = type(exc).__name__
+        raise
     finally:
         stop.set()
+        # ru_maxrss is bytes on macOS and kilobytes on Linux.
+        emit(
+            "daemon_exit",
+            reason=reason["exit"],
+            max_rss=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+        )
         for sig, handler in previous.items():
             signal.signal(sig, handler)
