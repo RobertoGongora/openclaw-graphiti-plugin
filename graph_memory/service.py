@@ -7,6 +7,7 @@ import uuid
 from . import models as m
 from . import retrieval, status
 from .diagnostics import diagnostic
+from .extraction_policy import extraction_payload
 from .llm import DREAM_INSTRUCTIONS, extraction_instructions
 from .retry import feedback, restored_feedback
 from .version import engine_fingerprint
@@ -87,11 +88,11 @@ class MemoryService:
                 return {"episode_id": request.episode_id, "status": "complete", "replayed": True}
             if self.llm is None:
                 return {**packet, "status": "extraction_required"}
-            payload = {
+            payload = extraction_payload({
                 "transcript": packet["transcript"],
                 "existing_entities": packet["existing_entities"],
                 "existing_relationships": packet["existing_relationships"],
-            }
+            })
             if packet.get("previous_rejection"):
                 payload["previous_rejection"] = packet["previous_rejection"]
             for attempt in range(2):

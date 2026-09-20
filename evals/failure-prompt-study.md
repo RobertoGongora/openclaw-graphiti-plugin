@@ -48,18 +48,19 @@ view. Message IDs and metadata remain. Conversational claims, tool results, tool
 calls, and memory read/write context remain unchanged. This is an experimental
 input transformation, not deletion or reclassification of graph evidence.
 
-## Release decision: not deployed
+## Release decision: user-authorized deployment
 
 Contract success is not sufficient. The repeat still omitted a required timing
 diagnosis. Manual review also found an inferred actor and an extra precise count
-not explicit in their cited claims. These remain blocking semantic-quality
-findings in the v4 report. The production instruction selector and worker input
-path are unchanged; `graph_memory/extraction_policy.py` is an experimental
-candidate used only by this study. The optional `CodexLLM(max_attempts=1)` exists
+not explicit in their cited claims. These remain open semantic-quality
+findings in the v4 report. After reviewing these results, the user explicitly
+authorized deploying v4 and capturing an operational baseline. The production
+instruction selector and worker input now use `graph_memory/extraction_policy.py`
+for session-records-v1 and direct-mcp-v1; other source formats retain their policy. The optional `CodexLLM(max_attempts=1)` exists
 for measurement; production defaults remain two schema attempts.
 
 The next gate should test claim-level completeness and attribution explicitly,
-then use additional untouched failure episodes before rollout. This set is a
+then use additional untouched failure episodes to assess the deployed policy. This set is a
 regression seed, not an approved golden baseline. Do not weaken the validator,
 drop failed facts, or mark omitted episodes complete to improve the score.
 

@@ -88,11 +88,11 @@ excerpt is partial evidence, not a complete file version. Preserve unresolved am
 
 
 def extraction_instructions(transcript):
-    return EXTRACTION_INSTRUCTIONS + (
-        "\n" + SOURCE_INSTRUCTIONS
-        if transcript.source_format in {"session-records-v1", "direct-mcp-v1"}
-        else ""
-    )
+    from .extraction_policy import source_instructions
+
+    if transcript.source_format in {"session-records-v1", "direct-mcp-v1"}:
+        return source_instructions(EXTRACTION_INSTRUCTIONS)
+    return EXTRACTION_INSTRUCTIONS
 
 
 DREAM_INSTRUCTIONS = """Reflect on this graph snapshot and the supplied past session transcripts.

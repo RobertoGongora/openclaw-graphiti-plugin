@@ -70,12 +70,20 @@ def test_reduced_view_and_committed_fact_keep_original_evidence(graph):
     )
     eid = store.stage(transcript)["episode_id"]
 
-    view = extraction_payload({"transcript": transcript.model_dump(mode="json")})
-    assert view["transcript"]["messages"][1]["content"].startswith("[Context text omitted")
     result = candidate()
     result.facts[0].status = "uncertain"
     result.facts[0].valid_at = None
     result.validate_evidence(transcript)
-    assert store.commit(ns, eid, result)["status"] == "complete"
+    from graph_memory.service import MemoryService
+    from graph_memory.models import EpisodeRequest
+    from hashlib import sha256
+
+    class Model:
+        def generate(self, instructions, payload, schema):
+            assert sha256(instructions.encode()).hexdigest() == "16279a0f461d461dd20e64217feffddb3ec646fc87ba2f0cfc97d113760c4883"
+            assert payload["transcript"]["messages"][1]["content"].startswith("[Context text omitted")
+            return result
+
+    assert MemoryService(store, Model()).extract(EpisodeRequest(namespace=ns, episode_id=eid))["status"] == "complete"
     saved = json.loads(store.episode(ns, eid)["payload"])
     assert saved["messages"][1]["content"] == "Opaque original tool output: Postgres"
