@@ -6,6 +6,7 @@ from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, Field, model_validator
 
+from . import aliases
 from . import models as m
 from .store import normalized
 
@@ -333,30 +334,37 @@ def search_entities(store, r):
 
         snapshot = Journal(store).snapshot(r.namespace, known_at=r.known_at, sequence=r.at_change)
         candidates = list(snapshot["state"]["MemoryEntity"].values())
+        paged = None
         history = {k: v for k, v in snapshot.items() if k != "state"}
     else:
-        candidates = store.transaction(
-            lambda tx: tx.run(
+        kind = r.kind.value if r.kind else None
+
+        def find(tx):
+            if aliases.indexed(tx, r.namespace):
+                return aliases.search(tx, r.namespace, needle, terms, kind, r.offset, r.limit)
+            rows = tx.run(
                 "MATCH (e:MemoryEntity {namespace:$ns}) WHERE e.merged_into IS NULL "
                 "AND ($kind IS NULL OR e.kind=$kind) "
                 "AND (any(a IN e.aliases WHERE a CONTAINS $needle) "
                 "OR all(term IN $terms WHERE any(a IN e.aliases WHERE a CONTAINS term))) "
                 "RETURN properties(e) AS entity",
                 ns=r.namespace,
-                kind=r.kind.value if r.kind else None,
+                kind=kind,
                 needle=needle,
                 terms=terms,
             ).data()
-        )
-        candidates = [row["entity"] for row in candidates]
+            return None, [row["entity"] for row in rows]
+
+        # With alias nodes the database ranks and pages; the list scan returns everything.
+        paged, candidates = store.read(find)
     ranked = []
     for e in candidates:
         if e.get("merged_into") or (r.kind and e["kind"] != r.kind.value):
             continue
-        aliases = [normalized(a) for a in [e["key"], e["name"], *e.get("aliases", [])]]
-        exact = needle in aliases
-        partial = any(needle in a for a in aliases)
-        all_terms = all(any(term in a for a in aliases) for term in terms)
+        names = [normalized(a) for a in [e["key"], e["name"], *e.get("aliases", [])]]
+        exact = needle in names
+        partial = any(needle in a for a in names)
+        all_terms = all(any(term in a for a in names) for term in terms)
         if not (exact or partial or all_terms):
             continue
         match = "exact" if exact else "substring" if partial else "words"
@@ -375,12 +383,14 @@ def search_entities(store, r):
             )
         )
     ranked.sort(key=lambda x: (x[0], x[1]))
-    rows = [row for _, _, row in ranked[r.offset : r.offset + r.limit]]
+    total = len(ranked) if paged is None else paged
+    window = ranked[r.offset : r.offset + r.limit] if paged is None else ranked
+    rows = [row for _, _, row in window]
     end = r.offset + len(rows)
     return {
         "query": r.query,
         "matches": rows,
-        "total": len(ranked),
-        "next_offset": end if end < len(ranked) else None,
+        "total": total,
+        "next_offset": end if end < total else None,
         **({"knowledge_history": history} if history else {}),
     }

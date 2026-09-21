@@ -93,6 +93,7 @@ class GraphStore:
                 "MemoryMessage",
                 "MemoryArtifact",
                 "MemoryArtifactObservation",
+                "MemoryAlias",
             ):
                 tx.run(
                     f"CREATE CONSTRAINT {label.lower()}_id IF NOT EXISTS FOR (n:{label}) REQUIRE n.id IS UNIQUE"
@@ -112,6 +113,16 @@ class GraphStore:
             ).consume()
             tx.run(
                 "CREATE INDEX memory_observation_message IF NOT EXISTS FOR (n:MemoryArtifactObservation) ON (n.message_ref)"
+            ).consume()
+            # A list property cannot be indexed; aliases.py mirrors each name as a node.
+            tx.run(
+                "CREATE INDEX memory_alias_text IF NOT EXISTS FOR (n:MemoryAlias) ON (n.namespace,n.text)"
+            ).consume()
+            tx.run(
+                "CREATE INDEX memory_alias_loose IF NOT EXISTS FOR (n:MemoryAlias) ON (n.namespace,n.loose)"
+            ).consume()
+            tx.run(
+                "CREATE TEXT INDEX memory_alias_contains IF NOT EXISTS FOR (n:MemoryAlias) ON (n.text)"
             ).consume()
             for field in ("subject_id", "target_id", "episode_id"):
                 tx.run(
@@ -284,18 +295,23 @@ class GraphStore:
 
     @staticmethod
     def canonical(tx, namespace, entity, touch=None):
+        from . import aliases
+
         names = list(
             dict.fromkeys(normalized(n) for n in [entity.key, entity.name, *entity.aliases])
         )
         match_names = [normalized(entity.key)] if entity.kind.value == "event" else names
-        rows = tx.run(
-            "MATCH (e:MemoryEntity {namespace:$ns,kind:$kind}) "
-            "WHERE any(a IN $names WHERE a IN e.aliases) AND e.merged_into IS NULL "
-            "RETURN properties(e) AS e",
-            ns=namespace,
-            kind=entity.kind.value,
-            names=match_names,
-        ).data()
+        if aliases.claim(tx, namespace):
+            rows = aliases.resolve(tx, namespace, entity.kind.value, match_names)
+        else:
+            rows = tx.run(
+                "MATCH (e:MemoryEntity {namespace:$ns,kind:$kind}) "
+                "WHERE any(a IN $names WHERE a IN e.aliases) AND e.merged_into IS NULL "
+                "RETURN properties(e) AS e",
+                ns=namespace,
+                kind=entity.kind.value,
+                names=match_names,
+            ).data()
         exact = [r for r in rows if normalized(r["e"]["key"]) == normalized(entity.key)]
         if exact:
             rows = exact
@@ -303,8 +319,8 @@ class GraphStore:
             # A common display name cannot collapse distinct scoped identities.
             # Existing keys are supplied to extractors; intentional aliases/merges
             # remain explicit. Different qualified owners/projects stay separate.
-            aliases = {normalized(a) for a in entity.aliases}
-            rows = [r for r in rows if normalized(r["e"]["key"]) in aliases]
+            given = {normalized(a) for a in entity.aliases}
+            rows = [r for r in rows if normalized(r["e"]["key"]) in given]
         if len(rows) > 1:
             raise ValueError(
                 f"Ambiguous identity for {entity.key}; merge or disambiguate explicitly"
@@ -336,24 +352,31 @@ class GraphStore:
             name=entity.name,
             names=names,
         ).consume()
+        aliases.link(tx, namespace, aliases.rows(namespace, entity.kind.value, eid, names))
         return eid, key
 
     def extraction_context(self, namespace, transcript):
+        from . import aliases
+
         content = normalized("\n".join(m.content for m in transcript.messages))
         return self.read(
-            lambda tx: tx.run(
-                "MATCH (e:MemoryEntity {namespace:$ns}) WHERE e.merged_into IS NULL "
-                "AND any(a IN e.aliases WHERE size(a)>=3 AND $content CONTAINS a) "
-                # When more than 200 match, the longest matching names are the least likely
-                # to be accidental substrings; alphabetical order kept an arbitrary set.
-                "WITH e,reduce(best=0,a IN e.aliases | CASE WHEN size(a)>=3 AND size(a)>best "
-                "AND $content CONTAINS a THEN size(a) ELSE best END) AS specificity "
-                "ORDER BY specificity DESC,e.key LIMIT 200 "
-                "RETURN e.key AS key,e.kind AS kind,e.name AS name,e.aliases AS aliases "
-                "ORDER BY key",
-                ns=namespace,
-                content=content,
-            ).data()
+            lambda tx: (
+                aliases.mentioned(tx, namespace, content)
+                if aliases.indexed(tx, namespace)
+                else tx.run(
+                    "MATCH (e:MemoryEntity {namespace:$ns}) WHERE e.merged_into IS NULL "
+                    "AND any(a IN e.aliases WHERE size(a)>=3 AND $content CONTAINS a) "
+                    # When more than 200 match, the longest matching names are the least likely
+                    # to be accidental substrings; alphabetical order kept an arbitrary set.
+                    "WITH e,reduce(best=0,a IN e.aliases | CASE WHEN size(a)>=3 AND size(a)>best "
+                    "AND $content CONTAINS a THEN size(a) ELSE best END) AS specificity "
+                    "ORDER BY specificity DESC,e.key LIMIT 200 "
+                    "RETURN e.key AS key,e.kind AS kind,e.name AS name,e.aliases AS aliases "
+                    "ORDER BY key",
+                    ns=namespace,
+                    content=content,
+                ).data()
+            )
         )
 
     def relationship_context(self, namespace, entities):
@@ -578,20 +601,27 @@ class GraphStore:
                 sequence=at_change,
                 complete=_complete,
             )
+        from . import aliases
+
         at = as_of or now()
         needle = normalized(query)
 
         def run(tx):
             space = tx.run("MATCH (s:MemorySpace {id:$ns}) RETURN s.revision AS r", ns=namespace)
             revision = (space.single() or {"r": 0})["r"]
-            candidates = tx.run(
-                "MATCH (e:MemoryEntity {namespace:$ns}) WHERE e.merged_into IS NULL "
-                "AND (any(a IN e.aliases WHERE a CONTAINS $q) OR e.key=$q) "
-                "RETURN properties(e) AS entity "
-                "ORDER BY CASE WHEN $q IN e.aliases THEN 0 ELSE 1 END,e.key LIMIT 21",
-                ns=namespace,
-                q=needle,
-            ).data()
+            candidates = (
+                # No `e.key=$q` arm: canonical puts every normalized key among the names.
+                aliases.containing(tx, namespace, needle, 21)
+                if aliases.indexed(tx, namespace)
+                else tx.run(
+                    "MATCH (e:MemoryEntity {namespace:$ns}) WHERE e.merged_into IS NULL "
+                    "AND (any(a IN e.aliases WHERE a CONTAINS $q) OR e.key=$q) "
+                    "RETURN properties(e) AS entity "
+                    "ORDER BY CASE WHEN $q IN e.aliases THEN 0 ELSE 1 END,e.key LIMIT 21",
+                    ns=namespace,
+                    q=needle,
+                ).data()
+            )
             exact = [r for r in candidates if needle in r["entity"]["aliases"]]
             selected = exact or candidates
             ids = [r["entity"]["id"] for r in selected]
@@ -797,6 +827,8 @@ class GraphStore:
         )
 
     def merge(self, namespace, source_key, target_key, reason):
+        from . import aliases
+
         if source_key == target_key:
             raise ValueError("Cannot merge an entity into itself")
 
@@ -844,6 +876,7 @@ class GraphStore:
                 t=t["id"],
                 reason=reason,
             ).consume()
+            aliases.repoint(tx, namespace, s, t)
             tx.run(
                 # By property, the durable record: a fact whose edge went missing
                 # must move too, or it stays on the entity that no longer exists.
@@ -879,6 +912,8 @@ class GraphStore:
         )
 
     def repair(self, namespace, transaction=None):
+        from . import aliases
+
         def run(tx):
             self.lock(tx, namespace)
             from .source_graph import repair
@@ -910,4 +945,11 @@ class GraphStore:
                 "temporal_projection": "recomputed on every read",
             }
 
-        return run(transaction) if transaction is not None else self.transaction(run)
+        if transaction is not None:
+            result = run(transaction)
+            aliases.rebuild(transaction, namespace)
+            return result
+        result = self.transaction(run)
+        # Derived and outside the journal, so it may commit in its own batches.
+        aliases.rebuild(self, namespace)
+        return result
