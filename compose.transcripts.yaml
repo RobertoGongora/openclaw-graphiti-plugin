@@ -117,6 +117,7 @@ services:
       MEMORY_LLM_TIMEOUT: ${MEMORY_LLM_TIMEOUT:-420}
       MEMORY_INTAKE_QUEUE: ${MEMORY_INTAKE_QUEUE:-32}
       MEMORY_INTAKE_FILES: ${MEMORY_INTAKE_FILES:-4}
+      MEMORY_FEED_ACCEPT_UNMATCHED: ${MEMORY_FEED_ACCEPT_UNMATCHED:-}
       MEMORY_JOURNAL_AUDIT: ${MEMORY_JOURNAL_AUDIT:-503}
     command: [daemon, --source-records, --transcripts, /sessions/claude, --transcripts, /sessions/codex, --workers, '${TRANSCRIPT_WORKERS:-8}']
     volumes:

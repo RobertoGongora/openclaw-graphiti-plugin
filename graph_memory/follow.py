@@ -30,7 +30,7 @@ def seed_seen(service, namespace, roots, files, seen):
             **feeds.blocked,
             "action": "Older feeds are stored under paths outside these roots, so their "
             "files would be fed again as new. Stamp them with the roots they were written "
-            "under (feed_identity.stamp_existing, LABEL=STORED_PREFIX), or set "
+            "under (graph-memory feeds stamp --root LABEL=STORED_PREFIX), or set "
             "MEMORY_FEED_ACCEPT_UNMATCHED=1 to feed regardless.",
         }
     feeds.rekey(service.store, files)

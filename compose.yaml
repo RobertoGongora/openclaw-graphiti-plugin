@@ -109,6 +109,7 @@ services:
       MEMORY_LLM_TIMEOUT: ${MEMORY_LLM_TIMEOUT:-420}
       MEMORY_INTAKE_QUEUE: ${MEMORY_INTAKE_QUEUE:-32}
       MEMORY_INTAKE_FILES: ${MEMORY_INTAKE_FILES:-4}
+      MEMORY_FEED_ACCEPT_UNMATCHED: ${MEMORY_FEED_ACCEPT_UNMATCHED:-}
     command: [daemon, /bank, --workers, '${MEMORY_WORKERS:-4}']
     volumes:
       - type: bind

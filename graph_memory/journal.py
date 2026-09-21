@@ -339,6 +339,10 @@ def advance(state, sealed, running, event, bodies=None):
             continue
         node = state[label][key]
         if holds_ref(label, node):
+            # Every engine that writes references also writes the shape; only a change
+            # from an older engine, on a node that gained a reference later, lacks it.
+            if "shape" not in change and event.get("version", 1) >= 3:
+                raise ValueError(REPLAY)
             if "shape" in change and digest([label, key, dict(node)]) != change["shape"]:
                 raise ValueError(REPLAY)
             if "hash" in change:

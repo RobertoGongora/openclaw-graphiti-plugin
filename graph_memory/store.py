@@ -73,11 +73,13 @@ class GraphStore:
         def run(tx, *args):
             # Per attempt: a retried transaction holds nothing, and a finished one's
             # identity may be reused by the next.
-            _held.locks = set()
+            # A transaction opened inside another on this thread must hand the outer
+            # one its record back, or the outer would take its lock a second time.
+            outer, _held.locks = getattr(_held, "locks", None), set()
             try:
                 return fn(tx, *args)
             finally:
-                _held.locks = None
+                _held.locks = outer
 
         return run
 
