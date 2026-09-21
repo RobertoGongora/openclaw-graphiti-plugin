@@ -1,6 +1,12 @@
 # ADR 007: Read-only memory status
 
-Status: implemented and validated, 2026-09-17.
+Status: Implemented and validated, 2026-09-17.
+
+**Updated 2026-09-21.** "Leases do not prove worker liveness" still holds, but
+liveness is no longer unknown: the daemon writes a heartbeat that `memory_status`
+returns under `workers`, with the provider state, and that the container
+healthcheck reads. Status also reports quarantined episodes and cached
+extractions. See [operations](../operations.md#health).
 
 Recall freshness reports do not provide a whole-namespace operational view, and
 persisted episode status does not distinguish queued work from active extraction.

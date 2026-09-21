@@ -1,6 +1,18 @@
 # ADR-002: Knowledge journal and historical replay
 
-Status: implemented, validated, and activated on 2026-09-16.
+Status: Implemented, validated, and activated on 2026-09-16.
+
+**Updated 2026-09-21.** Three statements below are superseded and kept as the
+record of the first implementation: the full before/after capture around every
+write, the state check before every write, and the full checkpoint every 100
+changes. The cost grew with the graph, as "Costs and boundaries" anticipated.
+Stage, commit, retract and merge now journal only the nodes they change, the state
+hash is an order-independent sum of per-node hashes, only a baseline or an
+explicit checkpoint embeds state, and untracked writes are found by verification,
+checkpoints, full-capture writes and a sampled audit instead of by every write.
+The contracts in this ADR are unchanged. See
+[ingestion pipeline](../ingestion-pipeline.md#journal-write-path) and
+[operations](../operations.md#journal-maintenance).
 
 ## Decision
 

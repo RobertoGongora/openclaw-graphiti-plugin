@@ -24,18 +24,27 @@ Transcript → durable episode → LLM extraction → Pydantic + quote validatio
 ## Run locally
 
 Python 3.11+ and Neo4j 5.26+ are required. `uv` is a convenient installer; ordinary
-`pip install .` also works. Docker Compose runs the full local system: Neo4j, its browser UI, the background worker, and the MCP server. See [Docker setup](docs/docker.md) for authentication and mounted sources. Docker is optional for a Python-only installation.
+`pip install .` also works. Docker Compose runs the full local system: Neo4j, the
+background worker, and the MCP server. Neo4j Browser is published only with the
+`browser` profile. See [Docker setup](docs/docker.md) for authentication and
+mounted sources. Docker is optional for a Python-only installation.
 
 ```sh
 cp .env.example .env
-# Set your memory-bank path and a private MCP token in .env, then authenticate Codex.
+# Set NEO4J_PASSWORD, MEMORY_HTTP_TOKEN and your memory-bank path in .env,
+# then authenticate Codex.
 docker compose up -d --build
 ```
 
+`.env.example` documents every variable the Compose files read. Both stacks
+refuse to start without `NEO4J_PASSWORD`.
+
 The MCP endpoint is `http://127.0.0.1:8765/mcp`. `serve` defaults to stdio for
 clients that launch subprocesses. See [MCP requests and client setup](docs/mcp.md).
-The development database binds only to localhost and persists in a named volume.
-Use Neo4j authentication and a private network for a shared installation.
+The database requires a password, binds only to localhost and persists in a named
+volume. Use a private network for a shared installation. The
+[operations runbook](docs/operations.md) covers deploy, rollback, log reading,
+journal maintenance, sizing and backup.
 
 ### Extraction and dreaming with Terra
 
@@ -52,8 +61,9 @@ uv run graph-memory --namespace personal latest Atlas --relation resolved
 ```
 
 The CLI adapter uses `codex exec` with isolated working directories, read-only
-sandboxing, no inherited user configuration, no persistent session, disabled
-shell/web tools, and schema-constrained output. The generated JSON Schema includes the event-time constraints enforced at commit.
+sandboxing, no inherited user configuration, no persistent session, every agent
+tool and web search disabled, a minimal environment, and schema-constrained
+output. A call that exceeds `MEMORY_LLM_TIMEOUT` is killed with its process group. The generated JSON Schema includes the event-time constraints enforced at commit.
 A rejected schema or evidence candidate gets a bounded correction attempt. Present-tense state and plans use
 the originating message time; event occurrences require their own time evidence.
 Extraction failures remain visible and retryable.
@@ -65,9 +75,11 @@ Python and CLI retain the prepare/commit operations for engine integrations.
 
 ## MCP tools
 
-Every tool carries an explicit namespace and all necessary identifiers. No
-transport session, initialize handshake, sampling callback, or agent host is
-required for the 2026 protocol.
+Every call carries all necessary identifiers. A server bound to a namespace
+supplies it, and an unbound server requires it as an argument. No transport
+session, initialize handshake, sampling callback, or agent host is required for
+the 2026 protocol. Clients that still send the 2025 `initialize` request get a
+stateless answer on both transports.
 
 | Tool | Advertised description |
 | --- | --- |
@@ -77,10 +89,14 @@ required for the 2026 protocol.
 | `memory_retract` | Use when the user says a remembered fact is incorrect or should no longer inform answers. |
 | `memory_merge` | Use when separate memory entries are confirmed to refer to the same person, project, or thing. |
 | `memory_render` | Use when the user wants to see their memory graph or how its facts connect. Shows the whole graph by default, or a selected view using optional Cypher. |
+| `memory_search_entities` | Use when you need to find a remembered person, project, or thing and are unsure of its name or identity. |
+| `memory_evidence` | Use when you need to verify a recalled fact or inspect the evidence behind it. |
+| `memory_status` | Use when you want to check memory ingestion progress, how much remains unstaged, processing or failed work, and graph counts. |
 
-Only these six operations are exposed through MCP. Read-only mode exposes recall, latest,
-and rendering. Extraction, commit, repair, and dreaming stay inside the engine and CLI;
-calling an internal operation through MCP is rejected, even by name.
+Only these nine operations are exposed through MCP. Read-only mode exposes recall,
+latest, rendering, entity search, evidence and status. Extraction, commit, repair,
+and dreaming stay inside the engine and CLI; calling an internal operation through
+MCP is rejected, even by name.
 
 `memory_recall` takes an entity name, key, or alias, not an arbitrary natural-language
 question. Tool-using LLMs turn a question into its subject. Ambiguous identities
@@ -113,8 +129,9 @@ current-state neighborhood returned by `memory_recall`.
   projects, and habits with different keys are not merged merely because their
   display names match. Broad-name ambiguity is returned for disambiguation;
   explicit merges preserve sources.
-- Reads restore missing structural links when their durable endpoints and source
-  exist. Facts missing evidence are excluded and counted in freshness.
+- Reads never write. A fact whose endpoints or source episode are missing is
+  excluded and counted in freshness. The `repair` command restores missing
+  structural links.
 
 ## History and replay
 
@@ -122,8 +139,9 @@ Knowledge changes are journaled atomically under `audit:<namespace>`. Ordinary
 recall uses the current graph; optional `known_at` or `at_change` inputs reconstruct
 past identities, facts, corrections, and published insights. `as_of` remains the
 event-time cutoff. Existing data starts with a dated baseline, not invented past
-history. [History commands and examples](docs/history.md) describe verification
-and read-only replay into a separate namespace.
+history. A write journals only the nodes it changes. [History commands and
+examples](docs/history.md) describe verification, checkpoints and read-only
+replay into a separate namespace.
 
 ## Dreaming
 
@@ -165,7 +183,8 @@ Claude hooks or the host-neutral `follow` watcher. [Client integration](docs/cli
 memories off, hook installation, transcript cursors, retry behavior, and the
 calling-agent instructions. Installation does not change global host settings or
 modify either original memory bank. A complete extraction receipt marks when
-new facts are visible.
+new facts are visible. [Ingestion pipeline](docs/ingestion-pipeline.md) describes
+episode states, leases, the retry budget, quarantine and the provider breaker.
 
 ## Evals and safe revisions
 
@@ -176,11 +195,15 @@ A real fresh-session Claude A/B runner compares native memory against MCP using
 identical source bytes, read-only access, fixed answers, and actual tool traces.
 
 ```sh
-MEMORY_TEST_NEO4J_URI=bolt://127.0.0.1:17687 uv run pytest -q
-MEMORY_TEST_NEO4J_URI=bolt://127.0.0.1:17687 MEMORY_LLM=codex \
+make test-db-up    # disposable Neo4j from compose.test.yaml on 127.0.0.1:37687
+MEMORY_TEST_NEO4J_URI=bolt://127.0.0.1:37687 uv run pytest -q
+MEMORY_TEST_NEO4J_URI=bolt://127.0.0.1:37687 MEMORY_LLM=codex \
   uv run python -m evals.run --runs 2 --output .local/baseline-candidate.json
+make test-db-down
 ```
 
+`make test-db` starts the database and runs the whole suite. Never point tests or
+evals at 17687 or 27687. Those ports are the live graphs.
 Tests and model evals use unique namespaces and clean up only their own data.
 Reports bind to the engine source, installed dependency versions, golden suite,
 model, and reasoning effort. Use a separate test database for CI and shared deployments.
@@ -198,14 +221,24 @@ automatically. See [revision workflow](docs/revisions.md).
 | Variable | Default / meaning |
 | --- | --- |
 | `NEO4J_URI` | `bolt://127.0.0.1:7687` |
-| `NEO4J_USER`, `NEO4J_PASSWORD`, `NEO4J_DATABASE` | `neo4j`, unset, `neo4j` |
+| `NEO4J_USER`, `NEO4J_PASSWORD`, `NEO4J_DATABASE` | `neo4j`, unset, `neo4j`. The Compose stacks require `NEO4J_PASSWORD` |
 | `MEMORY_NAMESPACE` | `personal`; a shared HTTP server is bound to one namespace |
 | `MEMORY_HTTP_TOKEN` | Optional bearer auth locally; required for non-loopback HTTP |
 | `MEMORY_LLM` | `caller`, `codex`, or `compatible` |
 | `MEMORY_MODEL` | `gpt-5.6-terra` for Codex |
 | `MEMORY_REASONING_EFFORT` | `low` for Codex; configurable |
+| `MEMORY_HTTP_HOSTS`, `MEMORY_HTTP_ORIGINS` | Comma lists of extra Host names and browser Origins accepted besides loopback |
+| `MEMORY_LLM_TIMEOUT` | `420` seconds per model call (10 to 3,600) |
+| `MEMORY_INTAKE_QUEUE` | `32` due episodes at which transcript intake stops staging |
+| `MEMORY_INTAKE_FILES` | `4` files with work that one transcript scan may open |
+| `MEMORY_JOURNAL_AUDIT` | `0` (off). `N` checks every Nth journal write against the whole graph |
 
-HTTP validates Origin and routing headers. Its bearer authentication is a
+`.env.example` is the reference for the Compose variables. `graph-memory --version`
+prints the package version and the engine identity. CLI failures exit with 2 for
+invalid input, 69 when the database is unavailable and 1 otherwise; `--debug`
+shows the traceback.
+
+HTTP validates Host, Origin and routing headers. Its bearer authentication is a
 private-service option; a public OAuth/OIDC deployment requires an external auth
 layer. No public deployment or client auto-configuration is performed by installation.
 
@@ -219,9 +252,10 @@ Existing Graphiti data is not silently reinterpreted under this schema.
 ### Render the graph in chat
 
 Call `memory_render` with `{"namespace":"personal"}` for the entire knowledge
-graph, including disconnected source episodes. Defaults are 10,000 nodes and
-30,000 relationships; any truncation is reported in the image and metadata.
-An optional `cypher` selects a subgraph. The response contains a PNG image block,
+graph, including disconnected source episodes. Defaults are 300 nodes and
+1,000 relationships; any truncation is reported in the image and metadata.
+An optional `cypher` selects a subgraph on a server without a bearer token. A
+token-bound server refuses custom Cypher. The response contains a PNG image block,
 ready for an MCP client to display. See [rendering examples](docs/rendering.md).
 
 ## Transcript source graph
@@ -229,5 +263,6 @@ ready for an MCP client to display. See [rendering examples](docs/rendering.md).
 For conversational claims with separate tool validation and historical memory-file
 observations, see [transcript sources](docs/transcript-sources.md) and
 [ADR 004](docs/adr/004-transcript-source-provenance.md).
-`compose.transcripts.yaml` provides an independent database, worker, Browser and MCP
-endpoint while the original markdown benchmark continues unchanged.
+`compose.transcripts.yaml` provides an independent database, worker, backlog
+inventory and MCP endpoint while the original markdown benchmark continues
+unchanged. Its Neo4j Browser is behind the `browser` profile.

@@ -1,6 +1,13 @@
 # ADR-003: Read-only graph images over MCP
 
-Status: implemented and locally validated, 2026-09-17.
+Status: Implemented and locally validated, 2026-09-17.
+
+**Updated 2026-09-21.** The default limits are now 300 nodes and 1,000
+relationships, not the 10,000 / 30,000 stated below, because a large namespace
+did not lay out within the time limit. A server bound to a bearer token now
+refuses custom Cypher, since the output filter described below does not stop a
+query from revealing counts about other namespaces. See
+[rendering](../rendering.md) and [operations](../operations.md).
 
 Rob wants the graph views used in Neo4j Browser available directly in agent chats:
 a whole-graph default with higher limits, or a focused view from optional Cypher.

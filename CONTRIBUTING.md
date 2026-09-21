@@ -7,15 +7,19 @@ The older TypeScript/OpenClaw implementation remains a compatibility archive.
 uv sync
 uv run ruff check graph_memory evals tests
 uv run ruff format --check graph_memory evals tests
-MEMORY_TEST_NEO4J_URI=bolt://127.0.0.1:17687 uv run pytest -q
+make test          # unit tests; database tests skip themselves
+make test-db       # starts compose.test.yaml on 127.0.0.1:37687 and runs everything
+make test-db-down
 uv build
 # Preserve the existing plugin tests while the archive remains in this repo.
 npm ci --ignore-scripts
 npm test
 ```
 
-Use a disposable Neo4j instance. Tests allocate and remove only their own random
-namespaces. Never point evals at a live graph. Model evals require a configured
+Use the disposable Neo4j from `compose.test.yaml` (`make test-db-up`). It has no
+authentication and no persistence. Tests allocate and remove only their own random
+namespaces. Never point tests or evals at a live graph: ports 17687 and 27687 are
+the personal and transcripts databases. Model evals require a configured
 Codex login or compatible endpoint; see [evals](evals/README.md).
 
 For extraction, prompt, schema, identity, or temporal changes, add a regression

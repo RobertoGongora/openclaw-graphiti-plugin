@@ -4,13 +4,22 @@ This is the original markdown benchmark deployment. A separate
 [transcript source stack](transcript-sources.md) now runs on Browser port 27474,
 Bolt 27687 and MCP 8766. It does not replace or modify these workers.
 
+**Current state, 2026-09-21.** Most of this page is a dated record of rollouts.
+What holds today: Neo4j requires `NEO4J_PASSWORD`, the Browser port is published
+only with the Compose `browser` profile, the MCP catalog has nine tools, and the
+image is selected by `GRAPH_MEMORY_TAG`. The transcript deployment has run eight
+consumers since 2026-09-20 (`evals/reports/20260920-eight-workers-baseline.json`).
+The live worker count is in the `daemon_start` log event and in
+`memory_status.workers`. Day-to-day procedures are in the
+[operations runbook](operations.md).
+
 The local system now runs through Docker Compose on Colima. Colima is the Linux
 VM hosting Docker on macOS. Three services are deployed:
 
 - `graph-memory-neo4j-1`: existing graph and Neo4j Browser.
 - `graph-memory-worker-1`: read-only bank scanner and two Terra/low consumers
   (concurrency reduced from twelve on 2026-09-17, fast mode off).
-- `graph-memory-mcp-1`: eight public tools over HTTP, with
+- `graph-memory-mcp-1`: nine public tools over HTTP (eight when this was written), with
   [compact recall and evidence on demand](compact-recall.md).
 
 Deployment configuration lives at
@@ -166,10 +175,11 @@ image alone is not a compatible rollback after new journaled changes exist.
 
 ## UI and MCP
 
-Open http://127.0.0.1:17474/browser/ and connect to
-`bolt://127.0.0.1:17687`, with authentication disabled for this local database.
-The MCP endpoint is http://127.0.0.1:8765/mcp and requires the private bearer token.
-Its exposed tools are recall, latest, ingest, retract, and merge.
+Start the Browser with the Compose `browser` profile, open
+http://127.0.0.1:17474/browser/ and connect to `bolt://127.0.0.1:17687` as user
+`neo4j` with `NEO4J_PASSWORD`. The MCP endpoint is http://127.0.0.1:8765/mcp and
+requires the private bearer token. It exposes the nine tools listed in
+[mcp.md](mcp.md).
 
 [Graph queries](graph-browser.cypher) show the graph and queue status.
 [Alfred / DailyAI / Unearth watch query](watch-alfred-dailyai.cypher) follows their
@@ -239,3 +249,7 @@ All 928 previously completed markdown episodes and 406 previously completed
 transcript episodes retained their extraction hashes. Transcript completions had
 reached 437 at the restart checkpoint. Configured consumer count is a ceiling;
 active model calls depend on ready jobs and retry backoff.
+
+This allocation is history. On 2026-09-20 the transcript deployment moved to eight
+consumers, which is also the `TRANSCRIPT_WORKERS` default in
+`compose.transcripts.yaml`. `MEMORY_WORKERS` for the markdown stack defaults to four.

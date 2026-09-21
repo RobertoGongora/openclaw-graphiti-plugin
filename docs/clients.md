@@ -1,7 +1,8 @@
 # Clients with native memories disabled
 
-MCP exposes recall, latest, evidence, entity search, graph rendering, ingest,
-retract, and merge. Background processing is owned by the Python engine.
+MCP exposes nine tools: recall, latest, evidence, entity search, status, graph
+rendering, ingest, retract, and merge. Background processing is owned by the
+Python engine.
 Docker can run the entire stack; see [Docker setup](docker.md).
 
 The portable contract is MCP plus the instructions in
@@ -18,6 +19,7 @@ configuration without changing your global Claude settings:
 
 ```sh
 export NEO4J_URI=bolt://127.0.0.1:17687
+export NEO4J_PASSWORD=...   # the value from .env
 export MEMORY_LLM=codex
 uv run graph-memory --namespace personal claude-config .local/claude
 # Run continuously in a separate terminal/service supervisor:
@@ -29,8 +31,9 @@ CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 claude \
 ```
 
 The config uses absolute Python executable paths. Keep that installed environment
-available. Generated config files are mode 0600 because MCP environment values
-can include a database password. They belong outside version control.
+available. Generated config files are mode 0600 and belong outside version
+control. The database password is written as the reference `${NEO4J_PASSWORD}`,
+never as its value, so the client must have that variable in its environment.
 
 `SessionStart` and `UserPromptSubmit` inject the memory-use instructions.
 `UserPromptSubmit`, `Stop`, and `SessionEnd` feed available transcript messages.
@@ -44,10 +47,13 @@ Repeated hooks are no-ops. Each new batch contains up to eight new messages and
 four context messages; extraction must cite a new message. A partial final JSONL
 line waits for a later invocation. A rewritten prefix requires explicit new
 source identity/review rather than silently reinterpreting committed evidence.
-Worker leases avoid duplicate queue execution and failures retry with backoff.
+Worker leases avoid duplicate queue execution and failures retry with backoff;
+see [ingestion pipeline](ingestion-pipeline.md).
 
-Hooks require database connectivity. Failed intake remains in the host transcript
-and is retried on the next hook; run the watcher below as a catch-up process if
+The hook always prints the memory-use instructions first, before it connects to
+the database, so they reach the agent even when Neo4j is slow or down. Staging
+requires database connectivity. If it fails, the hook reports the skip on stderr
+and the messages remain in the host transcript for the next hook; run the watcher below as a catch-up process if
 sessions can finish while the database is unavailable. Keep source transcripts
 until their extraction receipts are complete. A service supervisor should restart
 the worker/watcher after process or machine restarts.
@@ -128,7 +134,8 @@ be running. Using the stable container name follows subsequent MCP image upgrade
 The client uses the stdio compatibility handshake; the standalone 2026 HTTP
 endpoint remains available independently.
 
-A fresh Codex app-server process discovered all eight tools and successfully called
+A fresh Codex app-server process discovered all eight tools of that release (the
+catalog now has nine, with `memory_status`) and successfully called
 `memory_search_entities`, `memory_recall`, and `memory_evidence`, omitting namespace
 from every call. This validates native Codex MCP integration, beyond direct HTTP
 checks. The test used an ephemeral thread and no model inference. Other configured

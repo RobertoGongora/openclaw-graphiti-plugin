@@ -1,6 +1,13 @@
 # ADR-001: Standalone temporal graph memory with validated model revisions
 
-Status: implemented prototype; baseline candidate awaiting product review.
+Status: Implemented. Deployed locally since 2026-09-16; the golden baseline remains a candidate awaiting product review.
+
+**Updated 2026-09-21.** The public catalog has grown from the five tools decided
+here to nine (ADR-003, ADR-005, ADR-006, ADR-007). Reads no longer restore missing
+links; that is the explicit `repair` command. Neo4j now requires a password and
+its Browser is published only on request. The queue, leases, retry budget and
+provider breaker are described in [ingestion pipeline](../ingestion-pipeline.md),
+and running the stacks in [operations](../operations.md).
 
 ## Problem
 

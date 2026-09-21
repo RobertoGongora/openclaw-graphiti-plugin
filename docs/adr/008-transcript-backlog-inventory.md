@@ -1,5 +1,12 @@
 # ADR 008: Cached transcript backlog inventory
 
+Status: Implemented and validated, 2026-09-17.
+
+**Updated 2026-09-21.** The intake limits this inventory compensates for are now
+settings (`MEMORY_INTAKE_QUEUE`, `MEMORY_INTAKE_FILES`), and the inventory service
+has a container healthcheck. See [ingestion pipeline](../ingestion-pipeline.md#intake)
+and [operations](../operations.md#health).
+
 Saved-episode counts made a bounded staging queue look like a nearly completed
 corpus import. The source-records worker intentionally limits intake, so those
 counts cannot describe unstaged transcript content.

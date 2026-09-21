@@ -69,9 +69,8 @@ longer advertised. New clients see `entity` plus optional `question`. Search kee
 
 ## Verify a fact
 
-`memory_evidence` has the intent description:
-
-> Use when you need to verify a recalled fact or inspect the evidence behind it.
+`memory_evidence` has the intent description "Use when you need to verify a
+recalled fact or inspect the evidence behind it."
 
 ```json
 {"fact_ids":["ID_RETURNED_BY_RECALL"]}
@@ -86,7 +85,7 @@ namespace are not returned. For historical recall, pass the same `known_at` or
 `at_change` to evidence retrieval.
 
 Evidence and entity search are also permitted by retrieval-only MCP servers.
-The public catalog now has eight tools.
+The public catalog has nine tools: these eight plus `memory_status`, added later.
 Clients with cached catalogs may need to reconnect. Tool results remain JSON in
 both the MCP text and structured-content representations.
 
@@ -95,7 +94,8 @@ both the MCP text and structured-content representations.
 `tests/test_retrieval.py` covers state/plan separation, conflicts under response
 limits, duplicate grouping, pagination, old-value questions, lexical misses,
 explicit excerpts, source quotes, retractions, namespace isolation and historical
-evidence. Integration tests run in a disposable database, not the live imports.
+evidence. Integration tests run in the disposable database from
+`compose.test.yaml` (port 37687), not the live imports.
 
 `python -m evals.recall_payloads PRIVATE_SNAPSHOT.json` compares the old 30-per-lane
 response with the default compact response on the same frozen graph records.

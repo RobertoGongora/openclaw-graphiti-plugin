@@ -8,6 +8,8 @@ production cutover, proof of every provider/client, or an approved golden standa
 - Python 3.13.14, Pydantic 2.13.5, official Neo4j Python driver 6.3.1.
 - Dedicated local Neo4j 5.26.30 Community container `graph-memory-dev`, with its
   own volume and loopback ports 17687/17474. Existing databases were not reused.
+  Port 17687 has since become the live personal graph. Tests now run against the
+  disposable database from `compose.test.yaml` on 37687.
 - 36 Python tests passed against real Neo4j, including HTTP wire handling,
   concurrent idempotent commits, temporal ordering/conflicts, missing-source
   exclusion, automatic structural repair, document dates, append-only feed

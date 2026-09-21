@@ -4,11 +4,12 @@
 
 | Service | Responsibility | Local address |
 | --- | --- | --- |
-| `neo4j` | Persistent graph, queue, evidence, and Neo4j Browser | http://127.0.0.1:17474/browser/; Bolt 127.0.0.1:17687 |
+| `neo4j` | Persistent graph, queue and evidence. Requires a password | Bolt 127.0.0.1:17687 |
+| `neo4j-browser` | Publishes Neo4j Browser. Starts only with the `browser` profile | http://127.0.0.1:17474/browser/ |
 | `worker` | Scan a read-only memory-bank mount; process queued messages with Terra low | No published port |
-| `mcp` | Six session-facing tools over stateless HTTP | http://127.0.0.1:8765/mcp |
+| `mcp` | Nine session-facing tools over stateless HTTP | http://127.0.0.1:8765/mcp |
 
-Colima is the Linux VM running Docker on macOS; all three services are Docker
+Colima is the Linux VM running Docker on macOS; all services are Docker
 containers. Source files and model credentials are never copied into the image.
 The production image has only the two direct Python dependencies plus the optional
 Codex CLI. Graphviz and a font package provide local PNG graph rendering; no browser
@@ -16,8 +17,10 @@ or additional Python visualization library is required. The `eval` build target 
 
 ## First installation
 
-1. Copy `.env.example` to `.env`. Set `MEMORY_BANK_PATH` to an existing directory
-   and replace `MEMORY_HTTP_TOKEN` with a random private token. Keep `.env` private.
+1. Copy `.env.example` to `.env`. It documents every variable the Compose files
+   read. Set `MEMORY_BANK_PATH` to an existing directory, and replace
+   `NEO4J_PASSWORD` and `MEMORY_HTTP_TOKEN` with random private values. Compose
+   refuses to start without them. Keep `.env` private.
 2. Build: `docker compose build`.
 3. Authenticate the worker: `docker compose run --rm --no-deps --entrypoint codex worker login --device-auth`.
 4. Start: `docker compose up -d`.
@@ -26,9 +29,27 @@ Alternatively configure `MEMORY_LLM=compatible`, `MEMORY_LLM_URL`, `MEMORY_MODEL
 and `MEMORY_LLM_API_KEY`; Codex authentication is then unnecessary.
 
 The MCP HTTP endpoint requires `Authorization: Bearer <MEMORY_HTTP_TOKEN>` and the
-protocol headers documented in [mcp.md](mcp.md). No credentials are needed for the
-loopback-only development Neo4j Browser: connect to `bolt://127.0.0.1:17687`.
-An internet/shared deployment requires a separate authenticated database/network setup.
+protocol headers documented in [mcp.md](mcp.md). Neo4j requires user `neo4j` and
+`NEO4J_PASSWORD`. Its Browser port is not published by default. Start it with
+`docker compose --profile browser up -d neo4j-browser`, open
+http://127.0.0.1:17474/browser/ and connect to `bolt://127.0.0.1:17687`. The HTTP
+API answers only the loopback Browser origin. All ports bind to 127.0.0.1; an
+internet or shared deployment requires a separate network setup.
+
+A volume first created without authentication takes the password on its first
+authenticated start, provided the default password was never changed. After that
+the stored password wins, and `NEO4J_PASSWORD` must match it.
+
+## Container hardening
+
+The `worker` and `mcp` services run with a read-only root filesystem, a tmpfs
+`/tmp`, all capabilities dropped, `no-new-privileges`, and memory and pid limits.
+The image writes only to `/tmp` and to the mounted Codex home. Each service has a
+healthcheck: Neo4j answers a Cypher query, and the others run
+`graph-memory health --role worker|mcp`. Services wait for a healthy Neo4j and
+restart when it is recreated. `GRAPH_MEMORY_TAG` selects the image tag (default
+`local` here, required by the transcripts stack). `make image` builds
+`graph-memory:<short commit>`.
 
 ## Sources and restart behavior
 
@@ -40,8 +61,10 @@ file modification dates do not invent event times or silently resolve conflicts.
 
 The scanner and four queue consumers run independently in one worker container.
 Neo4j stores completed jobs, retries, leases, and the original evidence. Container
-restarts do not need a local cursor file. Graceful shutdown finishes active jobs;
-a forcibly killed worker's jobs become eligible when their leases expire.
+restarts do not need a local cursor file. Graceful shutdown finishes active jobs,
+within a 45 minute grace period. A starting daemon releases the leases its
+predecessor left, so a killed worker's jobs are eligible again at once. Run one
+daemon per namespace for that reason.
 
 For multiple roots, override the worker's `command` and mount each source directory
 read-only. For Claude's project memory bank, preserve a path ending in
@@ -57,8 +80,8 @@ Creation timestamps can differ between macOS and Linux; the scanner recognizes
 identical source content and retains the timestamps already in Neo4j.
 
 Extraction, commit, retry, structural repair, and dream operations remain Python
-engine/CLI responsibilities. The MCP catalog exposes only recall, latest, ingest,
-retract, merge, and rendering. Dream scheduling/promotion remains an explicit engine operator
+engine/CLI responsibilities. The MCP catalog exposes only the nine session tools
+listed in [mcp.md](mcp.md). Dream scheduling/promotion remains an explicit engine operator
 action (`graph-memory dream ...`), not an automatic ingestion side effect.
 
 ## Operations
@@ -71,6 +94,15 @@ docker compose exec worker graph-memory --namespace personal recall Atlas
 docker compose up -d --build
 ```
 
+The [operations runbook](operations.md) covers deploy and rollback, reading the
+log for slow ingestion, provider outages, journal maintenance, sizing, quarantine
+review, backup and secrets.
+
+Every log line is a JSON event with a `ts` timestamp. `daemon_start` records the
+settings and reclaimed leases, `daemon_exit` the reason and peak memory, and each
+`processed` event carries per-stage `timings`, `model_calls`, `cached`, `skipped`
+and `claim_seconds`. `provider_unavailable` and `provider_recovered` mark the
+provider breaker opening and closing.
 The worker logs scan counts, episode IDs, completion/failure status, and exception
 class names. Failed `processed` events also include a bounded `diagnostic` object:
 stage, reason code, extraction attempt, elapsed seconds, engine fingerprint, and
@@ -84,8 +116,10 @@ issue. Unknown field names are masked. Raw exceptions, rejected model output,
 source quotes, Pydantic input/context, and credentials are excluded. Unknown errors
 use `unclassified_error`; this is not a claim that their cause was diagnosed.
 These details live in the existing Docker log stream, not the knowledge journal.
-Old errors cannot acquire details retroactively. Existing correction attempts,
-evidence/schema safeguards, and retry delays are unchanged. Review with:
+Old errors cannot acquire details retroactively. A quote diagnostic lists up to
+ten bad quote locations at once under `locations`. Provider failures carry a
+`provider_reason` from a closed set and are not charged to the episode; see
+[ingestion pipeline](ingestion-pipeline.md). Review with:
 
 ```sh
 ~/.local/share/graph-memory/bin/compose logs --since 1h worker

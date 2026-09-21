@@ -24,8 +24,11 @@ commands with `~/.local/share/graph-memory/bin/compose exec worker`.
 ```sh
 # Inspect numbered changes (paginated, without returning private source payloads).
 graph-memory --namespace personal history list --limit 20
-# Verify that current knowledge equals the reconstructed journal head.
+# Verify the whole hash chain and that current knowledge equals the journal head.
+# Holds the namespace lock and reads every event: run it in a maintenance window.
 graph-memory --namespace personal history verify
+# Embed the current state so historical reads replay from here (maintenance action).
+graph-memory --namespace personal history checkpoint
 # Query the graph as it stood after a particular change.
 graph-memory --namespace personal recall Atlas --at-change 10
 # Combine knowledge-time and event-time cutoffs.
@@ -39,6 +42,31 @@ Use change numbers and dates actually present in your journal; the examples abov
 are illustrative. `history snapshot` returns full private evidence, while `history
 list` returns only change metadata. `history init` explicitly establishes a baseline
 for an existing namespace and is idempotent.
+
+## How the journal is written
+
+A stage, commit, retract or merge journals only the nodes it changes. The state
+hash is a sum of per-node hashes that does not depend on order, so such a write
+updates it without reading the rest of the graph. Dream and revision writes still
+capture the whole namespace.
+
+Only a baseline and an explicit `history checkpoint` embed the full state. There
+are no periodic snapshots. A historical read starts at the latest checkpoint at
+or before the requested change and replays the differences, checking every hash
+on the way. After a long run of changes, a checkpoint shortens those reads.
+Snapshots that earlier versions embedded every 100 changes remain readable.
+
+A write that touches a few nodes cannot notice a change made elsewhere outside
+the journal. Untracked writes are detected by `history verify`, by
+`history checkpoint`, by any full-capture write, and by the sampled audit:
+`MEMORY_JOURNAL_AUDIT=N` compares the streamed live graph with the journal head
+on every Nth write (`1` every write, `0` off). The engine also has a streamed
+`verify_live` check with no CLI command yet.
+
+After an untracked write, `history checkpoint --accept-live` records the live
+graph as the new truth. Use it only once the cause is known; see the
+[runbook](operations.md#journal-maintenance). The design is described in
+[ingestion pipeline](ingestion-pipeline.md#journal-write-path).
 
 In Neo4j Browser, view the history metadata:
 
@@ -74,9 +102,14 @@ all writers, save a graph backup, and run `history init` with the new engine bef
 starting the upgraded worker and MCP service. Preserve the database volume and
 source mount paths so the worker resumes the same queue.
 
-Once a namespace has a journal, every knowledge writer must support it. Running
-an older writer or editing knowledge properties directly in Cypher can diverge
-from recorded history; subsequent journaled writes stop until that discrepancy is
-resolved. `history verify` detects this condition. Keep the original backup and
+Once a namespace has a journal, every knowledge writer must support it. Editing
+knowledge properties directly in Cypher diverges from recorded history. The next
+verify, checkpoint, full-capture write or sampled audit detects it, and journaled
+writes that detect it stop until the discrepancy is resolved.
+
+Journals written before the per-node state hash migrate on the first write by the
+current code. From then on an older engine fails its own state check and refuses
+to write to that namespace. Stop every old writer before the first new write, and
+treat the migration as irreversible without the backup. Keep the original backup and
 validated image identifiers with the deployment record. Retrying an existing
 source does not create a new journal entry unless its knowledge state changes.
