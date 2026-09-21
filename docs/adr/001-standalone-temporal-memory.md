@@ -79,6 +79,10 @@ deterministic checks, in isolated namespaces. Expected outputs never self-update
 A/B harness records retrieval traces and tests the same known-answer question
 against identical source snapshots with native memories off in the graph arm.
 
+**Updated 2026-09-21.** Revisions no longer clone the namespace: selected episodes
+are re-extracted as a dry run against the live graph and promoted as one scoped
+change. See [revision workflow](../revisions.md). The original text follows.
+
 For an engine change, clone the namespace, replay selected episodes, revalidate
 affected dreams, compare claims, and apply explicit project expectations. Atomic
 promotion requires matching live/candidate revisions and an accepted changed diff.

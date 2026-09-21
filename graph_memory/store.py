@@ -94,6 +94,8 @@ class GraphStore:
                 "MemoryArtifact",
                 "MemoryArtifactObservation",
                 "MemoryAlias",
+                "MemoryRevisionCandidate",
+                "MemoryRevisionDream",
             ):
                 tx.run(
                     f"CREATE CONSTRAINT {label.lower()}_id IF NOT EXISTS FOR (n:{label}) REQUIRE n.id IS UNIQUE"
@@ -504,7 +506,9 @@ class GraphStore:
                 }
                 tx.run(
                     "MATCH (e:MemoryEpisode {id:$ep}),(s:MemoryEntity {id:$sid}),(t:MemoryEntity {id:$tid}) "
+                    # A fact committed again is live again: no residue of a past retraction.
                     "MERGE (f:MemoryFact {id:$id}) SET f += $props "
+                    "REMOVE f.retraction_reason,f.replaced_by_revision,f.retracted_at "
                     "MERGE (s)-[:HAS_FACT]->(f) MERGE (f)-[:TARGET]->(t) "
                     "MERGE (f)-[:SUPPORTED_BY]->(e)",
                     ep=episode_id,

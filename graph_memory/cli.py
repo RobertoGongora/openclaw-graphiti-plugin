@@ -210,6 +210,7 @@ def run():
     )
     revision.add_argument("--id")
     revision.add_argument("--episode", action="append")
+    revision.add_argument("--reason", help="create: why these episodes are being re-extracted")
     revision.add_argument("--eval-report", type=Path)
     revision.add_argument("--checks", type=Path)
     revision.add_argument("--accept-diff")
@@ -308,7 +309,7 @@ def run():
 
             manager = Revisions(service)
             if args.action == "create":
-                result = manager.create(args.namespace, args.episode)
+                result = manager.create(args.namespace, args.episode, args.reason)
             elif not args.id:
                 parser.error("revision action requires --id")
             elif args.action == "validate":

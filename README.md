@@ -213,10 +213,11 @@ model, and reasoning effort. Use a separate test database for CI and shared depl
 The baseline remains a **candidate** until reviewed; passing tests are not
 proof that all real-world extraction is correct.
 
-Engine updates replay selected sources into a candidate graph. They expose added
-and removed claims, rerun affected dreams, require golden and project-specific
-checks, and atomically promote only if both live and candidate revisions still
-match. Changed diffs require explicit acceptance; unchanged outcomes can promote
+Engine updates re-extract selected sources as a dry run against the live graph,
+copying nothing. They expose added, removed and changed claims and any human
+decision that would be dropped, rerun affected dreams, require golden and
+project-specific checks, and promote atomically only if the affected facts have not
+changed since validation. Changed diffs require explicit acceptance; unchanged outcomes can promote
 automatically. See [revision workflow](docs/revisions.md).
 
 ## Configuration

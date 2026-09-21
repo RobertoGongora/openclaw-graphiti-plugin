@@ -1,18 +1,32 @@
 # Safe engine revisions
 
-The revision workflow isolates extraction changes from the live namespace.
-It records immutable inputs, an engine identity, candidate results, a semantic
-diff, affected dreams, and validation evidence in Neo4j.
+A revision re-extracts selected episodes and shows what would change before
+anything changes. It is an overlay: nothing is copied, so its cost follows the
+episodes selected and not the size of the graph. It records the engine identity,
+the candidate extractions, a semantic diff, the affected dreams, and the validation
+evidence in Neo4j.
 
 1. Run the golden eval suite on the new engine and model. Keep the report.
-2. Select 1–100 fully extracted source episodes to replay. The candidate includes
-   the existing namespace as context, including aliases and retractions.
-3. Re-extract those sources in the candidate graph. Re-run affected completed or
-   applied dreams with the candidate context and the configured model.
-4. Review added/removed claims and dream outputs. Validate project-specific
-   expectations in addition to the global golden suite.
-5. Promote atomically. Concurrent live/candidate changes, engine/suite changes,
-   incomplete dreams, missing checks, and unaccepted changed diffs block promotion.
+2. Select 1–100 fully extracted source episodes (`--reason` records why).
+3. Build. Each selected episode is extracted again as a dry run against the live
+   graph: one model call per episode, nothing written to the live graph. Affected
+   completed or applied dreams are revalidated the same way.
+4. Review the diff: added, removed, changed and unchanged claims, dream outputs,
+   and `dropped_decisions`: facts a person confirmed that have no matching
+   candidate, and facts a person retracted that the candidate would bring back.
+   Diff and validate work by running the promotion inside a transaction that is
+   always rolled back, so they show exactly what promotion would do.
+5. Validate project-specific expectations in addition to the golden suite.
+6. Promote atomically, as one journaled write that touches only the selected
+   episodes, their facts and entities. Old facts of those episodes are retracted as
+   superseded, a confirmation carries over to the matching new fact, and knowledge
+   as of an earlier change still shows the old facts. Promotion is blocked by an
+   engine or suite change, incomplete dreams, missing checks, a change to the
+   affected facts since validation, or a diff with changes or dropped decisions
+   that was not accepted by its digest.
+
+Revisions created before the overlay (with a copied candidate graph) can still be
+read with `get`; build, diff, validate and promote refuse them.
 
 ```sh
 export MEMORY_LLM=codex

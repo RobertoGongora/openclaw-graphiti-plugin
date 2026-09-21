@@ -75,41 +75,33 @@ def test_shadow_replay_diff_gates_promotion_and_dream_revalidation(graph):
     revisions = Revisions(service)
     created = revisions.create(ns, [receipt["episode_id"]])
     rid = created["revision_id"]
-    try:
-        assert created["affected_dreams"] == [d["dream_id"]]
-        result = revisions.build(ns, rid)
-        assert len(result["diff"]["added"]) == 1
-        assert store.recall(ns, "Atlas")["planned"] == []
-        with pytest.raises(ValueError, match="Validate"):
-            revisions.promote(ns, rid)
-        checks = [
-            {
-                "tool": "memory_recall",
-                "arguments": {"query": "Atlas"},
-                "path": "planned",
-                "contains": {"relation": "uses_database", "target_contains": "postgre"},
-            }
-        ]
-        assert revisions.validate(ns, rid, report(), checks)["passed"]
-        with pytest.raises(ValueError, match="Behavior changed"):
-            revisions.promote(ns, rid)
-        before_promotion = Journal(store).snapshot(ns)["sequence"]
-        result = revisions.promote(ns, rid, result["diff"]["digest"])
-        assert Journal(store).snapshot(ns)["sequence"] == before_promotion + 1
-        assert Journal(store).events(ns)[-1]["kind"] == "revision_promoted"
-        assert store.recall(ns, "Atlas", at_change=before_promotion)["planned"] == []
-        assert Journal(store).verify(ns)["verified"]
-        assert result["status"] == "promoted"
-        assert store.recall(ns, "Atlas")["planned"][0]["target"] == PG["key"]
-        assert store.recall(ns, "Atlas")["current"][0]["target"] == MYSQL["key"]
-        assert revisions.promote(ns, rid)["replayed"]
-    finally:
-        store.transaction(
-            lambda tx: tx.run(
-                "MATCH (n) WHERE n.namespace=$ns OR (n:MemoryChange AND n.scope=$ns) OR (n:MemorySpace AND n.id=$ns) DETACH DELETE n",
-                ns=created["candidate"],
-            ).consume()
-        )
+    assert created["affected_dreams"] == [d["dream_id"]]
+    result = revisions.build(ns, rid)
+    assert len(result["diff"]["added"]) == 1
+    assert store.recall(ns, "Atlas")["planned"] == []
+    with pytest.raises(ValueError, match="Validate"):
+        revisions.promote(ns, rid)
+    checks = [
+        {
+            "tool": "memory_recall",
+            "arguments": {"query": "Atlas"},
+            "path": "planned",
+            "contains": {"relation": "uses_database", "target_contains": "postgre"},
+        }
+    ]
+    assert revisions.validate(ns, rid, report(), checks)["passed"]
+    with pytest.raises(ValueError, match="Behavior changed"):
+        revisions.promote(ns, rid)
+    before_promotion = Journal(store).snapshot(ns)["sequence"]
+    result = revisions.promote(ns, rid, result["diff"]["digest"])
+    assert Journal(store).snapshot(ns)["sequence"] == before_promotion + 1
+    assert Journal(store).events(ns)[-1]["kind"] == "revision_promoted"
+    assert store.recall(ns, "Atlas", at_change=before_promotion)["planned"] == []
+    assert Journal(store).verify(ns)["verified"]
+    assert result["status"] == "promoted"
+    assert store.recall(ns, "Atlas")["planned"][0]["target"] == PG["key"]
+    assert store.recall(ns, "Atlas")["current"][0]["target"] == MYSQL["key"]
+    assert revisions.promote(ns, rid)["replayed"]
 
 
 def test_live_writes_after_validation_block_promotion(graph):
@@ -139,25 +131,17 @@ def test_live_writes_after_validation_block_promotion(graph):
     revisions = Revisions(MemoryService(store, Model()))
     created = revisions.create(ns, [receipt["episode_id"]])
     rid = created["revision_id"]
-    try:
-        revisions.build(ns, rid)
-        checks = [
-            {
-                "tool": "memory_recall",
-                "arguments": {"query": "Atlas"},
-                "path": "current",
-                "contains": {"target_contains": "mysql"},
-            }
-        ]
-        revisions.validate(ns, rid, report(), checks)
-        store.retract(ns, receipt["fact_ids"][0], "Concurrent correction")
-        with pytest.raises(ValueError, match="changed since"):
-            revisions.promote(ns, rid)
-        assert store.recall(ns, "Atlas")["current"] == []
-    finally:
-        store.transaction(
-            lambda tx: tx.run(
-                "MATCH (n) WHERE n.namespace=$ns OR (n:MemoryChange AND n.scope=$ns) OR (n:MemorySpace AND n.id=$ns) DETACH DELETE n",
-                ns=created["candidate"],
-            ).consume()
-        )
+    revisions.build(ns, rid)
+    checks = [
+        {
+            "tool": "memory_recall",
+            "arguments": {"query": "Atlas"},
+            "path": "current",
+            "contains": {"target_contains": "mysql"},
+        }
+    ]
+    revisions.validate(ns, rid, report(), checks)
+    store.retract(ns, receipt["fact_ids"][0], "Concurrent correction")
+    with pytest.raises(ValueError, match="changed since"):
+        revisions.promote(ns, rid)
+    assert store.recall(ns, "Atlas")["current"] == []
