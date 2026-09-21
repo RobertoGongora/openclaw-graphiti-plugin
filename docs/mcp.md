@@ -115,7 +115,7 @@ has no `extract` switch and its response never delegates processing back to the 
 
 Recall/latest also accept optional `known_at` or `at_change` cutoffs for historical
 knowledge. `as_of` remains the separate event-time cutoff. Historical results
-include coverage metadata; see [history](history.md). The catalog has nine tools, including `memory_render` and `memory_evidence`.
+include coverage metadata; see [history](history.md). The catalog has ten tools, including `memory_render` and `memory_evidence`.
 
 
 `memory_render` returns a standard PNG `image` content block plus text and
@@ -130,7 +130,7 @@ See [rendering](rendering.md) for whole-graph and custom-Cypher examples.
 
 
 Recall/latest now default to [compact JSON with evidence on demand](compact-recall.md).
-The catalog contains nine tools, including the read-only `memory_evidence`.
+The catalog contains ten tools, including the read-only `memory_evidence`.
 The scoped server supplies namespace automatically. Supply an entity name in `entity` and optionally a question to select relevant
 facts. `detail:"full"` retains access to the legacy record format.
 

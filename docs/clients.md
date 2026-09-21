@@ -1,6 +1,6 @@
 # Clients with native memories disabled
 
-MCP exposes nine tools: recall, latest, evidence, entity search, status, graph
+MCP exposes ten tools: recall, latest, evidence, entity search, status, confirm, graph
 rendering, ingest, retract, and merge. Background processing is owned by the
 Python engine.
 Docker can run the entire stack; see [Docker setup](docker.md).
@@ -135,7 +135,7 @@ The client uses the stdio compatibility handshake; the standalone 2026 HTTP
 endpoint remains available independently.
 
 A fresh Codex app-server process discovered all eight tools of that release (the
-catalog now has nine, with `memory_status`) and successfully called
+catalog now has ten, with `memory_status` and `memory_confirm`) and successfully called
 `memory_search_entities`, `memory_recall`, and `memory_evidence`, omitting namespace
 from every call. This validates native Codex MCP integration, beyond direct HTTP
 checks. The test used an ephemeral thread and no model inference. Other configured

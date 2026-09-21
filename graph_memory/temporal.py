@@ -13,6 +13,15 @@ def project(facts: list[dict], as_of: datetime) -> dict:
     for fact in facts:
         if fact.get("retracted"):
             continue
+        if fact.get("confirmed_at") and fact["status"] == "uncertain":
+            # A person vouched for it: established from the date they confirmed.
+            fact = {
+                **fact,
+                "status": "active",
+                "valid_at": fact["confirmed_valid_at"],
+                "valid_ts": fact["confirmed_valid_ts"],
+                "confirmed": True,
+            }
         if fact.get("valid_ts") is None:
             if fact.get("documented_ts") is not None:
                 if fact["documented_ts"] <= cutoff:

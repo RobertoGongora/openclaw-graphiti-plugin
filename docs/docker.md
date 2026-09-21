@@ -7,7 +7,7 @@
 | `neo4j` | Persistent graph, queue and evidence. Requires a password | Bolt 127.0.0.1:17687 |
 | `neo4j-browser` | Publishes Neo4j Browser. Starts only with the `browser` profile | http://127.0.0.1:17474/browser/ |
 | `worker` | Scan a read-only memory-bank mount; process queued messages with Terra low | No published port |
-| `mcp` | Nine session-facing tools over stateless HTTP | http://127.0.0.1:8765/mcp |
+| `mcp` | Ten session-facing tools over stateless HTTP | http://127.0.0.1:8765/mcp |
 
 Colima is the Linux VM running Docker on macOS; all services are Docker
 containers. Source files and model credentials are never copied into the image.
@@ -80,7 +80,7 @@ Creation timestamps can differ between macOS and Linux; the scanner recognizes
 identical source content and retains the timestamps already in Neo4j.
 
 Extraction, commit, retry, structural repair, and dream operations remain Python
-engine/CLI responsibilities. The MCP catalog exposes only the nine session tools
+engine/CLI responsibilities. The MCP catalog exposes only the ten session tools
 listed in [mcp.md](mcp.md). Dream scheduling/promotion remains an explicit engine operator
 action (`graph-memory dream ...`), not an automatic ingestion side effect.
 

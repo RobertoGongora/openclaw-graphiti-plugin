@@ -68,7 +68,7 @@ fact is already retrievable. Workers continue to ingest saved sessions independe
 
 The plugin and skill validators check package structure. At validation a fresh
 Codex app-server discovered all eight tools of that release through the plugin
-alone and successfully called entity search. The catalog now has nine tools;
+alone and successfully called entity search. The catalog now has ten tools;
 `memory_status` was added afterwards. Behavioral probes use Terra/medium at standard speed in
 ephemeral sessions, so the probes do not become source transcripts.
 

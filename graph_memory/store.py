@@ -826,6 +826,55 @@ class GraphStore:
             )
         )
 
+    def confirm(self, namespace, fact_id, note, valid_at=None):
+        """A person vouches for a claim the engine could not verify. The fact keeps
+        its status and evidence, so the record still says how it was learned; the
+        projection treats it as established from the confirmed date."""
+
+        def run(tx):
+            self.lock(tx, namespace)
+            self.touch(tx, namespace, "MemoryFact", [fact_id])
+            row = tx.run(
+                "MATCH (f:MemoryFact {id:$id,namespace:$ns}) "
+                "OPTIONAL MATCH (f)-[:CITES]->(m:MemoryMessage) WHERE m.timestamp IS NOT NULL "
+                "RETURN f.status AS status,coalesce(f.retracted,false) AS retracted,"
+                "min(m.timestamp) AS said_at",
+                id=fact_id,
+                ns=namespace,
+            ).single()
+            if not row or row["status"] is None:
+                raise ValueError("Fact not found in namespace")
+            if row["retracted"]:
+                raise ValueError("A retracted fact cannot be confirmed")
+            if row["status"] != "uncertain":
+                raise ValueError("Only an uncertain fact needs confirming")
+            when = valid_at or (datetime.fromisoformat(row["said_at"]) if row["said_at"] else None)
+            if when is None:
+                raise ValueError("Give valid_at: no dated message supports this fact")
+            tx.run(
+                "MATCH (f:MemoryFact {id:$id}) SET f.confirmed_at=$at,f.confirmation_note=$note,"
+                "f.confirmed_valid_at=$valid_at,f.confirmed_valid_ts=$valid_ts "
+                "WITH f MATCH (s:MemorySpace {id:$ns}) SET s.revision=s.revision+1",
+                id=fact_id,
+                ns=namespace,
+                at=now().isoformat(),
+                note=note,
+                valid_at=when.isoformat(),
+                valid_ts=when.timestamp(),
+            ).consume()
+            return {"fact_id": fact_id, "confirmed": True, "valid_at": when.isoformat()}
+
+        return self.transaction(
+            lambda tx: self.mutate(
+                tx,
+                namespace,
+                "fact_confirmed",
+                {"fact_id": fact_id, "note": note},
+                run,
+                scoped=True,
+            )
+        )
+
     def merge(self, namespace, source_key, target_key, reason):
         from . import aliases
 

@@ -357,3 +357,15 @@ of the whole state. The first write by the current code checks that digest,
 then stores the new hash in both head fields. An older process then fails its
 own state check and cannot append to the journal. The step cannot be undone
 without restoring a backup.
+
+## Confirming an uncertain fact
+
+An assistant's claim with no validating tool result is stored as `uncertain` and
+undated. A person can vouch for it with `memory_confirm`. The fact keeps its status
+and its evidence, so the record still says how it was learned. It gains the
+confirmation time, the note, and a date: the one given, or the time the cited
+message was written. Recall then treats it as established from that date, and it
+competes for its slot like any confirmed fact. The confirmation is a journaled
+change to that one fact, so knowledge as of an earlier change still shows the doubt,
+and `memory_retract` takes the fact out again. Only an uncertain fact that has not
+been retracted can be confirmed.

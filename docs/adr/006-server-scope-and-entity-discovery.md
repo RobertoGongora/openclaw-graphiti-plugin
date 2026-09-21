@@ -2,8 +2,8 @@
 
 Status: Implemented and validated, 2026-09-17.
 
-**Updated 2026-09-21.** The catalog has nine tools since ADR-007 added
-`memory_status`; "eight-tool catalog" below describes this release. The worker
+**Updated 2026-09-21.** The catalog has ten tools: ADR-007 added `memory_status`, and
+`memory_confirm` followed; "eight-tool catalog" below describes this release. The worker
 counts under Deployment are those of 2026-09-17; the transcript deployment has run
 eight consumers since 2026-09-20. See [operations](../operations.md).
 

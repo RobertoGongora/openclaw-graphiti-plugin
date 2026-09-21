@@ -85,7 +85,7 @@ namespace are not returned. For historical recall, pass the same `known_at` or
 `at_change` to evidence retrieval.
 
 Evidence and entity search are also permitted by retrieval-only MCP servers.
-The public catalog has nine tools: these eight plus `memory_status`, added later.
+The public catalog has ten tools: these eight plus `memory_status` and `memory_confirm`, added later.
 Clients with cached catalogs may need to reconnect. Tool results remain JSON in
 both the MCP text and structured-content representations.
 

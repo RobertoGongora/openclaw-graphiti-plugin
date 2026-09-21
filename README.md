@@ -87,13 +87,14 @@ stateless answer on both transports.
 | `memory_latest` | Use when the user asks when something last happened or what was most recently recorded about a subject. |
 | `memory_ingest` | Use when the user asks you to remember something or when saving new information from a conversation. |
 | `memory_retract` | Use when the user says a remembered fact is incorrect or should no longer inform answers. |
+| `memory_confirm` | Use when the user states that an uncertain remembered fact is true. Never confirm on your own judgement. |
 | `memory_merge` | Use when separate memory entries are confirmed to refer to the same person, project, or thing. |
 | `memory_render` | Use when the user wants to see their memory graph or how its facts connect. Shows the whole graph by default, or a selected view using optional Cypher. |
 | `memory_search_entities` | Use when you need to find a remembered person, project, or thing and are unsure of its name or identity. |
 | `memory_evidence` | Use when you need to verify a recalled fact or inspect the evidence behind it. |
 | `memory_status` | Use when you want to check memory ingestion progress, how much remains unstaged, processing or failed work, and graph counts. |
 
-Only these nine operations are exposed through MCP. Read-only mode exposes recall,
+Only these ten operations are exposed through MCP. Read-only mode exposes recall,
 latest, rendering, entity search, evidence and status. Extraction, commit, repair,
 and dreaming stay inside the engine and CLI; calling an internal operation through
 MCP is rejected, even by name.

@@ -433,6 +433,15 @@ class Retract(Scope):
     reason: Text
 
 
+class Confirm(Scope):
+    fact_id: Key
+    note: Text = Field(description="Why this is known to be true, in the user's words.")
+    valid_at: AwareDatetime | None = Field(
+        default=None,
+        description="When it became true. Defaults to when the cited message was written.",
+    )
+
+
 class Empty(Model):
     pass
 

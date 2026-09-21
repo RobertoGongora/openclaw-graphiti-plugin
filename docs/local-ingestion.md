@@ -6,7 +6,7 @@ Bolt 27687 and MCP 8766. It does not replace or modify these workers.
 
 **Current state, 2026-09-21.** Most of this page is a dated record of rollouts.
 What holds today: Neo4j requires `NEO4J_PASSWORD`, the Browser port is published
-only with the Compose `browser` profile, the MCP catalog has nine tools, and the
+only with the Compose `browser` profile, the MCP catalog has ten tools, and the
 image is selected by `GRAPH_MEMORY_TAG`. The transcript deployment has run eight
 consumers since 2026-09-20 (`evals/reports/20260920-eight-workers-baseline.json`).
 The live worker count is in the `daemon_start` log event and in
@@ -19,7 +19,7 @@ VM hosting Docker on macOS. Three services are deployed:
 - `graph-memory-neo4j-1`: existing graph and Neo4j Browser.
 - `graph-memory-worker-1`: read-only bank scanner and two Terra/low consumers
   (concurrency reduced from twelve on 2026-09-17, fast mode off).
-- `graph-memory-mcp-1`: nine public tools over HTTP (eight when this was written), with
+- `graph-memory-mcp-1`: ten public tools over HTTP (eight when this was written), with
   [compact recall and evidence on demand](compact-recall.md).
 
 Deployment configuration lives at
@@ -178,7 +178,7 @@ image alone is not a compatible rollback after new journaled changes exist.
 Start the Browser with the Compose `browser` profile, open
 http://127.0.0.1:17474/browser/ and connect to `bolt://127.0.0.1:17687` as user
 `neo4j` with `NEO4J_PASSWORD`. The MCP endpoint is http://127.0.0.1:8765/mcp and
-requires the private bearer token. It exposes the nine tools listed in
+requires the private bearer token. It exposes the ten tools listed in
 [mcp.md](mcp.md).
 
 [Graph queries](graph-browser.cypher) show the graph and queue status.

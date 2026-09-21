@@ -483,6 +483,11 @@ class MemoryService:
                 lambda r: self.store.retract(r.namespace, r.fact_id, r.reason),
                 "Use when the user says a remembered fact is incorrect or should no longer inform answers.",
             ),
+            "memory_confirm": (
+                m.Confirm,
+                lambda r: self.store.confirm(r.namespace, r.fact_id, r.note, r.valid_at),
+                "Use when the user states that an uncertain remembered fact is true. Never confirm on your own judgement.",
+            ),
             "memory_merge": (
                 m.Merge,
                 lambda r: self.store.merge(r.namespace, r.source_key, r.target_key, r.reason),
@@ -526,6 +531,7 @@ class MemoryService:
             "memory_recall",
             "memory_latest",
             "memory_retract",
+            "memory_confirm",
             "memory_merge",
         }
         catalog = {name: entry for name, entry in self.tools().items() if name in names}
