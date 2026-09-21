@@ -26,16 +26,26 @@ Use `daemon --source-records --transcripts DIRECTORY` or
 source parser, separate from the old text-only feed. Claude Code JSONL and Codex
 response-item JSONL are supported, including Codex custom tool calls/outputs.
 Memory MCP recall results also remain derived context, not fresh verification.
+The output of a shell, exec or python call is a tool result and can validate an
+assistant claim, because commands are how agents verify most things. The exception
+is a command whose text names memory: what it printed may be a stored claim, so it
+stays context.
 Provider duplicate event mirrors, reasoning, and system/developer instructions
 are not claim sources. Delegated subagent instructions and automated Codex exec
 prompts are context, even when their provider role is `user`. Non-text attachments are gaps, not interpreted content.
 
 A session stays a single source identity with multiple bounded episodes. Each
 batch contains at most eight new text chunks (90,000 characters), four preceding
-chunks of context, and available earlier calls for late results. Individual
+chunks of context, and available earlier calls for late results. A batch also
+carries the successful tool results of the turn in progress (back to the last user
+message, newest first, with their calls, up to 40,000 characters): an agent reports
+after its tool calls, and the results behind the report are usually far more than
+four messages back. Individual
 records are split at 24,000 characters without dropping remaining text. Each
 chunk retains a record ID, role, timestamp, call ID and source classification.
-The durable cursor and prefix hash reject rewritten history; repeated intake or
+A cursor written before shell output counted as a result is recognized and resumes;
+its stored messages keep their original classification. The durable cursor and
+prefix hash reject rewritten history; repeated intake or
 process restart does not replay completed chunks. A partial final JSONL line
 waits for completion. One scan opens at most `MEMORY_INTAKE_FILES` files with
 work (default 4) and stages at most four batches from each. It stops after 120

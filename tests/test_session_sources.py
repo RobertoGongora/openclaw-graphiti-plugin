@@ -5,7 +5,14 @@ import pytest
 from graph_memory.journal import Journal
 from graph_memory.models import Evidence, Extraction, Transcript
 from graph_memory.service import MemoryService
-from graph_memory.session_sources import feed_records, records
+from graph_memory.session_sources import (
+    OPAQUE_CALL,
+    SHELL_OUTPUT,
+    before_shell_results,
+    feed_records,
+    records,
+)
+from graph_memory.store import digest
 from tests.helpers import MYSQL, PROJECT
 
 
@@ -160,16 +167,72 @@ def test_assistant_claim_requires_validation_and_memory_read_cannot_validate():
         e.validate_evidence(t)
 
 
-def test_opaque_execution_and_unmatched_result_are_not_primary(tmp_path):
+def test_shell_output_is_a_result_unless_the_command_names_memory(tmp_path):
     p = tmp_path / "s.jsonl"
     p.write_text(
         codex("custom_tool_call", call_id="c", name="exec", input="run some JS")
         + codex("custom_tool_call_output", call_id="c", output="Atlas uses MySQL.")
         + codex("function_call_output", call_id="missing", output="Success")
+        + codex("custom_tool_call", call_id="m", name="exec", input="graph-memory recall atlas")
+        + codex("custom_tool_call_output", call_id="m", output="Atlas uses MySQL.")
     )
     ms = list(records(p))
-    assert ms[1].source_type == ms[2].source_type == "context"
-    assert ms[1].gaps and ms[2].gaps
+    assert (ms[1].source_type, ms[1].gaps) == ("tool_result", [SHELL_OUTPUT])
+    assert ms[2].source_type == ms[4].source_type == "context"
+    assert ms[2].gaps and ms[4].gaps == [OPAQUE_CALL]
+
+
+def test_cursor_written_before_shell_results_resumes(graph, tmp_path):
+    store, ns = graph
+    p = tmp_path / "s.jsonl"
+    p.write_text(
+        claude("user", "Atlas uses MySQL.")
+        + codex("custom_tool_call", call_id="c", name="exec", input="make test")
+        + codex("custom_tool_call_output", call_id="c", output="12 passed")
+    )
+    service = MemoryService(store)
+    fid = feed_records(service, ns, p, "s")["feed_id"]
+    old = [before_shell_results(m.model_dump(mode="json")) for m in records(p)]
+    assert old[2]["source_type"] == "context" and old[2]["gaps"] == [OPAQUE_CALL]
+    store.transaction(
+        lambda tx: tx.run(
+            "MATCH (f:MemoryFeed {id:$id}) SET f.prefix_hash=$hash", id=fid, hash=digest(old)
+        ).consume()
+    )
+    with p.open("a") as f:
+        f.write(claude("assistant", "The tests pass."))
+    assert feed_records(service, ns, p, "s")["receipts"]
+
+
+def test_report_sees_the_successful_results_of_its_turn(graph, tmp_path):
+    store, ns = graph
+    p = tmp_path / "s.jsonl"
+    lines = [
+        codex("function_call", call_id="before", name="status", arguments="{}"),
+        codex("function_call_output", call_id="before", output="an earlier turn"),
+        claude("user", "Run the tests."),
+        codex("custom_tool_call", call_id="run", name="exec", input="make test"),
+        codex("custom_tool_call_output", call_id="run", output="12 passed"),
+        claude("assistant", [{"type": "tool_use", "id": "bad", "name": "Grep", "input": {}}]),
+        claude(
+            "user",
+            [{"type": "tool_result", "tool_use_id": "bad", "is_error": True, "content": "boom"}],
+        ),
+    ]
+    lines += [claude("assistant", f"Working on step {i}.") for i in range(12)]
+    lines += [claude("assistant", "The tests pass.")]
+    p.write_text("".join(lines))
+    service = MemoryService(store)
+    r = feed_records(service, ns, p, "s", max_batches=10)
+    t = Transcript.model_validate_json(
+        store.episode(ns, r["receipts"][-1]["episode_id"])["payload"]
+    )
+    carried = {m.call_id: m.source_type for m in t.messages if m.id not in t.focus_message_ids}
+    assert [m.content for m in t.messages if m.call_id == "run"] == ["make test", "12 passed"]
+    assert "before" not in carried and "bad" not in carried
+    assert [m.id for m in t.messages] == sorted(
+        (m.id for m in t.messages), key=lambda i: [int(x) for x in i.split("-")[1::2]]
+    )
 
 
 def test_record_chunks_preserve_all_content_and_partial_line(tmp_path):

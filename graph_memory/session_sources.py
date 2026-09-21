@@ -18,6 +18,13 @@ from .store import digest
 FORMAT = "session-records-v1"
 CHUNK = 24_000
 MAX_BATCH_CHARS = 90_000
+# Earlier tool results of the turn in progress, carried into a batch as context: an
+# agent reports after its tool calls, and the results that back the report are
+# usually many messages behind it.
+LOOKBACK_CHARS = 40_000
+LOOKBACK_MESSAGES = 400
+OPAQUE_CALL = "opaque_command_artifacts_not_resolved"
+SHELL_OUTPUT = "shell_output_not_attributed_to_files"
 # path, operation, submitted body, capture: the ArtifactTouch vocabulary.
 Touch = tuple[
     str,
@@ -219,16 +226,15 @@ def records(path: Path):
                     gaps.append("artifact_reference_limit_exceeded")
                     recognized = recognized[:32]
                 # Keep pairing state immutable with respect to later results.
-                if call_id:
-                    calls[call_id] = (tool, recognized)
-                role, source_type = "assistant", "tool_call"
+                shell = any(x in tool.lower() for x in ("exec", "bash", "shell", "python"))
                 content = (
                     json.dumps(args, ensure_ascii=False) if not isinstance(args, str) else args
                 )
-                if not recognized and any(
-                    x in tool.lower() for x in ("exec", "bash", "shell", "python")
-                ):
-                    gaps.append("opaque_command_artifacts_not_resolved")
+                if call_id:
+                    calls[call_id] = (tool, recognized, shell and "memor" in content.lower())
+                role, source_type = "assistant", "tool_call"
+                if not recognized and shell:
+                    gaps.append(OPAQUE_CALL)
                 for p, op, body, captured in recognized:
                     touches.append(
                         ArtifactTouch(
@@ -240,7 +246,7 @@ def records(path: Path):
                         )
                     )
             elif entry_kind == "result":
-                tool, recognized = calls.get(call_id, ("unknown tool", []))
+                tool, recognized, reads_memory = calls.get(call_id, ("unknown tool", [], False))
                 output = entry.get("output", "")
                 if isinstance(output, list) and any(
                     isinstance(x, dict)
@@ -308,10 +314,14 @@ def records(path: Path):
                 if not recognized and any(
                     x in tool.lower() for x in ("exec", "bash", "shell", "python")
                 ):
-                    # Shell/JS wrappers may include memory reads or multiple operations.
-                    # Preserve them, but don't promote their output as fresh verification.
-                    source_type = "context"
-                    gaps.append("opaque_command_artifacts_not_resolved")
+                    # A command's output is what the agent observed, and it is how agents
+                    # verify most things. Only a command that names memory is held back:
+                    # what it printed may be a stored claim, not a fresh observation.
+                    if reads_memory or source_type != "tool_result":
+                        source_type = "context"
+                        gaps.append(OPAQUE_CALL)
+                    else:
+                        gaps.append(SHELL_OUTPUT)
             else:
                 role = entry.get("role", "note")
                 content = text_content(entry.get("content", ""))
@@ -353,6 +363,35 @@ def records(path: Path):
                 )
 
 
+def before_shell_results(message):
+    """The message as parsed before shell output could validate a claim. Cursors
+    written then hash this form, and the file behind them has not changed."""
+    if SHELL_OUTPUT not in message["gaps"]:
+        return message
+    gaps = [OPAQUE_CALL if g == SHELL_OUTPUT else g for g in message["gaps"]]
+    return {**message, "source_type": "context", "gaps": gaps}
+
+
+def turn_results(messages, count, held, room):
+    """Successful tool results between the last user message and the batch, newest
+    first, each with its call, until `room` characters are used."""
+    calls = {m.call_id: m for m in messages[:count] if m.source_type == "tool_call" and m.call_id}
+    carried = []
+    for m in reversed(messages[max(0, count - LOOKBACK_MESSAGES) : count]):
+        if m.source_type == "user_assertion":
+            break
+        if m.source_type != "tool_result" or m.tool_failed is True or m.id in held:
+            continue
+        group = [x for x in (calls.get(m.call_id), m) if x and x.id not in held]
+        size = sum(len(x.content) for x in group)
+        if size > room:
+            continue
+        room -= size
+        carried.extend(group)
+        held.update(x.id for x in group)
+    return carried
+
+
 def feed_records(
     service,
     namespace,
@@ -389,10 +428,11 @@ def feed_records(
         row = tx.run("MATCH (f:MemoryFeed {id:$id}) RETURN properties(f) AS f", id=fid).single()
         previous = row["f"] if row else {}
         count = previous.get("message_count", 0)
+        prefix = [m.model_dump(mode="json") for m in messages[:count]]
         if count > len(messages) or (
             count
-            and digest([m.model_dump(mode="json") for m in messages[:count]])
-            != previous["prefix_hash"]
+            and previous["prefix_hash"]
+            not in (digest(prefix), digest([before_shell_results(m) for m in prefix]))
         ):
             raise ValueError(
                 "Transcript prefix changed; preserve old evidence and review a new source revision"
@@ -408,6 +448,7 @@ def feed_records(
                 end += 1
             selected = messages[max(0, count - 4) : end]
             ids = {m.id for m in selected}
+            selected += turn_results(messages, count, ids, LOOKBACK_CHARS)
             result_calls = {
                 m.call_id for m in messages[count:end] if m.role == "tool" and m.call_id
             }
