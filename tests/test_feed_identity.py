@@ -442,3 +442,128 @@ def test_a_different_file_at_a_known_key_is_reported_not_merged(graph, tmp_path)
     assert fed == [{"source": str(impostor.resolve()), "status": "failed", "error": "ValueError"}]
     assert feeds(store, ns) == before and episodes(store, ns) == staged
     assert census(store, ns, [new])["gaps"]["prefix_mismatches"] == 1
+
+
+UUID = "0138dd13-1c43-4517-84bc-416fc7aac737.jsonl"
+
+
+def project(root, directory="-Users-rob-atlas"):
+    """A uuid-named session and a workflow journal, whose name many directories share."""
+    session, journal = root / directory / UUID, root / directory / "journal.jsonl"
+    session.parent.mkdir(parents=True)
+    session.write_text(claude("user", "Atlas uses MySQL.") + claude("assistant", "Noted."))
+    journal.write_text(claude("user", "Workflow step one.") + claude("assistant", "Done."))
+    return session, journal
+
+
+def test_renamed_directory_continues_the_same_feeds(graph, tmp_path, parsed):
+    store, ns = graph
+    service = MemoryService(store)
+    root = tmp_path / "sessions" / "claude"
+    project(root)
+    # Another workflow's journal: the name alone must never decide.
+    other = root / "-Users-rob-other" / "journal.jsonl"
+    other.parent.mkdir()
+    other.write_text(claude("user", "Another workflow entirely."))
+    seen = {}
+    while follow_once(service, ns, [root], seen, source_records=True):
+        pass
+    before, staged = feeds(store, ns), episodes(store, ns)
+    (root / "-Users-rob-atlas").rename(root / "-Users-rob-atlas-v2")
+    session = root / "-Users-rob-atlas-v2" / UUID
+    with session.open("a") as stream:
+        stream.write(claude("user", "Atlas moved to Postgres."))
+    # The running watcher and a restarted one agree.
+    fed = follow_once(service, ns, [root], seen, source_records=True)
+    assert follow_once(service, ns, [root], {}, source_records=True) == []
+    assert [(Path(f["source"]).name, f.get("status"), len(f["receipts"])) for f in fed] == [
+        (UUID, None, 1)
+    ]
+    after = feeds(store, ns)
+    assert set(after) == set(before) and episodes(store, ns) == staged + 1
+    feed = after[fed[0]["feed_id"]]
+    assert feed["session_id"] == before[feed["id"]]["session_id"]
+    assert feed["message_count"] == before[feed["id"]]["message_count"] + 1
+    assert sorted(f["source_key"] for f in after.values()) == [
+        "claude:-Users-rob-atlas-v2/" + UUID,
+        "claude:-Users-rob-atlas-v2/journal.jsonl",
+        "claude:-Users-rob-other/journal.jsonl",
+    ]
+    assert census(store, ns, [root])["unstaged_episodes"] == 0
+    # The journal was adopted because it begins with what its feed holds; appending works.
+    with (root / "-Users-rob-atlas-v2" / "journal.jsonl").open("a") as stream:
+        stream.write(claude("user", "Workflow step two."))
+    fed = follow_once(service, ns, [root], seen, source_records=True)
+    assert len(fed) == 1 and len(fed[0]["receipts"]) == 1
+    assert set(feeds(store, ns)) == set(before) and episodes(store, ns) == staged + 2
+
+
+def test_rename_seen_from_another_mount_is_still_a_rename(graph, tmp_path):
+    store, ns = graph
+    service = MemoryService(store)
+    container = tmp_path / "sessions" / "claude"
+    project(container)
+    drain(service, ns, [container])
+    before, staged = feeds(store, ns), episodes(store, ns)
+    # Remounted AND a directory renamed: stored paths exist nowhere, keys point at the old name.
+    host = tmp_path / "home" / ".claude" / "projects"
+    host.parent.mkdir(parents=True)
+    container.rename(host)
+    (host / "-Users-rob-atlas").rename(host / "-Users-rob-atlas-v2")
+    assert census(store, ns, [host])["unstaged_episodes"] == 0
+    assert follow_once(service, ns, [host], {}, source_records=True) == []
+    assert set(feeds(store, ns)) == set(before) and episodes(store, ns) == staged
+
+
+def test_a_copy_beside_the_original_is_refused_under_the_lowest_feed_id(
+    graph, tmp_path, monkeypatch
+):
+    store, ns = graph
+    service = MemoryService(store)
+    root = tmp_path / "sessions" / "claude"
+    session, journal = project(root)
+    drain(service, ns, [root])
+    for number in (1, 2):
+        copy = root / f"copy-{number}"
+        copy.mkdir()
+        shutil.copy(session, copy / UUID)
+    shutil.copy(journal, root / "copy-1" / "journal.jsonl")
+    # Two feeds under one unique name, accepted on purpose, then a third copy arrives.
+    monkeypatch.setenv("MEMORY_FEED_ACCEPT_UNMATCHED", "1")
+    (root / "copy-2" / UUID).unlink()
+    drain(service, ns, [root])
+    monkeypatch.delenv("MEMORY_FEED_ACCEPT_UNMATCHED")
+    before = feeds(store, ns)
+    same = sorted(fid for fid, f in before.items() if f["source_uri"].endswith(UUID))
+    assert len(before) == 4 and len(same) == 2
+    shutil.copy(session, root / "copy-2" / UUID)
+    for _ in range(3):  # Whatever order the index was built in.
+        fed = follow_once(service, ns, [root], {}, source_records=True)
+        assert [(f["status"], f["known_feed_id"]) for f in fed] == [
+            ("feed_identity_refused", same[0])
+        ]
+    assert feeds(store, ns) == before
+
+
+def test_an_impostor_under_a_vanished_name_is_not_adopted(graph, tmp_path):
+    store, ns = graph
+    service = MemoryService(store)
+    root = tmp_path / "sessions" / "claude"
+    session, journal = project(root)
+    drain(service, ns, [root])
+    before, staged = feeds(store, ns), episodes(store, ns)
+    shutil.rmtree(session.parent)
+    impostor, unrelated = project(root, "-Users-rob-elsewhere")
+    impostor.write_text(claude("user", "A different conversation under the same uuid."))
+    unrelated.write_text(claude("user", "A workflow that shares only its file name."))
+    fed = follow_once(service, ns, [root], {}, source_records=True)
+    # The unique name is tried against its feed and rejected by content; the shared
+    # name was never a claim, so that file is simply new.
+    assert [(Path(f["source"]).name, f.get("status"), f.get("error")) for f in fed] == [
+        (UUID, "failed", "ValueError"),
+        ("journal.jsonl", None, None),
+    ]
+    after = feeds(store, ns)
+    assert {fid: after[fid] for fid in before} == before
+    assert len(after) == len(before) + 1 and episodes(store, ns) == staged + 1
+    assert census(store, ns, [root])["gaps"]["prefix_mismatches"] == 1

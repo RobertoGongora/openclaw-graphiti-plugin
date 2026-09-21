@@ -24,7 +24,7 @@ from itertools import islice
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
-from .session_sources import FORMAT
+from .session_sources import FORMAT, records
 from .store import digest
 
 # Where the hosts keep sessions; the directory above names the host.
@@ -151,11 +151,10 @@ def feed_rows(tx, namespace):
     ).data()
 
 
-def file_name(uri):
-    """What names this file wherever its tree is mounted: a unique basename, or
-    the basename with its directory (every workflow has a journal.jsonl)."""
-    path = PurePosixPath(uri)
-    return path.name if UNIQUE_NAME.search(path.name) else "/".join(path.parts[-2:])
+def unique_name(uri):
+    """Session uuids, rollout names and agent hashes name one file wherever it sits;
+    every workflow has a journal.jsonl."""
+    return bool(UNIQUE_NAME.search(PurePosixPath(uri).name))
 
 
 def accept_unmatched():
@@ -166,7 +165,8 @@ class Feeds:
     """The namespace's feed cursors: by source key, by stored path, by file name."""
 
     def __init__(self, store, namespace, roots=None):
-        self.namespace = namespace
+        self.store, self.namespace = store, namespace
+        self.roots = validate_roots(roots) if roots is not None else []
         self.by_key, self.by_uri, self.by_name = {}, {}, {}
         rows = store.read(feed_rows, namespace)
         for row in rows:
@@ -177,21 +177,72 @@ class Feeds:
                 # The watcher's own feed for a path wins over one a direct caller made.
                 if not held or row["session"] == "host:" + digest(row["uri"]):
                     self.by_uri[row["uri"]] = row
-                self.by_name.setdefault(file_name(row["uri"]), row)
+                self.by_name.setdefault(PurePosixPath(row["uri"]).name, {})[row["id"]] = row
         # Older feeds these roots cannot name: their files would all read as new.
         self.blocked = {}
         if roots is not None and not accept_unmatched():
-            counts = plan(rows, validate_roots(roots))[1]
+            counts = plan(rows, self.roots)[1]
             if counts["unmatched"] or counts["conflicts"]:
                 self.blocked = counts
 
-    def resolve(self, key, name) -> Identity:
+    def present(self, row, name):
+        """Is the file this feed was fed from still there? Its stored path may be
+        another mount's, so it is also looked for where today's roots would put it."""
+        places = {row["uri"]}
+        label, _, relative = (row["key"] or uri_key(self.roots, row["uri"]) or "").partition(":")
+        for root in self.roots:
+            if relative and root.label == label:
+                places.add(str((root.given.parent if root.is_file() else root.given) / relative))
+        return any(place != name and Path(place).exists() for place in places)
+
+    def renamed(self, name, messages):
+        """The known feed this file continues after its directory was renamed.
+
+        A file that is new by key and by path but carries a known name is a copy
+        while the known file exists, and is refused. Once that file is gone this one
+        took its place: a unique name says so by itself, and feed_records still
+        rejects different content; any other name must also begin with exactly the
+        messages the feed holds."""
+        known = sorted(
+            self.by_name.get(PurePosixPath(name).name, {}).values(), key=lambda r: r["id"]
+        )
+        parent = PurePosixPath(name).parts[-2:-1]
+        if not unique_name(name):
+            # The same name in another directory is another file until its content agrees.
+            alike = [row for row in known if PurePosixPath(row["uri"]).parts[-2:-1] == parent]
+            gone = [row for row in known if not self.present(row, name)]
+            if gone:
+                found = messages()
+                # Read now: the index does not follow cursors as they advance.
+                cursors = self.store.read(
+                    lambda tx: {
+                        r["id"]: (r["count"] or 0, r["prefix"])
+                        for r in tx.run(
+                            "MATCH (f:MemoryFeed) WHERE f.id IN $ids "
+                            "RETURN f.id AS id,f.message_count AS count,f.prefix_hash AS prefix",
+                            ids=[row["id"] for row in gone],
+                        )
+                    }
+                )
+                for row in gone:
+                    count, prefix = cursors.get(row["id"], (0, None))
+                    if 0 < count <= len(found) and prefix == digest(
+                        [m.model_dump(mode="json") for m in found[:count]]
+                    ):
+                        return row
+            known = [row for row in alike if self.present(row, name)]
+        for row in known:
+            if self.present(row, name):
+                raise KnownElsewhere(row)
+        return known[0] if known else None
+
+    def resolve(self, key, name, messages=None) -> Identity:
+        """messages: how to get the file's parsed records, when they are already at hand."""
         row = self.by_key.get(key) or self.by_uri.get(name)
+        if not row and not accept_unmatched():
+            row = self.renamed(name, messages or (lambda: list(records(Path(name)))))
         if row:
             return Identity(row["id"], row["session"], key, True)
-        row = self.by_name.get(file_name(name))
-        if row and not accept_unmatched():
-            raise KnownElsewhere(row)
         session = "source:" + digest(key)
         return Identity(digest([FORMAT, self.namespace, key, session]), session, key, False)
 
@@ -203,10 +254,12 @@ class Feeds:
             "uri": name,
         }
         for index in (self.by_key, self.by_uri):
-            for held in [k for k, v in index.items() if v["id"] == identity.feed_id]:
-                del index[held]
+            for mark in [k for k, v in index.items() if v["id"] == identity.feed_id]:
+                del index[mark]
+        for rows in self.by_name.values():
+            rows.pop(identity.feed_id, None)
         self.by_key[identity.source_key] = self.by_uri[name] = row
-        self.by_name[file_name(name)] = row
+        self.by_name.setdefault(PurePosixPath(name).name, {})[identity.feed_id] = row
 
     def rekey(self, store, files):
         """Name by today's roots every feed found by its path alone. A fully fed

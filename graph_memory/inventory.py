@@ -106,7 +106,9 @@ def census(store, namespace, roots, stop=None):
             before = path.stat()
             messages = list(records(path))
             try:
-                cursor = cursors.get(feeds.resolve(key, name).feed_id, {})
+                cursor = cursors.get(
+                    feeds.resolve(key, name, lambda found=messages: found).feed_id, {}
+                )
             except KnownElsewhere:
                 gaps["identity_refused"] += 1
                 continue
