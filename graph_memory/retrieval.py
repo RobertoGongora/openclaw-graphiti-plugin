@@ -77,6 +77,9 @@ def compact_fact(f, lane, copies=1):
     }
     if len(f["summary"]) > 500:
         result["text_truncated"] = True
+    if f.get("confirmed"):
+        # Current because a person said so, not because the engine verified it.
+        result["confirmed_by_user"] = True
     if f.get("documented_at") and not f.get("valid_at"):
         result["documented_at"] = f["documented_at"]
     count = max(copies, len(f.get("corroborating_fact_ids", [])))

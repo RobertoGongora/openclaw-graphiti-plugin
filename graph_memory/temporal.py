@@ -6,22 +6,29 @@ from datetime import datetime
 from .models import EVENT_RELATIONS
 
 
+def confirmed(fact):
+    """A person vouched for this unverified claim: established from the date they
+    confirmed. Rewritten once, up front, so every rule below sees the same fact,
+    including the one that lets a confirmed fact fulfil a plan."""
+    if not fact.get("confirmed_at") or fact["status"] != "uncertain" or fact.get("retracted"):
+        return fact
+    return {
+        **fact,
+        "status": "active",
+        "valid_at": fact["confirmed_valid_at"],
+        "valid_ts": fact["confirmed_valid_ts"],
+        "confirmed": True,
+    }
+
+
 def project(facts: list[dict], as_of: datetime) -> dict:
     cutoff = as_of.timestamp()
     groups = defaultdict(list)
     history, uncertain, events, documented = [], [], [], []
+    facts = [confirmed(fact) for fact in facts]
     for fact in facts:
         if fact.get("retracted"):
             continue
-        if fact.get("confirmed_at") and fact["status"] == "uncertain":
-            # A person vouched for it: established from the date they confirmed.
-            fact = {
-                **fact,
-                "status": "active",
-                "valid_at": fact["confirmed_valid_at"],
-                "valid_ts": fact["confirmed_valid_ts"],
-                "confirmed": True,
-            }
         if fact.get("valid_ts") is None:
             if fact.get("documented_ts") is not None:
                 if fact["documented_ts"] <= cutoff:

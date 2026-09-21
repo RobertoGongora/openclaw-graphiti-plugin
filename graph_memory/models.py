@@ -149,7 +149,6 @@ class Entity(Model):
 
 
 CLAIMS = {"user_assertion", "assistant_report"}
-NEW_EVIDENCE = CLAIMS | {"tool_result"}
 LINE_NUMBER = re.compile(r"(?m)^[ \t]*\d+(?:\t|→|: ?)")
 MARKUP = set("*_`~\\")
 
@@ -314,10 +313,11 @@ class Extraction(Model):
         focus = set(transcript.focus_message_ids)
         for fact_index, fact in enumerate(self.facts):
             cites = [messages[e.message_id] for e in [*fact.evidence, *fact.validation_evidence]]
-            # Only a claim or a tool result can be new; anything else in focus is
-            # context. Plain transcripts carry no roles, so any message there can be.
+            # A feed fact states a new claim: the same rule that decides whether the
+            # batch is worth a model call. Plain transcripts carry no roles, so any
+            # message there can be new.
             if focus and not any(
-                m.id in focus and m.source_type in NEW_EVIDENCE | {"legacy"} for m in cites
+                m.id in focus and m.source_type in CLAIMS | {"legacy"} for m in cites
             ):
                 reject(
                     "A feed fact must cite at least one new focus message",

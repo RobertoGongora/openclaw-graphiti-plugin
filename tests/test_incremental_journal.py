@@ -481,3 +481,25 @@ def test_retract_and_merge_journal_only_what_they_touch(graph, monkeypatch):
     targets = {f["target"] for lane in lanes for f in lane if isinstance(f, dict) and "target" in f}
     assert PG["key"] in targets
     assert Journal(store).verify_live(ns)["verified"]
+
+
+def test_the_namespace_lock_is_taken_once_per_transaction(graph):
+    """Writing the lock node again while another writer waits on it makes Neo4j kill
+    the waiter as a deadlock victim; a long transaction must not do that per step."""
+    store, ns = graph
+    fact(store, ns, "one")
+
+    def counter():
+        return store.transaction(
+            lambda tx: tx.run("MATCH (s:MemorySpace {id:$ns}) RETURN s.lock AS n", ns=ns).single()
+        )["n"]
+
+    before = counter()
+
+    def many(tx):
+        return [store.lock(tx, ns) for _ in range(5)]
+
+    assert len(set(store.transaction(many))) == 1
+    assert counter() == before + 1
+    store.transaction(lambda tx: store.lock(tx, ns))
+    assert counter() == before + 2  # a new transaction takes it again

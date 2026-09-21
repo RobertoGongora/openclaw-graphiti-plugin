@@ -25,6 +25,10 @@ def normalized(value: str) -> str:
     return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", value).casefold()).strip()
 
 
+# Namespace locks already held by the transaction running on this thread.
+_held = threading.local()
+
+
 class GraphStore:
     def __init__(
         self, uri: str, user: str = "neo4j", password: str | None = None, database: str = "neo4j"
@@ -64,6 +68,19 @@ class GraphStore:
         ) as session:
             return session.execute_write(fn, *args)
 
+    @staticmethod
+    def _attempt(fn):
+        def run(tx, *args):
+            # Per attempt: a retried transaction holds nothing, and a finished one's
+            # identity may be reused by the next.
+            _held.locks = set()
+            try:
+                return fn(tx, *args)
+            finally:
+                _held.locks = None
+
+        return run
+
     def transaction(self, fn, *args):
         # Leader routing matters: a different MCP process must not read a lagging follower.
         with (
@@ -72,7 +89,7 @@ class GraphStore:
                 database=self.database, default_access_mode=WRITE_ACCESS
             ) as session,
         ):
-            return session.execute_write(fn, *args)
+            return session.execute_write(self._attempt(fn), *args)
 
     def setup(self):
         self.driver.verify_connectivity()
@@ -166,11 +183,22 @@ class GraphStore:
     @staticmethod
     def lock(tx, namespace):
         # An explicit namespace write lock serializes canonicalization and revision checks.
-        return tx.run(
+        # Taken once per transaction: writing the node again while another writer is
+        # queued on it makes Neo4j report a deadlock and kill the one waiting, and a
+        # revision or a multi-batch stage would otherwise do that for every step.
+        held = getattr(_held, "locks", None)
+        if held is not None and (id(tx), namespace) in held:
+            return tx.run(
+                "MATCH (s:MemorySpace {id:$ns}) RETURN s.revision AS revision", ns=namespace
+            ).single()["revision"]
+        revision = tx.run(
             "MERGE (s:MemorySpace {id:$ns}) ON CREATE SET s.revision=0 "
             "SET s.lock=coalesce(s.lock,0)+1 RETURN s.revision AS revision",
             ns=namespace,
         ).single()["revision"]
+        if held is not None:
+            held.add((id(tx), namespace))
+        return revision
 
     def stage(self, transcript: Transcript, *, transaction=None):
         payload = transcript.model_dump(mode="json")
@@ -809,8 +837,12 @@ class GraphStore:
             self.lock(tx, namespace)
             self.touch(tx, namespace, "MemoryFact", [fact_id])
             row = tx.run(
+                # Taking a fact back takes back the vouching for it too: if it is ever
+                # committed again, it returns as it was first learned.
                 "MATCH (f:MemoryFact {id:$id,namespace:$ns}) SET f.retracted=true,"
-                "f.retraction_reason=$reason,f.retracted_at=$at RETURN f.id AS id",
+                "f.retraction_reason=$reason,f.retracted_at=$at "
+                "REMOVE f.confirmed_at,f.confirmed_by,f.confirmation_note,"
+                "f.confirmed_valid_at,f.confirmed_valid_ts RETURN f.id AS id",
                 id=fact_id,
                 ns=namespace,
                 reason=reason,
@@ -846,7 +878,7 @@ class GraphStore:
                 "MATCH (f:MemoryFact {id:$id,namespace:$ns}) "
                 "OPTIONAL MATCH (f)-[:CITES]->(m:MemoryMessage) WHERE m.timestamp IS NOT NULL "
                 "RETURN f.status AS status,coalesce(f.retracted,false) AS retracted,"
-                "min(m.timestamp) AS said_at",
+                "collect(m.timestamp) AS said",
                 id=fact_id,
                 ns=namespace,
             ).single()
@@ -856,11 +888,16 @@ class GraphStore:
                 raise ValueError("A retracted fact cannot be confirmed")
             if row["status"] != "uncertain":
                 raise ValueError("Only an uncertain fact needs confirming")
-            when = valid_at or (datetime.fromisoformat(row["said_at"]) if row["said_at"] else None)
+            # Compared as instants: the strings may carry different offsets.
+            said = [datetime.fromisoformat(stamp) for stamp in row["said"]]
+            when = valid_at or (min(said) if said else None)
             if when is None:
                 raise ValueError("Give valid_at: no dated message supports this fact")
+            if when > now():
+                raise ValueError("A fact cannot be confirmed as true from a future date")
             tx.run(
-                "MATCH (f:MemoryFact {id:$id}) SET f.confirmed_at=$at,f.confirmation_note=$note,"
+                "MATCH (f:MemoryFact {id:$id}) SET f.confirmed_at=$at,f.confirmed_by='user',"
+                "f.confirmation_note=$note,"
                 "f.confirmed_valid_at=$valid_at,f.confirmed_valid_ts=$valid_ts "
                 "WITH f MATCH (s:MemorySpace {id:$ns}) SET s.revision=s.revision+1",
                 id=fact_id,

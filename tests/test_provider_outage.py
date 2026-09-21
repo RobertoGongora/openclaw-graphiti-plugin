@@ -252,3 +252,27 @@ def test_a_lone_crashing_episode_cannot_hold_the_break_open(graph, tmp_path):
     service.breaker = Breaker()
     scan_bank(service, ns, [tmp_path], {})
     assert [r["status"] for r in worker_tick(service, ns)["receipts"]] == ["complete"]
+
+
+def test_a_database_lock_timeout_charges_no_episode(graph, tmp_path):
+    from neo4j.exceptions import Neo4jError
+
+    store, ns = graph
+    (tmp_path / "note.md").write_text("Note: Atlas uses MySQL.")
+
+    class Busy:
+        timeout = 600
+
+        def generate(self, instructions, payload, output):
+            raise Neo4jError._hydrate_neo4j(
+                code="Neo.TransientError.Transaction.LockAcquisitionTimeout",
+                message="lock wait ran out",
+            )
+
+    service = MemoryService(store, Busy())
+    service.breaker = Breaker()
+    scan_bank(service, ns, [tmp_path], {})
+    receipt = worker_tick(service, ns)["receipts"][0]
+    assert receipt["systemic"] and receipt["diagnostic"]["code"] == "database_unavailable"
+    assert receipt["diagnostic"]["database_code"].endswith("LockAcquisitionTimeout")
+    assert episodes(store, ns)[0]["status"] == "pending" and episodes(store, ns)[0]["attempts"] == 0

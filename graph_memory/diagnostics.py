@@ -25,7 +25,7 @@ REASONS = {
 }
 # Faults of the namespace or the process, not of the episode that met them: the
 # next episode would fail the same way, so none of them is charged or quarantined.
-SYSTEMIC = {"journal_state_mismatch", "engine_changed"}
+SYSTEMIC = {"journal_state_mismatch", "engine_changed", "database_unavailable"}
 FIELDS = {
     "entities",
     "facts",
@@ -88,6 +88,14 @@ def annotate(exc: BaseException, **metadata):
     return exc
 
 
+def database_unavailable(exc):
+    from neo4j.exceptions import DriverError, Neo4jError
+
+    if isinstance(exc, Neo4jError):
+        return bool(exc.is_retryable()) or str(exc.code or "").startswith("Neo.TransientError")
+    return isinstance(exc, DriverError) and exc.is_retryable()
+
+
 def diagnostic(exc, stage="worker") -> dict[str, Any]:
     result: dict[str, Any] = {"stage": stage, "code": "unclassified_error"}
     if isinstance(exc, ValidationError):
@@ -108,6 +116,13 @@ def diagnostic(exc, stage="worker") -> dict[str, Any]:
         return result
     message = str(exc)
     result["code"] = reason(message) or result["code"]
+    if database_unavailable(exc):
+        # A lock wait that ran out, a deadlock victim, a dropped connection: the
+        # database's trouble, and the next episode would meet it too.
+        result["code"] = "database_unavailable"
+        code = getattr(exc, "code", None)
+        if isinstance(code, str) and re.fullmatch(r"[A-Za-z.]{1,80}", code):
+            result["database_code"] = code
     location = getattr(exc, "memory_location", None)
     if isinstance(location, (tuple, list)):
         result["location"] = [
