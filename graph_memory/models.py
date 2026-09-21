@@ -1,5 +1,7 @@
 """The extraction contract is also the tool JSON Schema; nothing executes model output."""
 
+import re
+import unicodedata
 from copy import deepcopy
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -127,12 +129,68 @@ class Transcript(Model):
             raise ValueError("Split transcripts into chunks of at most 500000 characters")
         return self
 
+    def can_yield_facts(self):
+        """False when the rules make a fact impossible: a feed fact must cite a new
+        message, and only a claim, or a tool result validating one, can be new."""
+        if self.source_format not in {"session-records-v1", "direct-mcp-v1"}:
+            return True
+        focus = set(self.focus_message_ids)
+        return any(
+            m.source_type in CLAIMS | {"tool_result"}
+            for m in self.messages
+            if not focus or m.id in focus
+        )
+
 
 class Entity(Model):
     key: Key
     name: Text
     kind: Kind
     aliases: Annotated[list[Text], Field(max_length=30)] = Field(default_factory=list)
+
+
+CLAIMS = {"user_assertion", "assistant_report"}
+LINE_NUMBER = re.compile(r"(?m)^[ \t]*\d+(?:\t|→|: ?)")
+MARKUP = set("*_`~\\")
+
+
+def projection(text):
+    """The text as a model tends to reproduce it (markup, line numbers and spacing
+    dropped), with the source offset of every character kept."""
+    skipped = set()
+    for match in LINE_NUMBER.finditer(text):
+        skipped.update(range(*match.span()))
+    out, offsets, gap = [], [], False
+    for index, char in enumerate(text):
+        if index in skipped or char in MARKUP:
+            continue
+        # Decomposed and without accents, so composed and combining forms compare equal.
+        for piece in unicodedata.normalize("NFKD", char):
+            if unicodedata.combining(piece):
+                continue
+            if piece.isspace():
+                gap = bool(out)
+                continue
+            if gap:
+                out.append(" ")
+                offsets.append(index)
+                gap = False
+            out.append(piece)
+            offsets.append(index)
+    return "".join(out), offsets
+
+
+def source_span(quote, content):
+    """The exact source text a quote reproduces, or None. Stored evidence stays
+    verbatim: a loosely copied quote is replaced by the span it points at."""
+    if quote in content:
+        return quote
+    needle, _ = projection(quote)
+    haystack, offsets = projection(content)
+    if len(needle) < 12 or haystack.count(needle) != 1:
+        return None  # Too short or ambiguous to stand as evidence.
+    start = haystack.index(needle)
+    return content[offsets[start] : offsets[start + len(needle) - 1] + 1]
 
 
 class Evidence(Model):
@@ -217,6 +275,7 @@ class Extraction(Model):
             raise error
 
         messages = {m.id: m for m in transcript.messages}
+        mismatched = []
         for fact_index, fact in enumerate(self.facts):
             if transcript.focus_message_ids and not any(
                 e.message_id in transcript.focus_message_ids
@@ -226,18 +285,30 @@ class Extraction(Model):
                     "A feed fact must cite at least one new focus message",
                     ["facts", fact_index, "evidence"],
                 )
-            for evidence_index, evidence in enumerate([*fact.evidence, *fact.validation_evidence]):
-                message = messages.get(evidence.message_id)
-                if message is None or evidence.quote not in message.content:
-                    reject(
-                        "Evidence must quote an exact substring of its source message",
-                        ["facts", fact_index, "evidence", evidence_index, "quote"],
-                    )
+            for field in ("evidence", "validation_evidence"):
+                for evidence_index, evidence in enumerate(getattr(fact, field)):
+                    message = messages.get(evidence.message_id)
+                    span = source_span(evidence.quote, message.content) if message else None
+                    if span is None:
+                        # The right text under the wrong message id is a slip, not an invention.
+                        found = [
+                            (m.id, s)
+                            for m in transcript.messages
+                            if (s := source_span(evidence.quote, m.content))
+                        ]
+                        if len(found) == 1:
+                            evidence.message_id, span = found[0]
+                    if span is None:
+                        mismatched.append(["facts", fact_index, field, evidence_index, "quote"])
+                    elif len(span) <= 4000:
+                        evidence.quote = span
+                    else:
+                        mismatched.append(["facts", fact_index, field, evidence_index, "quote"])
+            if mismatched:
+                continue
             if transcript.source_format in {"session-records-v1", "direct-mcp-v1"}:
                 cited = [messages[e.message_id] for e in fact.evidence]
-                claims = [
-                    m for m in cited if m.source_type in {"user_assertion", "assistant_report"}
-                ]
+                claims = [m for m in cited if m.source_type in CLAIMS]
                 if not claims or len(claims) != len(cited):
                     reject(
                         "Facts must cite a conversational claim in evidence; tool outputs belong only in validation_evidence, and memory artifacts are context only",
@@ -256,6 +327,12 @@ class Extraction(Model):
                 reject(
                     "Future facts must be planned, not active", ["facts", fact_index, "valid_at"]
                 )
+        if mismatched:
+            # Every bad quote at once: a correction pass that learns of one per
+            # attempt cannot finish within the retry budget.
+            error = ValueError("Evidence must quote an exact substring of its source message")
+            error.memory_location, error.memory_locations = mismatched[0], mismatched[:10]
+            raise error
         return self
 
 
@@ -330,8 +407,8 @@ class Render(Scope):
         description="Optional read-only Cypher returning nodes, relationships, or paths. Omit for the whole namespace. $namespace and $ns are supplied automatically.",
     )
     parameters: dict = Field(default_factory=dict, description="Optional Cypher parameters.")
-    max_nodes: Annotated[int, Field(ge=1, le=20_000)] = 10_000
-    max_relationships: Annotated[int, Field(ge=1, le=60_000)] = 30_000
+    max_nodes: Annotated[int, Field(ge=1, le=20_000)] = 300
+    max_relationships: Annotated[int, Field(ge=1, le=60_000)] = 1_000
 
 
 class Merge(Scope):

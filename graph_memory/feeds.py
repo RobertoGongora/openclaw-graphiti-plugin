@@ -103,6 +103,9 @@ def hook(service, namespace, payload):
 
 
 INFRASTRUCTURE = {"model_timeout", "model_invocation_failed"}
+# Faults of the namespace or the process, not of the episode that met them: the
+# next episode would fail the same way, so none of them is charged or quarantined.
+SYSTEMIC = {"journal_state_mismatch", "engine_changed"}
 
 
 class Breaker:
@@ -225,6 +228,20 @@ def worker_tick(service, namespace, limit=10):
         except Exception as exc:
             issue = getattr(exc, "memory_diagnostic", None) or diagnostic(exc)
             infrastructure = issue["code"] in INFRASTRUCTURE
+            if issue["code"] in SYSTEMIC:
+                receipts.append(
+                    {
+                        "episode_id": row["id"],
+                        "status": "failed",
+                        "error": type(exc).__name__,
+                        "diagnostic": issue,
+                        "systemic": True,
+                    }
+                )
+                if breaker:
+                    breaker.failure(issue["code"], persistent=True)
+                    receipts[-1]["breaker"] = breaker.state()
+                break
             validation_failure = issue["stage"] == "evidence_validation" or (
                 issue["stage"] == "model_output"
                 and issue["code"]
@@ -234,15 +251,16 @@ def worker_tick(service, namespace, limit=10):
             # integrity errors require review; regenerating won't repair them.
             review = issue["stage"] == "cached_validation" or issue["code"] in {
                 "ambiguous_identity",
-                "journal_state_mismatch",
                 "extraction_conflict",
             }
             retry = service.store.transaction(
                 lambda tx, eid=row["id"], token=token, validation_failure=validation_failure, review=review, issue=issue, infrastructure=infrastructure: (
                     tx.run(
                         "MATCH (e:MemoryEpisode {namespace:$ns,id:$id,worker:$token}) "
+                        "WHERE e.status <> 'complete' "
                         "WITH e, CASE WHEN e.validation_engine=$engine THEN coalesce(e.validation_failures,0) ELSE 0 END AS prior,"
-                        "coalesce(e.attempts,0) AS tried "
+                        # Retries under an older engine or a past outage do not slow this one down.
+                        "CASE WHEN e.validation_engine=$engine THEN coalesce(e.attempts,0) ELSE 0 END AS tried "
                         "SET e.validation_engine=$engine,e.validation_failures=prior+$validation "
                         "SET e.quarantine_engine=CASE WHEN $review OR e.validation_failures>=3 THEN $engine ELSE null END,"
                         "e.quarantine_reason=CASE WHEN $review OR e.validation_failures>=3 THEN $reason ELSE null END "

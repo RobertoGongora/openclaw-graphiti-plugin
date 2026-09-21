@@ -142,6 +142,10 @@ def run_daemon(
                 for receipt in result["receipts"]:
                     if "breaker" in receipt:
                         report(receipt.pop("breaker"))
+                    if receipt.get("diagnostic", {}).get("code") == "engine_changed":
+                        # Only a new process loads the new code; the supervisor restarts it.
+                        reason["exit"] = "engine_changed"
+                        stop.set()
                     emit(
                         "processed",
                         worker=number,
@@ -154,6 +158,7 @@ def run_daemon(
                                 "timings",
                                 "model_calls",
                                 "cached",
+                                "skipped",
                                 "claim_seconds",
                                 "diagnostic",
                                 "failed_attempts",

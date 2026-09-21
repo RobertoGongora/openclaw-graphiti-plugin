@@ -51,9 +51,8 @@ def hexhash(value):
     return f"{value % MODULUS:064x}"
 
 
-def capture(tx, namespace, ids=None):
-    """Journaled state of a namespace, or only of the given {label: ids}."""
-    state = {label: {} for label in LABELS}
+def elements(tx, namespace, ids=None):
+    """Yield (label, journaled properties) for a namespace, or for {label: ids}."""
     for label in LABELS:
         if ids is None:
             rows = tx.run(
@@ -81,8 +80,20 @@ def capture(tx, namespace, ids=None):
                 props["status"] = "pending"
             if label == "MemoryDream" and props["status"] not in ("completed", "applied"):
                 props["status"] = "pending"
-            state[label][props["id"]] = props
+            yield label, props
+
+
+def capture(tx, namespace, ids=None):
+    state = {label: {} for label in LABELS}
+    for label, props in elements(tx, namespace, ids):
+        state[label][props["id"]] = props
     return state
+
+
+def live_hash(tx, namespace):
+    """The state hash of the live graph, one node at a time: holding a large
+    namespace in memory only to add up its hashes costs gigabytes."""
+    return hexhash(sum(element_hash(label, props) for label, props in elements(tx, namespace)))
 
 
 def audited(sequence):
@@ -254,9 +265,7 @@ class Journal:
                 self._append(tx, namespace, kind, details, state_hash, changes)
             # Untracked writes are found by verify() and sampled audits, not on
             # every scoped write.
-            if audited(head["journal_sequence"] + 1) and state_hash != hexhash(
-                set_hash(capture(tx, namespace))
-            ):
+            if audited(head["journal_sequence"] + 1) and state_hash != live_hash(tx, namespace):
                 raise ValueError(mismatch)
             return result
         before = capture(tx, namespace)

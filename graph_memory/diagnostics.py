@@ -38,6 +38,7 @@ FIELDS = {
     "valid_at",
     "confidence",
     "evidence",
+    "validation_evidence",
     "message_id",
     "quote",
     "namespace",
@@ -100,6 +101,15 @@ def diagnostic(exc, stage="worker"):
         result["location"] = [
             p if isinstance(p, int) or (isinstance(p, str) and p in FIELDS) else "<field>"
             for p in location[:12]
+        ]
+    locations = getattr(exc, "memory_locations", None)
+    if isinstance(locations, list) and len(locations) > 1:
+        result["locations"] = [
+            [
+                p if isinstance(p, int) or (isinstance(p, str) and p in FIELDS) else "<field>"
+                for p in loc[:12]
+            ]
+            for loc in locations[:10]
         ]
     invocation = re.fullmatch(
         r"Codex model invocation failed \(exit (-?\d+)\); check CLI authentication/model availability",

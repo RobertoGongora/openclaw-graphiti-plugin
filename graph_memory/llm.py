@@ -181,6 +181,7 @@ def run_group(command, prompt, cwd, timeout):
         stderr=subprocess.PIPE,
         text=True,
         cwd=cwd,
+        env={k: os.environ[k] for k in PASSED_ENVIRONMENT if k in os.environ},
         start_new_session=True,
     )
     try:
@@ -193,6 +194,36 @@ def run_group(command, prompt, cwd, timeout):
         process.communicate()
         raise
     return process.returncode, stderr
+
+
+# The transcript is untrusted and the CLI is an agent: extraction needs no tool at
+# all. Set as config overrides, which tolerate a CLI version without the feature.
+DISABLED_FEATURES = [
+    arg
+    for feature in (
+        "shell_tool",
+        "unified_exec",
+        "unified_exec_tty",
+        "view_image",
+        "image_generation",
+        "multi_agent",
+        "plugins",
+        "plugin_sharing",
+        "apps",
+        "skill_search",
+        "browser_use",
+        "browser_use_external",
+        "browser_use_full_cdp_access",
+        "in_app_browser",
+        "computer_use",
+        "hooks",
+        "sleep_tool",
+    )
+    for arg in ("-c", f"features.{feature}=false")
+]
+# The CLI needs its login and a PATH; the worker's database and MCP secrets are not
+# its business, and the agent could read them from its environment.
+PASSED_ENVIRONMENT = ("PATH", "HOME", "CODEX_HOME", "LANG", "LC_ALL", "TMPDIR", "SSL_CERT_FILE")
 
 
 class CodexLLM:
@@ -226,15 +257,16 @@ class CodexLLM:
                 f'model_reasoning_effort="{self.effort}"',
                 "-c",
                 'web_search="disabled"',
-                "-c",
-                "features.shell_tool=false",
+                *DISABLED_FEATURES,
+                "--ignore-rules",
                 "--output-schema",
                 str(schema),
                 "--output-last-message",
                 str(result),
                 "-",
             ]
-            prompt = instructions + "\nINPUT DATA:\n" + json.dumps(payload)
+            # Escaped non-ASCII would make an exact quote of accented text impossible.
+            prompt = instructions + "\nINPUT DATA:\n" + json.dumps(payload, ensure_ascii=False)
             for attempt in range(self.max_attempts):
                 result.unlink(missing_ok=True)
                 try:

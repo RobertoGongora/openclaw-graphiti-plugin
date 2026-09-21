@@ -94,6 +94,25 @@ class MemoryService:
                 )
                 lap("commit")
                 return {**receipt, "timings": timings, "model_calls": 0, "cached": True}
+            if not m.Transcript.model_validate_json(episode["payload"]).can_yield_facts():
+                # Nothing in these messages can carry a fact; asking the model
+                # would only spend a call to be told so.
+                lap("prepare")
+                stage = "commit"
+                receipt = self.store.commit(
+                    request.namespace,
+                    request.episode_id,
+                    m.Extraction(entities=[], facts=[]),
+                    model_info={"provider": "none", "skipped": "no_claim_in_focus"},
+                )
+                lap("commit")
+                return {
+                    **receipt,
+                    "timings": timings,
+                    "model_calls": 0,
+                    "cached": False,
+                    "skipped": "no_claim_in_focus",
+                }
             packet = self.prepare(request)
             if packet["status"] == "complete":
                 return {"episode_id": request.episode_id, "status": "complete", "replayed": True}

@@ -252,7 +252,7 @@ class GraphStore:
                 "WITH e WHERE e.status <> 'complete' AND e.quarantine_engine IS NOT NULL "
                 "AND coalesce(e.lease_until,0)<=$now "
                 "SET e.quarantine_engine=null,e.quarantine_reason=null,"
-                "e.validation_failures=0,e.validation_engine=$engine,e.retry_after=0 "
+                "e.validation_failures=0,e.validation_engine=$engine,e.retry_after=0,e.attempts=0 "
                 "RETURN e.id AS episode_id",
                 id=episode_id,
                 ns=namespace,
@@ -462,7 +462,8 @@ class GraphStore:
             tx.run(
                 "MATCH (e:MemoryEpisode {id:$id}) SET e.status='complete',e.error=null,e.retry_feedback=null,"
                 "e.cached_extraction=null,e.cached_engine=null,e.cached_model=null,"
-                "e.quarantine_engine=null,e.quarantine_reason=null,"
+                "e.quarantine_engine=null,e.quarantine_reason=null,e.retry_after=null,"
+                "e.lease_until=0,e.worker=null,"
                 "e.extraction_hash=$hash,e.extraction_payload=$extraction,e.engine=$engine,e.model_info=$model_info,e.completed_at=$at,e.fact_count=$count "
                 "WITH e MATCH (s:MemorySpace {id:$ns}) SET s.revision=s.revision+1",
                 id=episode_id,
