@@ -3,10 +3,7 @@
 import json
 import uuid
 
-from .diagnostics import diagnostic
-from .extraction_policy import extraction_payload
-from .llm import DREAM_INSTRUCTIONS
-from .models import DreamOutput, DreamRequest, EpisodeRequest, Extraction, Transcript, now
+from .models import DreamRequest, EpisodeRequest, Extraction, Transcript, now
 from .store import GraphStore, digest
 from .version import engine_fingerprint
 
@@ -256,13 +253,11 @@ class Revisions:
         ]
 
     def _propose(self, namespace, episode_id):
-        """service.extract without its writes: the same packet, model call and
-        evidence validation, against the live graph as context."""
+        """The ingest path's own extraction, against the live graph, without its writes."""
         packet = self.service.prepare(EpisodeRequest(namespace=namespace, episode_id=episode_id))
         if packet["status"] != "complete":
             raise ValueError("Only complete episodes can be replayed")
-        transcript = Transcript.model_validate(packet["transcript"])
-        if not transcript.can_yield_facts():
+        if not Transcript.model_validate(packet["transcript"]).can_yield_facts():
             return (
                 Extraction(entities=[], facts=[]),
                 {"provider": "none", "skipped": "no_claim_in_focus"},
@@ -272,61 +267,8 @@ class Revisions:
             raise ValueError("Revision replay requires a configured LLM")
         model, effort = self._model()
         info = {"provider": type(self.service.llm).__name__, "model": model, "effort": effort}
-        payload = extraction_payload(
-            {
-                "transcript": packet["transcript"],
-                "existing_entities": packet["existing_entities"],
-                "existing_relationships": packet["existing_relationships"],
-            }
-        )
-        for attempt in range(2):
-            extraction = self.service.llm.generate(packet["instructions"], payload, Extraction)
-            try:
-                extraction.validate_evidence(transcript)
-                return extraction, info, attempt + 1
-            except ValueError as exc:
-                if attempt:
-                    raise
-                payload = {
-                    **payload,
-                    "rejected_candidate": extraction.model_dump(mode="json"),
-                    "validation_error": str(exc),
-                    "validation_diagnostic": diagnostic(exc, "evidence_validation"),
-                    "correction": "Correct exact quote/focus/time grounding against the original transcript. Do not invent evidence or change source text.",
-                }
-        raise AssertionError("unreachable")
-
-    def _revalidate(self, snapshot):
-        """service.dream_run's generation and grounding checks, without a dream node."""
-        graph = snapshot["graph"]
-        facts = {f["id"]: f for lane in ("current", "events") for f in graph[lane]}
-        payload = {**snapshot, "eligible_fact_ids": sorted(facts)}
-        for attempt in range(2):
-            output = self.service.llm.generate(DREAM_INSTRUCTIONS, payload, DreamOutput)
-            try:
-                for insight in output.insights:
-                    if not set(insight.supporting_fact_ids) <= facts.keys():
-                        raise ValueError("Dream cites facts outside its current evidence snapshot")
-                    keys = {
-                        facts[fid][side]
-                        for fid in insight.supporting_fact_ids
-                        for side in ("subject", "target")
-                    }
-                    if not set(insight.entity_keys) <= keys:
-                        raise ValueError(
-                            "Dream insight entities must occur in its supporting facts"
-                        )
-                return output
-            except ValueError as exc:
-                if attempt:
-                    raise
-                payload = {
-                    **payload,
-                    "rejected_candidate": output.model_dump(mode="json"),
-                    "validation_error": str(exc),
-                    "correction": "Correct grounding using only eligible_fact_ids. Move unsupported conclusions to observations; never invent support.",
-                }
-        raise AssertionError("unreachable")
+        extraction, calls = self.service.propose(packet)
+        return extraction, info, calls
 
     def _set(self, revision_id, **props):
         self.store.transaction(
@@ -414,7 +356,7 @@ class Revisions:
                     "Dream focus is too broad; narrow the query before creating a snapshot"
                 )
             snapshot = {**old[dream_id], "graph": context}
-            output = self._revalidate(snapshot)
+            output = self.service.dream_generate(snapshot)
             self.store.transaction(
                 lambda tx, dream_id=dream_id, snapshot=snapshot, output=output: tx.run(
                     "MATCH (r:MemoryRevision {id:$id,namespace:$ns}) "

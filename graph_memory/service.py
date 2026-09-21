@@ -59,10 +59,86 @@ class MemoryService:
             ),
         }
 
+    def propose(self, packet, progress=None, lap=lambda stage: None):
+        """The model's extraction for a prepared packet, validated against the
+        transcript, with one correction pass. It writes nothing, so an ingest and a
+        revision's dry run are the same call. progress reports how far it got."""
+        if self.llm is None:
+            raise ValueError("Extraction requires a configured LLM")
+        progress = {} if progress is None else progress
+        transcript = m.Transcript.model_validate(packet["transcript"])
+        payload = extraction_payload(
+            {
+                "transcript": packet["transcript"],
+                "existing_entities": packet["existing_entities"],
+                "existing_relationships": packet["existing_relationships"],
+            }
+        )
+        if packet.get("previous_rejection"):
+            payload["previous_rejection"] = packet["previous_rejection"]
+        lap("prepare")
+        for attempt in range(2):
+            progress.update(stage="model_output", attempt=attempt, extraction=None)
+            try:
+                extraction = self.llm.generate(packet["instructions"], payload, m.Extraction)
+            finally:
+                lap("model")
+            progress.update(stage="evidence_validation", extraction=extraction)
+            try:
+                extraction.validate_evidence(transcript)
+                lap("validation")
+                return extraction, attempt + 1
+            except ValueError as exc:
+                lap("validation")
+                if attempt:
+                    raise
+                payload = {
+                    **payload,
+                    "rejected_candidate": extraction.model_dump(mode="json"),
+                    "validation_error": str(exc),
+                    "validation_diagnostic": diagnostic(exc, "evidence_validation"),
+                    "correction": "Correct exact quote/focus/time grounding against the original transcript. Do not invent evidence or change source text.",
+                }
+        raise AssertionError("unreachable")
+
+    def dream_generate(self, snapshot):
+        """The model's reflection on a dream snapshot, held to its grounding rules,
+        with one correction pass. It writes nothing."""
+        if self.llm is None:
+            raise ValueError("Dreaming requires a configured LLM")
+        facts = {f["id"]: f for lane in ("current", "events") for f in snapshot["graph"][lane]}
+        payload = {**snapshot, "eligible_fact_ids": sorted(facts)}
+        for attempt in range(2):
+            output = self.llm.generate(DREAM_INSTRUCTIONS, payload, m.DreamOutput)
+            try:
+                for insight in output.insights:
+                    if not set(insight.supporting_fact_ids) <= facts.keys():
+                        raise ValueError("Dream cites facts outside its current evidence snapshot")
+                    keys = {
+                        facts[fid][side]
+                        for fid in insight.supporting_fact_ids
+                        for side in ("subject", "target")
+                    }
+                    if not set(insight.entity_keys) <= keys:
+                        raise ValueError(
+                            "Dream insight entities must occur in its supporting facts"
+                        )
+                return output
+            except ValueError as exc:
+                if attempt:
+                    raise
+                payload = {
+                    **payload,
+                    "rejected_candidate": output.model_dump(mode="json"),
+                    "validation_error": str(exc),
+                    "correction": "Correct grounding using only eligible_fact_ids. Move unsupported conclusions to observations; never invent support.",
+                }
+        raise AssertionError("unreachable")
+
     def extract(self, request: m.EpisodeRequest):
         self.store.assert_writable(request.namespace)
-        started, stage, attempt = time.monotonic(), "prepare", -1
-        extraction = None
+        started = time.monotonic()
+        progress = {"stage": "prepare", "attempt": -1, "extraction": None}
         timings, mark = {}, [started]
 
         def lap(name):
@@ -85,11 +161,12 @@ class MemoryService:
                 and episode.get("cached_model") == json.dumps(model_info)
                 and episode.get("cached_extraction")
             ):
-                stage = "cached_validation"
+                progress["stage"] = "cached_validation"
                 extraction = m.Extraction.model_validate_json(episode["cached_extraction"])
+                progress["extraction"] = extraction
                 extraction.validate_evidence(m.Transcript.model_validate_json(episode["payload"]))
                 lap("prepare")
-                stage = "commit"
+                progress["stage"] = "commit"
                 receipt = self.store.commit(
                     request.namespace, request.episode_id, extraction, model_info=model_info
                 )
@@ -99,7 +176,7 @@ class MemoryService:
                 # Nothing in these messages can carry a fact; asking the model
                 # would only spend a call to be told so.
                 lap("prepare")
-                stage = "commit"
+                progress["stage"] = "commit"
                 receipt = self.store.commit(
                     request.namespace,
                     request.episode_id,
@@ -119,45 +196,13 @@ class MemoryService:
                 return {"episode_id": request.episode_id, "status": "complete", "replayed": True}
             if self.llm is None:
                 return {**packet, "status": "extraction_required"}
-            payload = extraction_payload(
-                {
-                    "transcript": packet["transcript"],
-                    "existing_entities": packet["existing_entities"],
-                    "existing_relationships": packet["existing_relationships"],
-                }
-            )
-            if packet.get("previous_rejection"):
-                payload["previous_rejection"] = packet["previous_rejection"]
-            lap("prepare")
-            for attempt in range(2):
-                stage = "model_output"
-                extraction = None
-                try:
-                    extraction = self.llm.generate(packet["instructions"], payload, m.Extraction)
-                finally:
-                    lap("model")
-                try:
-                    stage = "evidence_validation"
-                    extraction.validate_evidence(m.Transcript.model_validate(packet["transcript"]))
-                    lap("validation")
-                    break
-                except ValueError as exc:
-                    lap("validation")
-                    if attempt:
-                        raise
-                    payload = {
-                        **payload,
-                        "rejected_candidate": extraction.model_dump(mode="json"),
-                        "validation_error": str(exc),
-                        "validation_diagnostic": diagnostic(exc, stage),
-                        "correction": "Correct exact quote/focus/time grounding against the original transcript. Do not invent evidence or change source text.",
-                    }
-            stage = "checkpoint"
+            extraction, calls = self.propose(packet, progress, lap)
+            progress["stage"] = "checkpoint"
             self.store.cache_extraction(
                 request.namespace, request.episode_id, extraction, model_info
             )
             lap("checkpoint")
-            stage = "commit"
+            progress["stage"] = "commit"
             receipt = self.store.commit(
                 request.namespace,
                 request.episode_id,
@@ -165,12 +210,12 @@ class MemoryService:
                 model_info=model_info,
             )
             lap("commit")
-            return {**receipt, "timings": timings, "model_calls": attempt + 1, "cached": False}
+            return {**receipt, "timings": timings, "model_calls": calls, "cached": False}
         except Exception as exc:
             issue = {
-                **diagnostic(exc, stage),
+                **diagnostic(exc, progress["stage"]),
                 "timings": timings,
-                "extraction_attempt": attempt + 1,
+                "extraction_attempt": progress["attempt"] + 1,
                 "duration_seconds": round(time.monotonic() - started, 3),
                 "engine": self.store.engine,
             }
@@ -185,9 +230,11 @@ class MemoryService:
                 type(exc).__name__,
                 retry_feedback=feedback(
                     exc,
-                    stage,
+                    progress["stage"],
                     self.store.engine,
-                    extraction.model_dump(mode="json") if extraction is not None else None,
+                    progress["extraction"].model_dump(mode="json")
+                    if progress["extraction"] is not None
+                    else None,
                 ),
             )
             raise
@@ -280,36 +327,7 @@ class MemoryService:
 
         self.store.transaction(claim)
         try:
-            graph = dream["snapshot"]["graph"]
-            facts = {f["id"]: f for lane in ("current", "events") for f in graph[lane]}
-            payload = {**dream["snapshot"], "eligible_fact_ids": sorted(facts)}
-            for attempt in range(2):
-                output = self.llm.generate(DREAM_INSTRUCTIONS, payload, m.DreamOutput)
-                try:
-                    for insight in output.insights:
-                        if not set(insight.supporting_fact_ids) <= facts.keys():
-                            raise ValueError(
-                                "Dream cites facts outside its current evidence snapshot"
-                            )
-                        keys = {
-                            facts[fid][side]
-                            for fid in insight.supporting_fact_ids
-                            for side in ("subject", "target")
-                        }
-                        if not set(insight.entity_keys) <= keys:
-                            raise ValueError(
-                                "Dream insight entities must occur in its supporting facts"
-                            )
-                    break
-                except ValueError as exc:
-                    if attempt:
-                        raise
-                    payload = {
-                        **payload,
-                        "rejected_candidate": output.model_dump(mode="json"),
-                        "validation_error": str(exc),
-                        "correction": "Correct grounding using only eligible_fact_ids. Move unsupported conclusions to observations; never invent support.",
-                    }
+            output = self.dream_generate(dream["snapshot"])
 
             def complete(tx):
                 row = tx.run(
