@@ -292,7 +292,9 @@ def names(fed):
 def drain_queue(store, ns):
     store.transaction(
         lambda tx: tx.run(
-            "MATCH (e:MemoryEpisode {namespace:$ns,status:'pending'}) SET e.status='failed'", ns=ns
+            "MATCH (e:MemoryEpisode {namespace:$ns,status:'pending'}) SET e.retry_after=$later",
+            ns=ns,
+            later=time.time() + 3600,
         ).consume()
     )
 

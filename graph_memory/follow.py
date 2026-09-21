@@ -29,8 +29,13 @@ def follow_once(service, namespace, roots: list[Path], seen: dict, source_record
     if source_records:
         queued = service.store.transaction(
             lambda tx: tx.run(
-                "MATCH (e:MemoryEpisode {namespace:$ns,status:'pending'}) RETURN count(e) AS n",
+                # Work that is due now, whatever its last outcome: a failed episode
+                # whose retry time has come is queue depth too.
+                "MATCH (e:MemoryEpisode {namespace:$ns}) WHERE e.status <> 'complete' "
+                "AND e.quarantine_engine IS NULL AND coalesce(e.retry_after,0)<=$now "
+                "RETURN count(e) AS n",
                 ns=namespace,
+                now=time.time(),
             ).single()["n"]
         )
         if queued >= 32:

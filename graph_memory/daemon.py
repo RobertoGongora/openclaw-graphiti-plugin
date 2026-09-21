@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from .diagnostics import diagnostic
-from .feeds import worker_tick
+from .feeds import Breaker, worker_tick
 from .follow import follow_once
 from .importers import memory_files, transcripts
 from .store import digest
@@ -126,12 +126,22 @@ def run_daemon(
         raise ValueError("workers must be 1..16 and interval at least 1 second")
     seen, feed_seen = {}, {}
     stop = threading.Event()
+    breaker = service.breaker = Breaker()
+    announced = {"open": False}
+
+    def report(state):
+        # One line when the provider goes away, per failed probe, and when it returns.
+        if state["open"] or announced["open"]:
+            announced["open"] = state["open"]
+            emit("provider_unavailable" if state["open"] else "provider_recovered", **state)
 
     def consume(number):
         while not stop.is_set():
             try:
                 result = worker_tick(service, namespace, limit=1)
                 for receipt in result["receipts"]:
+                    if "breaker" in receipt:
+                        report(receipt.pop("breaker"))
                     emit(
                         "processed",
                         worker=number,
@@ -164,7 +174,7 @@ def run_daemon(
                 stop.wait(interval)
             if once:
                 return
-            stop.wait(1)
+            stop.wait(5 if breaker.open else 1)
 
     previous, reason = {}, {"exit": "once" if once else "stopped"}
 
@@ -192,7 +202,8 @@ def run_daemon(
                 while not stop.is_set():
                     result = scan_bank(service, namespace, roots, seen)
                     emit("bank_scan", **result)
-                    if transcript_roots:
+                    # Staging during an outage only builds a queue nobody can work.
+                    if transcript_roots and not breaker.open:
                         try:
                             began = time.monotonic()
                             feeds = follow_once(

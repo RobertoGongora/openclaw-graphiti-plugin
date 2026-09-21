@@ -8,7 +8,7 @@ from . import models as m
 from . import retrieval, status
 from .diagnostics import diagnostic
 from .extraction_policy import extraction_payload
-from .llm import DREAM_INSTRUCTIONS, extraction_instructions
+from .llm import DREAM_INSTRUCTIONS, ModelUnavailable, extraction_instructions
 from .retry import feedback, restored_feedback
 from .version import engine_fingerprint
 
@@ -154,6 +154,9 @@ class MemoryService:
                 "duration_seconds": round(time.monotonic() - started, 3),
                 "engine": self.store.engine,
             }
+            # A provider outage leaves the episode as it was: nothing about it failed.
+            if isinstance(exc, ModelUnavailable):
+                raise
             self.store.failed(
                 request.namespace,
                 request.episode_id,

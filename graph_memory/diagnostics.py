@@ -107,4 +107,10 @@ def diagnostic(exc, stage="worker"):
     )
     if invocation:
         result.update(code="model_invocation_failed", exit_code=int(invocation[1]))
+    elif message.startswith(("Model endpoint failed (HTTP ", "Model endpoint unreachable;")):
+        result["code"] = "model_invocation_failed"
+    # A closed vocabulary from the model adapter, never provider text.
+    provider = getattr(exc, "memory_reason", None)
+    if isinstance(provider, str) and re.fullmatch(r"[a-z_]{1,32}", provider):
+        result["provider_reason"] = provider
     return result

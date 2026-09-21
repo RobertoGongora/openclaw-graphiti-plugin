@@ -2,9 +2,12 @@
 
 import json
 import os
+import re
+import signal
 import subprocess
 import tempfile
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from pydantic import BaseModel, ValidationError
@@ -131,6 +134,67 @@ def strict_schema(schema: dict) -> dict:
     return schema
 
 
+# The CLI's error stream can echo prompt text, so only a closed set of reasons
+# leaves this module; the text itself is never logged or stored.
+INVOCATION_REASONS = (
+    ("usage_limit", r"usage limit|purchase more credits|quota"),
+    ("rate_limit", r"rate limit|too many requests|\b429\b"),
+    (
+        "authentication",
+        r"not logged in|log ?in again|unauthorized|\b401\b|\b403\b|token (is )?expired",
+    ),
+    (
+        "model_unavailable",
+        r"model .{0,60}(not found|does not exist|not supported)|unsupported model",
+    ),
+    (
+        "network",
+        r"connection (refused|reset|error)|timed out|dns|network|stream disconnected|\b50[0-4]\b",
+    ),
+)
+# Every call will fail the same way until someone acts or a window resets.
+PERSISTENT_REASONS = {"usage_limit", "authentication", "model_unavailable"}
+
+
+def invocation_reason(stderr):
+    lines = [line for line in stderr.splitlines() if line.startswith(("ERROR", "error"))]
+    text = "\n".join(lines or stderr.splitlines()[-20:]).lower()
+    return next(
+        (name for name, pattern in INVOCATION_REASONS if re.search(pattern, text)), "unknown"
+    )
+
+
+class ModelUnavailable(RuntimeError):
+    """The provider could not be used; the input was not judged and stays retryable."""
+
+    def __init__(self, message, reason):
+        super().__init__(message)
+        self.memory_reason = reason
+
+
+def run_group(command, prompt, cwd, timeout):
+    """Run in its own process group so a timeout also ends what the CLI launched."""
+    process = subprocess.Popen(
+        command,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=cwd,
+        start_new_session=True,
+    )
+    try:
+        _, stderr = process.communicate(prompt, timeout=timeout)
+    except BaseException:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.communicate()
+        raise
+    return process.returncode, stderr
+
+
 class CodexLLM:
     def __init__(self, model="gpt-5.6-terra", effort="low", timeout=600, max_attempts=2):
         if max_attempts not in (1, 2):
@@ -174,22 +238,15 @@ class CodexLLM:
             for attempt in range(self.max_attempts):
                 result.unlink(missing_ok=True)
                 try:
-                    run = subprocess.run(
-                        command,
-                        input=prompt,
-                        text=True,
-                        capture_output=True,
-                        cwd=tmp,
-                        timeout=self.timeout,
-                        check=False,
-                    )
+                    returncode, stderr = run_group(command, prompt, tmp, self.timeout)
                 except subprocess.TimeoutExpired as exc:
-                    raise RuntimeError(
-                        "Codex extraction timed out; durable input can be retried"
+                    raise ModelUnavailable(
+                        "Codex extraction timed out; durable input can be retried", "timeout"
                     ) from exc
-                if run.returncode or not result.exists():
-                    raise RuntimeError(
-                        f"Codex model invocation failed (exit {run.returncode}); check CLI authentication/model availability"
+                if returncode or not result.exists():
+                    raise ModelUnavailable(
+                        f"Codex model invocation failed (exit {returncode}); check CLI authentication/model availability",
+                        invocation_reason(stderr),
                     )
                 raw = result.read_text()
                 try:
@@ -234,8 +291,20 @@ class CompatibleLLM:
         if self.api_key:
             headers["Authorization"] = "Bearer " + self.api_key
         request = Request(self.url, data=json.dumps(body).encode(), headers=headers, method="POST")
-        with urlopen(request, timeout=300) as response:
-            result = json.loads(response.read(4_000_000))
+        try:
+            with urlopen(request, timeout=300) as response:
+                result = json.loads(response.read(4_000_000))
+        except HTTPError as exc:
+            reason = {401: "authentication", 403: "authentication", 404: "model_unavailable"}.get(
+                exc.code, "rate_limit" if exc.code == 429 else "network"
+            )
+            raise ModelUnavailable(
+                f"Model endpoint failed (HTTP {exc.code}); durable input can be retried", reason
+            ) from exc
+        except (URLError, TimeoutError) as exc:
+            raise ModelUnavailable(
+                "Model endpoint unreachable; durable input can be retried", "network"
+            ) from exc
         raw = result["choices"][0]["message"]["content"]
         try:
             return output.model_validate_json(raw)

@@ -1,5 +1,4 @@
 import json
-from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -137,14 +136,14 @@ def test_schema_rejection_retains_final_candidate_and_error(monkeypatch, max_att
     raw["entities"] = []  # Both relationship endpoints are undeclared.
     seen = []
 
-    def run(command, **kwargs):
-        seen.append(kwargs["input"])
+    def run(command, prompt, cwd, timeout):
+        seen.append(prompt)
         from pathlib import Path
 
         Path(command[command.index("--output-last-message") + 1]).write_text(json.dumps(raw))
-        return SimpleNamespace(returncode=0)
+        return 0, ""
 
-    monkeypatch.setattr("graph_memory.llm.subprocess.run", run)
+    monkeypatch.setattr("graph_memory.llm.run_group", run)
     with pytest.raises(ValidationError) as caught:
         CodexLLM(max_attempts=max_attempts).generate(
             "Extract", {"transcript": "source"}, Extraction
