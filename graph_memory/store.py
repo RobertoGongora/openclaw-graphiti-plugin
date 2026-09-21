@@ -264,9 +264,10 @@ class GraphStore:
                 "SET e.worker_lock=coalesce(e.worker_lock,0)+1 "
                 "WITH e WHERE e.status <> 'complete' AND e.quarantine_engine IS NOT NULL "
                 "AND coalesce(e.lease_until,0)<=$now "
-                # A saved extraction that failed its own validation would fail it again.
-                "SET e.cached_extraction=CASE WHEN e.quarantine_reason IN $stale THEN null "
-                "ELSE e.cached_extraction END "
+                # A saved extraction that was rejected would be rejected again; only one
+                # set aside for a model crash or timeout is still worth keeping.
+                "SET e.cached_extraction=CASE WHEN e.quarantine_reason IN $kept "
+                "THEN e.cached_extraction ELSE null END "
                 "SET e.quarantine_engine=null,e.quarantine_reason=null,e.infra_failures=0,"
                 "e.validation_failures=0,e.validation_engine=$engine,e.retry_after=0,e.attempts=0 "
                 "RETURN e.id AS episode_id",
@@ -274,7 +275,7 @@ class GraphStore:
                 ns=namespace,
                 now=now().timestamp(),
                 engine=self.engine,
-                stale=["cached_validation", "schema_validation", "evidence_quote_mismatch"],
+                kept=["model_timeout", "model_invocation_failed"],
             ).single()
         )
         if not row:

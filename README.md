@@ -140,7 +140,8 @@ recall uses the current graph; optional `known_at` or `at_change` inputs reconst
 past identities, facts, corrections, and published insights. `as_of` remains the
 event-time cutoff. Existing data starts with a dated baseline, not invented past
 history. A write journals only the nodes it changes. [History commands and
-examples](docs/history.md) describe verification, checkpoints and read-only
+examples](docs/history.md) describe the routine `verify-live` check, the full
+audit, checkpoints and read-only
 replay into a separate namespace.
 
 ## Dreaming
@@ -203,7 +204,8 @@ make test-db-down
 ```
 
 `make test-db` starts the database and runs the whole suite. Never point tests or
-evals at 17687 or 27687. Those ports are the live graphs.
+evals at 17687 or 27687. Those ports are the live graphs, and the test suite
+refuses them unless `MEMORY_TEST_ALLOW_LIVE` is set.
 Tests and model evals use unique namespaces and clean up only their own data.
 Reports bind to the engine source, installed dependency versions, golden suite,
 model, and reasoning effort. Use a separate test database for CI and shared deployments.
@@ -228,7 +230,7 @@ automatically. See [revision workflow](docs/revisions.md).
 | `MEMORY_MODEL` | `gpt-5.6-terra` for Codex |
 | `MEMORY_REASONING_EFFORT` | `low` for Codex; configurable |
 | `MEMORY_HTTP_HOSTS`, `MEMORY_HTTP_ORIGINS` | Comma lists of extra Host names and browser Origins accepted besides loopback |
-| `MEMORY_LLM_TIMEOUT` | `420` seconds per model call (10 to 3,600) |
+| `MEMORY_LLM_TIMEOUT` | `420` seconds per model call (10 to 600) |
 | `MEMORY_INTAKE_QUEUE` | `32` due episodes at which transcript intake stops staging |
 | `MEMORY_INTAKE_FILES` | `4` files with work that one transcript scan may open |
 | `MEMORY_JOURNAL_AUDIT` | `0` (off). `N` checks every Nth journal write against the whole graph |

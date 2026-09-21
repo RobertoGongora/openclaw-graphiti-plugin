@@ -6,31 +6,32 @@ behaviour described here see [ingestion pipeline](ingestion-pipeline.md).
 The examples use the transcripts stack. Set a shell alias first:
 
 ```sh
-alias gm='docker compose -f compose.transcripts.yaml'
+alias gm='docker compose --env-file /path/outside/repo/transcripts.env -f compose.transcripts.yaml'
 ```
 
-For the personal stack use plain `docker compose` and namespace `personal`.
+For the personal stack use `compose.yaml`, its own env file and namespace
+`personal`.
 
 ## Configuration
 
 `.env.example` is the reference for every variable that the Compose files read.
-Copy it to `.env`, which is git-ignored. Both Compose files read the same `.env`.
+For a trial, copy it to `.env`, which is git-ignored. For a deployment keep one
+env file per stack outside the repository and pass it with `--env-file`. A
+checkout, a branch switch or a `git clean` then cannot change or remove what a
+running stack depends on, and the two stacks cannot pick up each other's values.
 Variables prefixed `TRANSCRIPT_` belong to `compose.transcripts.yaml` only.
 
 Neo4j requires a password. Both stacks refuse to start without `NEO4J_PASSWORD`,
 and the transcripts stack also refuses to start without `GRAPH_MEMORY_TAG`.
-
-**Note.** `MEMORY_INTAKE_FILES` is read by the daemon, but neither Compose file
-passes it to the worker container yet. Setting it in `.env` has no effect until
-the worker's `environment` block lists it.
 
 | Stack | Bolt | MCP | Browser (profile `browser`) |
 | --- | --- | --- | --- |
 | Personal (`compose.yaml`) | 127.0.0.1:17687 | 127.0.0.1:8765 | 127.0.0.1:17474 |
 | Transcripts (`compose.transcripts.yaml`) | 127.0.0.1:27687 | 127.0.0.1:8766 | 127.0.0.1:27474 |
 
-The Neo4j Browser port is not published by default. Start it on request and stop
-it when you are done:
+The Neo4j Browser port is not published by default. A plain `up` never starts
+it. It needs the `browser` profile. Start it on request and stop it when you are
+done:
 
 ```sh
 gm --profile browser up -d neo4j-browser
@@ -39,9 +40,9 @@ gm --profile browser stop neo4j-browser
 
 ## Deploy
 
-The deployment is a tagged image plus a Compose file and its `.env`. Keep the
-deployed Compose file and `.env` outside the working tree, so that edits in a
-checkout cannot change what is running.
+The deployment is a tagged image plus a Compose file and its env file, both kept
+outside the working tree so that edits in a checkout cannot change what is
+running.
 
 ```sh
 make image                      # builds graph-memory:<short commit>
@@ -50,36 +51,68 @@ graph-memory --version          # package version and engine identity of a build
 
 1. Run the tests against the disposable database (see [Testing](#testing)).
 2. Build the image and note its tag.
-3. Take a backup if the release changes the journal format or the engine (see
-   [Backup](#backup)).
-4. Stop every writer that runs the old code: `gm stop worker mcp inventory`.
+3. Stop every writer that runs the old code: `gm stop worker mcp inventory`.
    The worker finishes active jobs first. Its stop grace period is 45 minutes.
-5. Set `GRAPH_MEMORY_TAG` in `.env` to the new tag.
-6. Start: `gm up -d`. Check `gm ps` until every service is `healthy`.
-7. Read the first lines of the worker log. `daemon_start` shows the engine
+4. Take a backup if the release changes the journal format, the engine or the
+   Neo4j configuration (see [Backup](#backup)).
+5. If the Neo4j service definition changed, stop the database yourself with a
+   long timeout before Compose recreates it:
+
+   ```sh
+   gm stop -t 120 neo4j
+   ```
+
+   Compose stops the old container with the old container's settings. A
+   container created before the two minute grace period was added still has
+   Docker's 10 second default. That ends in a kill during a Neo4j checkpoint and
+   a recovery on the next start.
+6. Set `GRAPH_MEMORY_TAG` in the env file to the new tag.
+7. Bring services up by name, in order. Do not run a bare `gm up -d`, which
+   starts the worker along with everything else.
+
+   ```sh
+   gm up -d neo4j
+   gm up -d mcp inventory
+   gm ps                         # wait for healthy
+   gm exec mcp graph-memory --namespace transcripts history verify-live
+   ```
+
+8. Start the worker as an explicit step, once the checks above pass:
+
+   ```sh
+   gm up -d worker
+   ```
+
+9. Read the first lines of the worker log. `daemon_start` shows the engine
    identity, the settings in force and how many leases were reclaimed.
 
 Stop the old code before the first new write. A release that changes the journal
 format migrates the journal on its first write. From then on an older process
 fails its own journal check and cannot write. An old MCP server left running
-would start refusing `memory_ingest`, `memory_retract` and `memory_merge`.
+would start refusing `memory_ingest`, `memory_retract` and `memory_merge`. The
+worker is the service that writes without being asked, which is why it starts
+last and by name.
 
 ## Rollback
 
-Set `GRAPH_MEMORY_TAG` back to the previous tag and run `gm up -d`. This is safe
-when the release changed only operational code.
+Set `GRAPH_MEMORY_TAG` back to the previous tag and bring the services up by
+name again. This is safe when the release changed only operational code.
 
-Two things are not reversible by switching the tag:
+## What is irreversible
 
 - **Journal format.** After the first write by a release that migrated the
   journal, older images cannot write to that namespace. Roll forward, or restore
   the backup taken before the deploy and lose the writes made since.
-- **Engine identity.** A new engine identity releases quarantined episodes and
-  ignores cached extractions made by the old one. Returning to the old tag
+- **Completed episodes.** A new engine identity releases quarantined episodes
+  and ignores cached extractions made by the old one. Returning to the old tag
   restores the old identity, but episodes that the new engine already completed
-  stay completed.
-
-Never use `down -v` on a stack you want to keep. It deletes the database volume.
+  stay completed with the facts it extracted.
+- **The stored Neo4j password.** The volume keeps the password it was first
+  started with. See [Secrets](#secrets).
+- **`history checkpoint --accept-live`.** The journal then vouches for a state it
+  never recorded. See [Journal maintenance](#journal-maintenance).
+- **`down -v`.** It deletes the database volume. Never use it on a stack you want
+  to keep.
 
 ## Health
 
@@ -94,11 +127,15 @@ gm exec inventory graph-memory health --role inventory
 
 | Role | Healthy when |
 | --- | --- |
-| `worker` | The worker heartbeat is younger than six scan intervals, and at least 180 s |
+| `worker` | The worker heartbeat is younger than 180 s |
 | `inventory` | The last inventory finished less than three refresh intervals plus 120 s ago |
 | `mcp` | A `ping` to the local HTTP endpoint returns 200 |
 
-The daemon writes the heartbeat once per scan loop to a `MemoryWorker` node. It
+The daemon writes the heartbeat to a `MemoryWorker` node from its own timer, every
+30 seconds at most. A long scan or a long drain therefore does not look like a
+dead worker, and a failed heartbeat write logs `heartbeat_error` without stopping
+the daemon. Each recreated container has a new host name and so a new record.
+Records of other hosts older than a day are pruned on each beat. The record
 holds the worker count, the engine identity, the process id and whether the
 provider breaker is open. `memory_status` returns it under `workers`, with
 `alive`, `same_engine` and `provider_unavailable`. `same_engine: false` means the
@@ -115,11 +152,12 @@ Every line is one JSON event with a `ts` field in Unix seconds.
 | Event | Fields that matter |
 | --- | --- |
 | `daemon_start` | `engine`, `workers`, `settings`, `reclaimed_leases` |
-| `bank_scan` | `files`, `changed_files`, `staged`, `existing`, `failures` |
+| `bank_scan` | `files`, `changed_files`, `staged`, `existing`, `failures`, or `skipped: queue_paused` |
 | `transcript_scan` | `feeds` (files that staged work), `seconds` |
 | `processed` | `status`, `timings`, `model_calls`, `cached`, `skipped`, `claim_seconds`, and on failure `diagnostic`, `failed_attempts`, `retry_after`, `quarantined`, `validation_failures` |
 | `provider_unavailable`, `provider_recovered` | `open`, `reason`, `retry_in` |
-| `worker_error` | `error`, `diagnostic` |
+| `namespace_fault`, `namespace_recovered` | Same fields. The reason is `journal_state_mismatch` or `engine_changed` |
+| `worker_error`, `heartbeat_error` | `error`, and `diagnostic` for a worker |
 | `draining` | The daemon is finishing active jobs |
 | `daemon_exit` | `reason`, `max_rss` (kilobytes on Linux, bytes on macOS) |
 
@@ -161,7 +199,8 @@ Reading a slow hour:
   running `history verify` or `history checkpoint`.
 - `transcript_scan.seconds` near 120 means the scan is hitting its time limit.
   After a restart this is expected for a few scans while files are confirmed.
-- No `processed` events and no `provider_unavailable` means the queue is empty
+- No `processed` events, no `provider_unavailable` and no `namespace_fault` means
+  the queue is empty
   or everything is waiting for a retry time. Check `memory_status.processing`.
 - Many `processed` failures with `evidence_quote_mismatch` point at extraction
   quality, not capacity. Adding workers will not help.
@@ -169,10 +208,12 @@ Reading a slow hour:
 ## Provider outage
 
 When the model provider fails, the breaker opens. The log shows
-`provider_unavailable` with a `reason`, workers stop claiming episodes and
-transcript staging pauses. Episodes are not charged for the outage. The daemon
-probes with one episode per cooldown, starting at 60 s and doubling to at most
-900 s, and logs `provider_recovered` when a probe succeeds.
+`provider_unavailable` with a `reason`, workers stop claiming episodes and all
+staging pauses, including the memory-bank scan. Episodes are not charged for the
+outage. The daemon probes with one episode per wait. The wait starts at 60 s and
+doubles only after a failed probe, to at most 900 s. A probe that found nothing
+to send to the model is retried after about 5 s. Only a model call closes the
+break, and the log then shows `provider_recovered`.
 
 | Reason | What to do |
 | --- | --- |
@@ -180,25 +221,40 @@ probes with one episode per cooldown, starting at 60 s and doubling to at most
 | `authentication` | Log in again: `gm run --rm --no-deps --entrypoint codex worker login --device-auth` |
 | `model_unavailable` | Check `TRANSCRIPT_MODEL` or `MEMORY_MODEL` against what the account can use |
 | `rate_limit`, `network`, `timeout`, `unknown` | Usually passes without action. Check connectivity if it lasts |
-| `journal_state_mismatch` | Not a provider problem. See [Journal maintenance](#journal-maintenance) |
 
 No restart is needed after the cause is fixed. The next probe closes the breaker.
 A restart is harmless and makes the first probe immediate.
+
+A timeout or crash that happens while other episodes succeed is not an outage.
+It is charged to that episode as `infra_failures`, and three of them quarantine
+it with reason `model_timeout` or `model_invocation_failed`.
+
+A `namespace_fault` event is a different pause. Its reason is
+`journal_state_mismatch` (see [Journal maintenance](#journal-maintenance)) or
+`engine_changed`, after which the daemon exits and the supervisor restarts it
+on the new code. `namespace_recovered` marks the end of the pause.
 
 ## Journal maintenance
 
 ```sh
 gm exec worker graph-memory --namespace transcripts history list --limit 20
+gm exec worker graph-memory --namespace transcripts history verify-live
 gm exec worker graph-memory --namespace transcripts history verify
 gm exec worker graph-memory --namespace transcripts history checkpoint
 ```
 
-**Verify in a window.** `history verify` holds the namespace lock, reads every
-journal event and captures the whole graph. On a large namespace it pauses all
-writers and needs memory in proportion to the graph. Stop the worker first and
-run it when nobody is waiting on ingestion. The streamed check `verify_live`
-exists in the engine but has no CLI command. The sampled audit
-(`MEMORY_JOURNAL_AUDIT`) runs the same streamed comparison during normal writes.
+**Routine check.** `history verify-live` streams the live graph and compares its
+hash with the journal head. It takes seconds and constant memory, and it finds
+untracked writes. It holds the namespace lock while it runs, so writers wait for
+those seconds. Run it after a deploy, after any manual work in the database and
+whenever a mismatch is suspected. It refuses a journal that has not yet migrated
+to the per-node hash. One write or a checkpoint migrates it. The sampled audit
+(`MEMORY_JOURNAL_AUDIT`) runs the same comparison during normal writes.
+
+**Full audit in a window.** `history verify` also reads every journal event,
+checks the whole hash chain and captures the whole graph. On a large namespace it
+pauses all writers for a long time and needs memory in proportion to the graph.
+Stop the worker first and run it when nobody is waiting on ingestion.
 
 **Audit cadence.** The transcripts stack defaults to `MEMORY_JOURNAL_AUDIT=503`.
 Every 503rd journal write streams the live graph and compares its hash with the
@@ -208,12 +264,14 @@ journal head. A lower number finds an untracked write sooner and costs more.
 **Checkpoint cadence.** Historical reads replay from the latest checkpoint, so
 their cost grows with the number of changes since then. A checkpoint embeds the
 full state in one event. On the transcripts graph that event is hundreds of
-megabytes, which is why `TRANSCRIPT_NEO4J_TX_MEMORY_MAX` must stay at 1g or more.
+megabytes, which is why `TRANSCRIPT_NEO4J_TX_MEMORY_MAX` defaults to 2g and must
+not go below 1g.
 Take a checkpoint after a bulk import finishes and before an upgrade, with the
 worker stopped. Do not schedule it frequently. Each one adds its full size to
 the store for good.
 
-**Recovering from a journal mismatch.** The message is "Graph differs from its
+**Recovering from a journal mismatch.** The worker log shows `namespace_fault`
+with reason `journal_state_mismatch`. The message is "Graph differs from its
 journal; investigate an untracked write before continuing", reason code
 `journal_state_mismatch`. Something changed journaled nodes outside the engine:
 manual Cypher, an older image, or a restore of part of the data.
@@ -230,7 +288,9 @@ manual Cypher, an older image, or a restore of part of the data.
    ```
 
    The checkpoint event records `accepted_untracked_state: true`.
-5. Start the services and confirm that `processed` events resume.
+5. Run `history verify-live`, start the services by name and confirm that
+   `processed` events resume. A worker left running logs `namespace_recovered`
+   after its next successful probe.
 
 Do not use `--accept-live` when you have not identified the change, when the
 change is one you would undo if you could, or as a routine fix to make the
@@ -244,8 +304,8 @@ event to the checkpoint is not explained by any recorded change.
 | --- | --- | --- |
 | `TRANSCRIPT_WORKERS`, `MEMORY_WORKERS` | 8, 4 | Concurrent extraction workers, 1 to 16 |
 | `MEMORY_INTAKE_QUEUE` | 32 | Due episodes at which transcript intake stops staging |
-| `MEMORY_INTAKE_FILES` | 4 | Files with work that one scan may open (see the note under Configuration) |
-| `MEMORY_LLM_TIMEOUT` | 420 | Seconds per model call. The lease is four timeouts plus 60 s |
+| `MEMORY_INTAKE_FILES` | 4 | Transcript files with work that one scan may open. Both Compose files pass it to the worker |
+| `MEMORY_LLM_TIMEOUT` | 420 | Seconds per model call, 10 to 600. The lease is four timeouts plus 60 s |
 
 The local deployment runs 8 transcript workers. Earlier allocations of 12 and 2
 workers recorded in other documents are history.
@@ -280,7 +340,7 @@ size would cache data nobody reads.
 | --- | --- | --- |
 | `TRANSCRIPT_NEO4J_PAGECACHE` | 2g | Covers the hot set |
 | `TRANSCRIPT_NEO4J_HEAP_MAX` | 4g | Full-capture writes and checkpoints build large states in memory |
-| `TRANSCRIPT_NEO4J_TX_MEMORY_MAX` | 1g | A checkpoint event is one string of hundreds of megabytes |
+| `TRANSCRIPT_NEO4J_TX_MEMORY_MAX` | 2g | A checkpoint event is one string of several hundred megabytes. Do not go below 1g |
 | `TRANSCRIPT_NEO4J_MEM_LIMIT` | 8g | Heap max plus page cache plus about 2 GB of JVM overhead |
 
 Both stacks set a 60 s lock acquisition timeout and a 10 minute transaction
@@ -289,6 +349,10 @@ Neo4j gets two minutes to stop. A shorter grace period ends in a kill during a
 checkpoint and a recovery on the next start.
 
 The personal stack uses a 512 MB heap, a 256 MB page cache and a 1,536 MB limit.
+
+The transcripts MCP container has a 2 GB memory limit. Each client session
+attached through `docker exec` is charged to that container, at about 56 MB per
+session. The personal MCP container keeps 1 GB.
 
 ## Quarantine review
 
@@ -309,10 +373,11 @@ ORDER BY e.ingested_at;
 
 | Reason | Meaning | Action |
 | --- | --- | --- |
-| `evidence_quote_mismatch`, `schema_validation`, other validation codes | Three runs failed validation | Usually wait for an engine change that fixes the prompt or the validator. Retry one by hand to confirm |
+| `evidence_quote_mismatch`, `schema_validation`, other validation codes | Three runs failed validation, or a cached extraction no longer validates | Usually wait for an engine change that fixes the prompt or the validator. Retry one by hand to confirm |
+| `model_timeout`, `model_invocation_failed` | Three model failures followed this episode while the provider served others | Look at the episode's size and content. Retry once the cause is understood |
+| Any other code with eight `attempts` | Eight charged failures of any kind | Read the `diagnostic` of its last `processed` event before retrying |
 | `ambiguous_identity` | The extraction names an entity that matches several | Merge or disambiguate the entities, then retry |
 | `extraction_conflict` | The episode was committed with a different extraction | Retract the wrong facts explicitly. Do not retry blindly |
-| A validation code with fewer than three `validation_failures` | The cached extraction no longer validates against its source | `retry-quarantined` keeps the cached extraction, so the retry meets the same failure. It clears only when the engine identity or the model settings change |
 
 Release one episode:
 
@@ -320,9 +385,11 @@ Release one episode:
 gm exec worker graph-memory --namespace transcripts retry-quarantined EPISODE_ID
 ```
 
-This clears the quarantine mark, the attempts and the validation failures. It
-keeps the rejected candidate and the feedback. It refuses an episode that holds
-a live lease. An engine change releases every quarantined episode without
+This clears the quarantine mark and resets the attempts, the validation failures
+and the model failures. It keeps the rejection feedback. It clears the cached
+extraction, which would otherwise be rejected again, unless the episode was set
+aside for a model timeout or crash. It refuses an
+episode that holds a live lease. An engine change releases every quarantined episode without
 operator action.
 
 ## Backup
@@ -359,11 +426,20 @@ because an older image cannot write to a migrated journal.
 
 ## Secrets
 
-- `.env` holds `NEO4J_PASSWORD` and the MCP bearer tokens. It is git-ignored.
+- The env file holds `NEO4J_PASSWORD` and the MCP bearer tokens. Keep one per
+  stack outside the repository, readable only by you. A `.env` in the checkout is
+  git-ignored.
   Generate values with `openssl rand -hex 32`.
-- A Neo4j volume keeps the password it was first started with. Changing
-  `NEO4J_PASSWORD` later does not change the stored password, and the services
-  then fail to connect. Change it in Neo4j first, then in `.env`.
+- The stored Neo4j password wins over a later change of `NEO4J_PASSWORD`. The
+  variable sets the password only on the first authenticated start of a volume.
+  Changing it later leaves the stored password as it was, and every service then
+  fails to connect. Rotate in Neo4j first, then update the env file and recreate
+  the clients by name:
+
+  ```sh
+  gm exec neo4j cypher-shell -u neo4j -p "$OLD" -d system \
+    "ALTER CURRENT USER SET PASSWORD FROM '$OLD' TO '$NEW'"
+  ```
 - The Codex login lives in the mounted auth directory (`TRANSCRIPT_AUTH_PATH`)
   or the `codex_auth` volume. The worker writes to it when tokens refresh.
 - The model CLI receives a minimal environment. It does not see the database
@@ -378,8 +454,11 @@ because an older image cannot write to a migrated journal.
 
 ## Testing
 
-Tests and evals wipe what they touch. Never point `MEMORY_TEST_NEO4J_URI` at
-17687 or 27687. Those are the live graphs.
+Tests and evals create and delete data. Never point `MEMORY_TEST_NEO4J_URI` at
+17687 or 27687. Those are the live graphs. The test suite refuses to run against
+either port and exits with code 2, unless `MEMORY_TEST_ALLOW_LIVE` is set. Do not
+set it on a machine that runs the stacks. The guard is in the pytest fixtures. `evals.run` starts with pytest and is
+covered; `evals.ab` has no such guard.
 
 ```sh
 make test          # unit tests. Database tests skip themselves

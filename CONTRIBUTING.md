@@ -19,7 +19,8 @@ npm test
 Use the disposable Neo4j from `compose.test.yaml` (`make test-db-up`). It has no
 authentication and no persistence. Tests allocate and remove only their own random
 namespaces. Never point tests or evals at a live graph: ports 17687 and 27687 are
-the personal and transcripts databases. Model evals require a configured
+the personal and transcripts databases. The test suite exits with an error on
+those ports unless `MEMORY_TEST_ALLOW_LIVE` is set. Model evals require a configured
 Codex login or compatible endpoint; see [evals](evals/README.md).
 
 For extraction, prompt, schema, identity, or temporal changes, add a regression

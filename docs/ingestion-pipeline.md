@@ -36,9 +36,9 @@ stateDiagram-v2
     Due --> Claimed: a worker wins the claim
     Claimed --> Complete: skip rule, cached extraction, or validated extraction committed
     Claimed --> Waiting: failure charged to the episode (status failed, backoff)
-    Claimed --> Waiting: provider unavailable (status unchanged, 60 s, not charged)
-    Claimed --> Due: systemic fault (not charged, lease released)
-    Claimed --> Quarantined: third validation failure, or a failure that needs review
+    Claimed --> Waiting: provider outage (status unchanged, 60 s, not charged)
+    Claimed --> Due: namespace fault (status unchanged, not charged, lease released)
+    Claimed --> Quarantined: budget exhausted, or a failure that needs review
     Claimed --> Due: daemon restart reclaims the lease
     Waiting --> Due: retry time reached
     Quarantined --> Due: engine identity changes, or retry-quarantined
@@ -67,7 +67,8 @@ four earlier messages as context. With source records a batch also holds at most
 Source-records intake is bounded so that a large archive cannot flood the queue:
 
 - **Queue gate.** Intake counts episodes that are due now: status `pending` or
-  `failed`, retry time reached, not quarantined. When the count reaches
+  `failed`, retry time reached, not quarantined for the running engine. This is
+  the same quarantine rule the workers use. When the count reaches
   `MEMORY_INTAKE_QUEUE` (default 32) the scan leaves the remaining source on disk.
 - **File budget.** One scan opens at most `MEMORY_INTAKE_FILES` files (default 4)
   that stage work or still have work left. Confirming that a file is already fed
@@ -83,8 +84,10 @@ Staging links only the nodes of the episode being staged: its session, messages
 and artifact observations. It does not rescan the namespace for missing links.
 Restoring links across a namespace is the explicit `repair` command.
 
-Transcript staging pauses while the provider is unavailable, because it would
-only build a queue that no worker can drain. The memory-bank scan continues.
+All staging pauses while the queue is paused, whether the cause is the provider
+or a namespace fault. That covers transcript intake and the memory-bank scan,
+which logs `bank_scan` with `skipped: queue_paused`. Staging during a pause
+would only build a queue that no worker can drain.
 
 ## Claim and lease
 
@@ -118,7 +121,7 @@ One run of a claimed episode follows this order.
    validates it again against the source and commits it. No model call is made.
 2. **Skip rule.** For source-record and direct MCP episodes, a fact must cite a
    new message, and only a user assertion, an assistant report, or a tool result
-   that validates one can be new evidence. If no focus message has one of those
+   can be new evidence. If no focus message has one of those
    types, the episode is committed empty without a model call. The receipt
    carries `skipped: no_claim_in_focus`. Other formats always go to the model.
 3. **Model call.** The model receives the transcript, matching existing entities
@@ -137,7 +140,17 @@ One run of a claimed episode follows this order.
 The worst case is two passes of two calls each, which is why the lease covers
 four model timeouts.
 
-## Quote repair
+## Quote repair and evidence rules
+
+Validation runs in two steps. It first repairs every quote in the extraction.
+It then applies the focus and role rules to the evidence as repaired. A quote
+that repair moved to another message is held to that message's role and focus,
+so moving a quote cannot sidestep those rules.
+
+The focus rule requires each fact of a feed batch to cite at least one new
+message, and that message must be a claim or a tool result. Any other message
+type in focus is context. Plain transcripts carry no roles, so any of their
+messages qualifies.
 
 Evidence must be text that occurs in the cited message. Models often copy a
 passage with small differences, so validation looks for the source span a quote
@@ -146,7 +159,10 @@ points at instead of rejecting on the first difference.
 Tolerated differences between the quote and the source:
 
 - Markdown markup characters (`*`, `_`, `` ` ``, `~`, `\`).
-- Line-number prefixes at the start of a line.
+- Line-number prefixes at the start of a line of the source. They are stripped
+  from the source only, and only when the quote does not match without doing so.
+  A quote keeps its own leading digits because they are content: "2023: grew"
+  must not pass for a source that says 2024.
 - Any amount or kind of whitespace.
 - Accents, and composed versus decomposed Unicode forms.
 - The right text under the wrong message id, when exactly one message in the
@@ -161,7 +177,10 @@ Still rejected:
 - A repaired span longer than 4,000 characters.
 
 When a quote is repaired, the stored evidence is replaced by the exact source
-span. Stored evidence is therefore always verbatim source text.
+span, including the combining marks of its last character. Stored evidence is
+therefore always verbatim source text. The extraction hash stored on a completed
+episode is the hash of the evidence as committed. Sending the same unrepaired
+extraction again is still recognised as a replay, not as a conflict.
 
 Validation collects every bad quote in an extraction and reports up to ten
 locations in one diagnostic. A correction pass that learned of one bad quote per
@@ -174,21 +193,29 @@ decides who pays for the failure.
 
 | Class | Examples | Charged to the episode | Effect |
 | --- | --- | --- | --- |
-| Validation failure | `evidence_quote_mismatch`, `schema_validation`, `unvalidated_assistant_claim` | Attempt and validation failure | Backoff. Third validation failure under one engine quarantines |
+| Validation failure | `evidence_quote_mismatch`, `schema_validation`, `unvalidated_assistant_claim` | Attempt and validation failure | Backoff |
 | Needs review | `ambiguous_identity`, `extraction_conflict`, a cached extraction that no longer validates | Attempt | Quarantined at once |
-| Other episode failure | Database error at commit, `unclassified_error` | Attempt | Backoff only |
-| Provider unavailable | `model_timeout`, `model_invocation_failed` | Nothing | Status unchanged, retry in 60 s, feeds the breaker |
-| Systemic fault | `journal_state_mismatch`, `engine_changed` | Nothing | The worker stops claiming. See below |
+| Other episode failure | Database error at commit, `unclassified_error` | Attempt | Backoff |
+| Provider outage | `model_timeout` or `model_invocation_failed` while the breaker opens or is open | Nothing | Status unchanged, retry in 60 s |
+| Model failure that follows the episode | The same codes while the provider serves other episodes | `infra_failures` | Status unchanged, retry in 60 s |
+| Namespace fault | `journal_state_mismatch`, `engine_changed` | Nothing | Status unchanged. The worker stops claiming. See below |
 
-**Backoff.** A charged failure delays the next try by 60 seconds doubled for each
-earlier attempt: 60, 120, 240, 480, 960, 1,920 seconds, then 3,600 seconds for
-every later attempt. Attempts and validation failures recorded under an older
-engine identity do not count.
+**Backoff.** A charged attempt delays the next try by 60 seconds doubled for each
+earlier attempt: 60, 120, 240, 480, 960, 1,920 and 3,600 seconds. Counters
+recorded under an older engine identity do not count.
 
-**Retry budget.** The budget is three validation-failed runs per engine identity.
-A run includes its correction calls, so three runs can mean up to twelve model
-calls. Failures outside the validation class delay the episode but never
-exhaust the budget.
+**Retry budget.** An episode is quarantined under the running engine when any of
+these is reached:
+
+- three validation-failed runs. A run includes its correction calls, so three
+  runs can mean up to twelve model calls;
+- three model timeouts or crashes that were not part of an outage. A timeout
+  that follows one episode around while other episodes succeed is that
+  episode's problem;
+- eight charged attempts of any kind. Without this limit an episode with a
+  persistent database or unclassified error would retry every hour indefinitely.
+
+A provider outage and a namespace fault never count toward any of the three.
 
 **Rejection feedback.** The latest validation failure is stored on the episode:
 reason, location and the rejected candidate, within size limits. The next run
@@ -203,8 +230,10 @@ that quarantined it. `memory_status.processing.quarantined` counts these episode
 
 Two things release it. A new engine identity makes it due again, because new
 extraction code may succeed where the old code failed. An operator can release
-one episode with `retry-quarantined`, which resets its attempts and validation
-failures.
+one episode with `retry-quarantined`, which resets its attempts, validation
+failures and model failures. It also clears the cached extraction, because a
+saved extraction that was rejected would be rejected again. The cache is kept
+only when the episode was set aside for a model timeout or crash.
 
 ## Circuit breaker
 
@@ -215,26 +244,35 @@ calls that cannot succeed.
 - It opens after three provider failures with no success between them. It opens
   on the first failure when the reason is `usage_limit`, `authentication` or
   `model_unavailable`, because every call will fail until someone acts.
-- While open, workers do not claim episodes. One probe episode is admitted per
-  cooldown. The cooldown starts at 60 seconds and doubles after each failed
-  probe, up to 900 seconds.
-- A success closes it and resets the cooldown. A failure that is the episode's
-  own fault also counts as proof that the provider answered.
+- While open, workers do not claim episodes. One probe is admitted per wait.
+  The wait starts at 60 seconds. Only a failed probe doubles it, up to 900
+  seconds. Eight workers failing together when the break opens do not lengthen it.
+- Only a model call can close the break. A completed run closes it if it made a
+  model call. A run that the validator rejected also closes it, because the
+  provider answered. A skipped, cached or replayed episode says nothing about
+  the provider and leaves the break open.
+- A probe that ended without a model call, for example because nothing was due,
+  is released and the next probe is admitted after about 5 seconds.
+- Every admitted call carries the state it started under. An outcome that
+  arrives after the break opened or closed belongs to the past and is ignored.
 
 The daemon logs `provider_unavailable` when the breaker opens and after each
 failed probe, and `provider_recovered` when it closes. Both carry `open`,
 `reason` and `retry_in`. The worker heartbeat records the open state, so
 `memory_status.workers` reports `provider_unavailable` with the reason.
 
-## Systemic faults
+## Namespace faults
 
 Two faults belong to the namespace or the process. The next episode would fail
-the same way, so no episode is charged for them.
+the same way, so no episode is charged, marked failed or quarantined for them.
+They pause the queue through the same breaker, opened at once, but they are
+announced under their own names: `namespace_fault` when the pause starts and
+after each failed probe, `namespace_recovered` when a probe succeeds. Provider
+events keep their names.
 
 - **`journal_state_mismatch`.** The graph no longer matches its journal.
-  The breaker opens with this reason, so the log shows `provider_unavailable`
-  with `reason: journal_state_mismatch`. Writes stay refused until an operator
-  resolves it. See [operations](operations.md#journal-maintenance).
+  Writes stay refused until an operator resolves it. See
+  [operations](operations.md#journal-maintenance).
 - **`engine_changed`.** The engine files on disk differ from the ones the
   process loaded. The daemon drains and exits with reason `engine_changed`, and
   the container supervisor starts a new process with the new code.
@@ -260,16 +298,19 @@ with nothing an agent could use.
   disabled. Every agent tool feature is switched off through config overrides,
   which a CLI version without that feature tolerates.
 - The output must match the JSON Schema of the extraction model.
-- The process receives only `PATH`, `HOME`, `CODEX_HOME`, `LANG`, `LC_ALL`,
-  `TMPDIR` and `SSL_CERT_FILE`. The database password and the MCP token are not
-  passed on.
+- The process receives only what the CLI needs: `PATH`, `HOME`, `CODEX_HOME`,
+  locale and temporary-directory variables, certificate and proxy settings, and
+  `OPENAI_API_KEY` or `CODEX_API_KEY` when set. The database password and the
+  MCP token are not passed on.
 - The CLI runs in its own process group. On timeout the whole group is killed,
   including anything the CLI started. `MEMORY_LLM_TIMEOUT` sets the timeout in
-  seconds (default 420, allowed 10 to 3,600).
-- The CLI's error stream can repeat prompt text. It is reduced to one of a closed
-  set of reasons: `usage_limit`, `rate_limit`, `authentication`,
-  `model_unavailable`, `network`, `timeout` or `unknown`. The text itself is
-  never logged or stored.
+  seconds (default 420, allowed 10 to 600). The upper bound keeps four calls
+  inside the worker container's 45 minute stop grace period.
+- The CLI's error stream can repeat prompt text. Only the CLI's own `ERROR`
+  lines are read, so transcript text can never decide that the provider is down.
+  They are reduced to one of a closed set of reasons: `usage_limit`,
+  `rate_limit`, `authentication`, `model_unavailable`, `network`, `timeout` or
+  `unknown`. The text itself is never logged or stored.
 
 The compatible HTTP adapter maps HTTP status codes to the same reasons.
 
@@ -296,8 +337,10 @@ journal head first and refuse to write on a mismatch.
 
 **Where untracked writes are detected.** A scoped write does not read the whole
 graph, so it cannot notice a change made outside the journal. Detection happens
-in `history verify`, in `history checkpoint`, in any full-capture write, and in
-the sampled audit. With `MEMORY_JOURNAL_AUDIT=N`, the writes whose sequence is a
+in `history verify-live`, in `history verify`, in `history checkpoint`, in any
+full-capture write, and in the sampled audit. `verify-live` streams the live
+graph and compares its hash with the journal head. It takes seconds and constant
+memory, which makes it the routine check. `verify` also reads the whole history. With `MEMORY_JOURNAL_AUDIT=N`, the writes whose sequence is a
 multiple of `N` stream the live graph and compare its hash with the head. `1`
 checks every write and `0` turns the audit off. A sampled audit skips writes
 that changed nothing.

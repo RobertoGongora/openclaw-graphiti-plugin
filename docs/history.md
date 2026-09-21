@@ -24,7 +24,10 @@ commands with `~/.local/share/graph-memory/bin/compose exec worker`.
 ```sh
 # Inspect numbered changes (paginated, without returning private source payloads).
 graph-memory --namespace personal history list --limit 20
-# Verify the whole hash chain and that current knowledge equals the journal head.
+# Routine check: stream the live graph and compare it with the journal head.
+# Seconds and constant memory. Finds untracked writes.
+graph-memory --namespace personal history verify-live
+# Full audit: the whole hash chain, then the live graph against its reconstruction.
 # Holds the namespace lock and reads every event: run it in a maintenance window.
 graph-memory --namespace personal history verify
 # Embed the current state so historical reads replay from here (maintenance action).
@@ -57,11 +60,11 @@ on the way. After a long run of changes, a checkpoint shortens those reads.
 Snapshots that earlier versions embedded every 100 changes remain readable.
 
 A write that touches a few nodes cannot notice a change made elsewhere outside
-the journal. Untracked writes are detected by `history verify`, by
-`history checkpoint`, by any full-capture write, and by the sampled audit:
-`MEMORY_JOURNAL_AUDIT=N` compares the streamed live graph with the journal head
-on every Nth write (`1` every write, `0` off). The engine also has a streamed
-`verify_live` check with no CLI command yet.
+the journal. Untracked writes are detected by `history verify-live`, by
+`history verify`, by `history checkpoint`, by any full-capture write, and by the
+sampled audit: `MEMORY_JOURNAL_AUDIT=N` compares the streamed live graph with the
+journal head on every Nth write (`1` every write, `0` off). `verify-live` is the
+routine check. `verify` stays the full audit for a maintenance window.
 
 After an untracked write, `history checkpoint --accept-live` records the live
 graph as the new truth. Use it only once the cause is known; see the
@@ -104,7 +107,7 @@ source mount paths so the worker resumes the same queue.
 
 Once a namespace has a journal, every knowledge writer must support it. Editing
 knowledge properties directly in Cypher diverges from recorded history. The next
-verify, checkpoint, full-capture write or sampled audit detects it, and journaled
+`verify-live`, verify, checkpoint, full-capture write or sampled audit detects it, and journaled
 writes that detect it stop until the discrepancy is resolved.
 
 Journals written before the per-node state hash migrate on the first write by the

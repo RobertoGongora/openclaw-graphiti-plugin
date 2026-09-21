@@ -43,7 +43,8 @@ seconds. Intake pauses when `MEMORY_INTAKE_QUEUE` episodes (default 32) are due,
 counting pending and failed episodes whose retry time has come and leaving out
 quarantined ones. The scan resumes after the last file it examined, and a fully
 fed file is stamped on its feed node so a restart skips it without parsing.
-Staging also pauses while the model provider is unavailable. See
+All staging pauses while the model provider is unavailable or a namespace fault
+is open. See
 [ingestion pipeline](ingestion-pipeline.md#intake).
 Source files must remain available until intake has caught up.
 
@@ -190,7 +191,7 @@ tracking and limits remain enabled.
 
 **Update, 2026-09-21.** The Compose defaults above are superseded. The template
 now uses a 4 GiB maximum heap (`TRANSCRIPT_NEO4J_HEAP_MAX`), a 2 GiB page cache
-(`TRANSCRIPT_NEO4J_PAGECACHE`), a 1 GiB transaction memory limit and an 8 GiB
+(`TRANSCRIPT_NEO4J_PAGECACHE`), a 2 GiB transaction memory limit and an 8 GiB
 container limit. Writes no longer capture the source graph before and after;
 they journal only the nodes they change. See
 [sizing](operations.md#sizing-neo4j).
@@ -249,10 +250,12 @@ outage before the checkpoint itself is saved can still lose that model work.
 
 After three failed validation runs for an engine version, an episode is paused
 for review. A run includes the existing bounded schema/evidence correction calls;
-three runs does not mean three individual CLI calls. Provider failures (timeouts
-and failed invocations) are not charged to the episode at all: it waits 60
-seconds, keeps its attempts, its validation budget and its rejection feedback,
-and the provider breaker decides when calls resume. Identity conflicts,
+three runs does not mean three individual CLI calls. Failures during a provider
+outage are not charged to the episode at all: it waits 60 seconds, keeps its
+attempts, its validation budget and its rejection feedback, and the provider
+breaker decides when calls resume. A timeout or crash that follows one episode
+while the provider serves others is counted on that episode and pauses it after
+three. Eight charged failures of any kind also pause an episode. Identity conflicts,
 extraction conflicts and damaged checkpoints pause immediately. A journal
 mismatch or changed engine files are faults of the namespace or process, so no
 episode is charged or paused for them. A batch whose new messages cannot carry
@@ -263,7 +266,8 @@ and correction feedback instead of being classified as unknown failures.
 `memory_status.processing` reports `quarantined` and `cached_extractions`.
 Paused episodes remain failed/incomplete and count against coverage. They become
 eligible again after an engine change, or an operator can deliberately release
-one using `graph-memory --namespace transcripts retry-quarantined EPISODE_ID`.
+one using `graph-memory --namespace transcripts retry-quarantined EPISODE_ID`,
+which also clears a saved extraction when the pause reason was a validation one.
 The existing backoff may still delay an engine-change retry. Historical failure
 totals are not assumed to be validation failures: the new counter starts with
 this release. No source, fact, or rejection evidence is removed by quarantine.

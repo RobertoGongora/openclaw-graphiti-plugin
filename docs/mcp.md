@@ -139,7 +139,7 @@ facts. `detail:"full"` retains access to the legacy record format.
 server (or `{"namespace":"personal"}` on an unbound server). It returns:
 
 - `workers`: up to five worker heartbeats with worker count, heartbeat age,
-  `alive`, `same_engine`, and `provider_unavailable` with its reason while the
+  `alive` (a heartbeat younger than 180 seconds; the daemon beats every 30), `same_engine`, and `provider_unavailable` with its reason while the
   provider breaker is open.
 - Episode totals and counts by persisted status (`pending`, `complete`, `failed`).
 - Active extraction leases, work eligible for a worker, retry-delayed work,

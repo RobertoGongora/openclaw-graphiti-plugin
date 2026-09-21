@@ -226,3 +226,29 @@ def test_timeout_kills_the_whole_process_group(tmp_path, monkeypatch):
     time.sleep(0.2)
     alive = subprocess.run(["ps", "-p", str(child)], capture_output=True).returncode == 0
     assert not alive  # the grandchild the CLI launched is gone too
+
+
+def test_a_lone_crashing_episode_cannot_hold_the_break_open(graph, tmp_path):
+    store, ns = graph
+    (tmp_path / "note.md").write_text("Note: Atlas uses MySQL.")
+    clock = [0.0]
+    service = MemoryService(store, Flaky("timeout"))
+    service.breaker = Breaker(clock=lambda: clock[0])
+    scan_bank(service, ns, [tmp_path], {})
+    quarantined = False
+    for _ in range(8):  # two failures, the break opens, then every probe is this episode
+        receipts = worker_tick(service, ns)["receipts"]
+        quarantined = quarantined or any(r.get("quarantined") for r in receipts)
+        clock[0] += 1000
+        store.transaction(
+            lambda tx: tx.run(
+                "MATCH (e:MemoryEpisode {namespace:$ns}) SET e.retry_after=0", ns=ns
+            ).consume()
+        )
+    assert quarantined
+    # With the episode set aside, healthy work closes the break.
+    (tmp_path / "other.md").write_text("Another note: Atlas uses Postgres.")
+    service.llm.down = False
+    service.breaker = Breaker()
+    scan_bank(service, ns, [tmp_path], {})
+    assert [r["status"] for r in worker_tick(service, ns)["receipts"]] == ["complete"]

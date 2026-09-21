@@ -134,6 +134,10 @@ class Breaker:
                 self.probing = True
             return self.generation
 
+    def current(self, ticket):
+        with self.lock:
+            return ticket == self.generation
+
     def release(self, ticket):
         """The tick ended without a model call (nothing due, a skipped episode, a
         database error): free the probe, or no one could ever probe again."""
@@ -185,13 +189,13 @@ def worker_tick(service, namespace, limit=10):
     if breaker and ticket is None:
         return {"receipts": [], "breaker": breaker.state()}
     try:
-        return _tick(service, namespace, limit, breaker, ticket)
+        return _tick(service, namespace, limit, breaker, ticket, bool(breaker and breaker.open))
     finally:
         if breaker:
             breaker.release(ticket)
 
 
-def _tick(service, namespace, limit, breaker, ticket):
+def _tick(service, namespace, limit, breaker, ticket, probe):
     from .diagnostics import diagnostic
     from .llm import PERSISTENT_REASONS
 
@@ -282,17 +286,33 @@ def _tick(service, namespace, limit, breaker, ticket):
                 "ambiguous_identity",
                 "extraction_conflict",
             }
-            outage = False
+            outage, timely = False, True
             if breaker and infrastructure:
                 reason = issue.get("provider_reason") or issue["code"]
+                timely = breaker.current(ticket)
                 outage = breaker.failure(ticket, reason, reason in PERSISTENT_REASONS) is not None
                 outage = outage or breaker.open
-            elif breaker and breaker.success(ticket):
+            # A database error before the call says nothing about the provider.
+            elif (
+                breaker
+                and issue["stage"] in {"model_output", "evidence_validation"}
+                and breaker.success(ticket)
+            ):
                 # The provider answered; it is the episode that was rejected.
                 recovered = True
             # A timeout or crash that follows one episode around, while the provider
             # serves the others, is that episode's problem: three and it is set aside.
-            stubborn = infrastructure and not outage
+            # A probe that times out or dies without a provider error counts too: on a
+            # quiet queue the same episode is the only probe, and if it were never
+            # charged it would hold the break open for good. A failure from a call
+            # that predates the current state is nobody's fault.
+            stubborn = (
+                infrastructure
+                and timely
+                and (
+                    not outage or (probe and issue.get("provider_reason") in {"timeout", "unknown"})
+                )
+            )
             retry = service.store.transaction(
                 lambda tx, eid=row["id"], token=token, validation_failure=validation_failure, review=review, issue=issue, infrastructure=infrastructure, stubborn=stubborn: (
                     tx.run(

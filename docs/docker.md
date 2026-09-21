@@ -102,7 +102,9 @@ Every log line is a JSON event with a `ts` timestamp. `daemon_start` records the
 settings and reclaimed leases, `daemon_exit` the reason and peak memory, and each
 `processed` event carries per-stage `timings`, `model_calls`, `cached`, `skipped`
 and `claim_seconds`. `provider_unavailable` and `provider_recovered` mark the
-provider breaker opening and closing.
+provider breaker opening and closing; `namespace_fault` and `namespace_recovered`
+mark a pause caused by a journal mismatch or changed engine files. All staging
+pauses during either.
 The worker logs scan counts, episode IDs, completion/failure status, and exception
 class names. Failed `processed` events also include a bounded `diagnostic` object:
 stage, reason code, extraction attempt, elapsed seconds, engine fingerprint, and
