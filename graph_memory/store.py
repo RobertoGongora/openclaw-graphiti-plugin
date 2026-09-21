@@ -93,6 +93,13 @@ class GraphStore:
             tx.run(
                 "CREATE INDEX memory_change_scope IF NOT EXISTS FOR (n:MemoryChange) ON (n.scope,n.sequence)"
             ).consume()
+            # Staging links a tool result to its call and a message to its observations.
+            tx.run(
+                "CREATE INDEX memory_message_call IF NOT EXISTS FOR (n:MemoryMessage) ON (n.session_ref,n.call_id)"
+            ).consume()
+            tx.run(
+                "CREATE INDEX memory_observation_message IF NOT EXISTS FOR (n:MemoryArtifactObservation) ON (n.message_ref)"
+            ).consume()
             for field in ("subject_id", "target_id", "episode_id"):
                 tx.run(
                     f"CREATE INDEX memory_fact_{field} IF NOT EXISTS FOR (n:MemoryFact) ON (n.namespace,n.{field})"

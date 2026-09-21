@@ -111,7 +111,41 @@ def save(tx, transcript, episode_id, declare=None):
         session=sid,
         messages=mids,
     ).consume()
-    repair(tx, ns)
+    link(tx, ns, sid, episode_id, mids)
+
+
+def link(tx, ns, sid, episode_id, mids):
+    """Relationships for one staged episode. repair() rebuilds the same edges for a
+    whole namespace, which is far too much work to repeat on every episode."""
+    tx.run(
+        "MATCH (s:MemorySession {id:$sid}),(e:MemoryEpisode {id:$eid}) "
+        "MERGE (s)-[:HAS_EPISODE]->(e) WITH s,e "
+        "UNWIND $mids AS mid MATCH (m:MemoryMessage {id:mid}) "
+        "MERGE (e)-[:CONTAINS]->(m) MERGE (s)-[:HAS_MESSAGE]->(m)",
+        sid=sid,
+        eid=episode_id,
+        mids=mids,
+    ).consume()
+    # A result and its call may arrive in different episodes, in either order.
+    tx.run(
+        "UNWIND $mids AS mid MATCH (m:MemoryMessage {id:mid}) WHERE m.call_id IS NOT NULL "
+        "MATCH (other:MemoryMessage {session_ref:$sid,call_id:m.call_id}) "
+        "WHERE other.namespace=$ns AND other.id<>m.id "
+        "WITH CASE WHEN m.role='tool' THEN m ELSE other END AS r,"
+        "CASE WHEN m.role='tool' THEN other ELSE m END AS c "
+        "WHERE r.role='tool' AND c.source_type='tool_call' MERGE (r)-[:RESULT_OF]->(c)",
+        mids=mids,
+        sid=sid,
+        ns=ns,
+    ).consume()
+    tx.run(
+        "UNWIND $mids AS mid MATCH (o:MemoryArtifactObservation {message_ref:mid}) "
+        "WHERE o.namespace=$ns "
+        "MATCH (m:MemoryMessage {id:mid}),(a:MemoryArtifact {id:o.artifact_ref}) "
+        "MERGE (m)-[:TOUCHED_MEMORY]->(o) MERGE (o)-[:VERSION_OF]->(a)",
+        mids=mids,
+        ns=ns,
+    ).consume()
 
 
 def repair(tx, ns):

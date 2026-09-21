@@ -377,3 +377,44 @@ def test_already_fed_files_do_not_spend_the_scan_budget(graph, tmp_path):
     # Six fed files precede the new one; confirming them is free, so one scan reaches it.
     fed = follow_once(service, ns, [tmp_path], {}, source_records=True)
     assert [f["source"].rsplit("/", 1)[-1] for f in fed] == ["99.jsonl"]
+
+
+def edges(store, ns):
+    return store.transaction(
+        lambda tx: sorted(
+            (r["a"], r["t"], r["b"])
+            for r in tx.run(
+                "MATCH (a {namespace:$ns})-[r]->(b {namespace:$ns}) "
+                "RETURN a.id AS a,type(r) AS t,b.id AS b",
+                ns=ns,
+            )
+        )
+    )
+
+
+def test_staging_links_only_its_own_nodes_and_matches_a_full_repair(graph, tmp_path, monkeypatch):
+    store, ns = graph
+    service = MemoryService(store)
+    memory = tmp_path / "memory" / "state.md"
+    memory.parent.mkdir()
+    memory.write_text("Atlas uses MySQL.")
+    call = [{"type": "tool_use", "id": "r1", "name": "Read", "input": {"file_path": str(memory)}}]
+    result = [{"type": "tool_result", "tool_use_id": "r1", "content": "Atlas uses MySQL."}]
+    path = tmp_path / "s.jsonl"
+    # The result arrives in a later episode than its call: nine fillers push it out.
+    path.write_text(
+        claude("assistant", call)
+        + "".join(claude("user", f"Filler message {i}.") for i in range(9))
+        + claude("user", result)
+    )
+    from graph_memory import source_graph
+    from graph_memory.session_sources import feed_records
+
+    monkeypatch.setattr(source_graph, "repair", lambda *a: pytest.fail("namespace-wide repair"))
+    fed = feed_records(service, ns, path, "s")
+    assert len(fed["receipts"]) >= 2 and fed["caught_up"]
+    monkeypatch.undo()
+    staged = edges(store, ns)
+    assert {t for _, t, _ in staged} >= {"HAS_EPISODE", "CONTAINS", "HAS_MESSAGE", "RESULT_OF"}
+    store.repair(ns)
+    assert edges(store, ns) == staged  # nothing was left for the full repair to add
