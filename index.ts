@@ -10,7 +10,7 @@
  * - graphiti_ingest: Manual episode ingestion
  * - Auto-recall: Injects relevant facts before each conversation (via before_agent_start)
  * - Auto-capture: Ingests conversation content before compaction/reset
- * - CLI: `openclaw graphiti status|search|episodes|ingest`
+ * - CLI: `openclaw graphiti status|search|episodes|ingest|logs|backfill`
  * - CLI bridge: `openclaw memory status` (built-in file-based memory)
  * - Slash command: /graphiti
  */
@@ -19,9 +19,9 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { Type } from "@sinclair/typebox";
 import path from "node:path";
 import os from "node:os";
-import { GraphitiClient, type GraphitiEpisode } from "./client.js";
+import { GraphitiClient, formatEpisodeCount, type GraphitiEpisode } from "./client.js";
 import { DebugLog, NOOP_LOG } from "./debug-log.js";
-import { extractMemoryPath, upsertIndexEpisode, scanMemoryFiles, readIndexState, writeIndexState, readMemoryFileMeta, buildIndexContent, indexEpisodeName, isIndexableFile, DEFAULT_INDEX_EXTENSIONS } from "./memory-index.js";
+import { resolveMemoryWrite, ingestIndexEpisode, scanMemoryFiles, readIndexState, writeIndexState, readMemoryFileMeta, buildIndexContent, indexEpisodeName, isIndexableFile, DEFAULT_INDEX_EXTENSIONS } from "./memory-index.js";
 import { buildProvenance, extractTextsFromMessages, buildEpisodeName, formatFactsAsContext, sanitizeForCapture, type SessionMeta } from "./shared.js";
 import { GraphitiContextEngine } from "./context-engine.js";
 
@@ -68,8 +68,67 @@ interface PluginConfig {
   logFile?: string;
   /** Create index episodes when files are written to memory/ (default: true). */
   autoIndex?: boolean;
-  /** File extensions to index (default: [".md", ".txt"]). Only relevant when autoIndex is enabled. */
-  autoIndexExtensions?: string[];
+  /**
+   * File extensions to index (default: [".md", ".txt"]). Only relevant when autoIndex is enabled.
+   * The schema says array, but a comma-separated string (".md, .txt") is tolerated.
+   */
+  autoIndexExtensions?: string[] | string;
+}
+
+/** Config after defaults and coercion — the single object every consumer reads. */
+export interface NormalizedConfig {
+  url: string;
+  groupId: string;
+  autoRecall: boolean;
+  autoCapture: boolean;
+  recallMaxFacts: number;
+  minPromptLength: number;
+  apiKey?: string;
+  autoIndex: boolean;
+  autoIndexExtensions: string[];
+  debug: boolean;
+  logFile?: string;
+}
+
+/** Cap for the session-start map; the oldest entry is evicted past this. */
+export const MAX_SESSION_STARTS = 1000;
+
+/** Flush backfill progress to the index state file every N indexed files. */
+const BACKFILL_FLUSH_EVERY = 25;
+
+/**
+ * Coerce `autoIndexExtensions` to a normalised string array. Accepts an array
+ * or a comma-separated string; drops non-string / empty entries. Returns
+ * `coerced: true` when the input was not already a clean string array.
+ */
+export function normalizeIndexExtensions(raw: unknown): { extensions: string[]; coerced: boolean } {
+  if (raw === undefined || raw === null) return { extensions: [...DEFAULT_INDEX_EXTENSIONS], coerced: false };
+
+  let coerced = false;
+  let items: unknown[];
+  if (Array.isArray(raw)) {
+    items = raw;
+  } else if (typeof raw === "string") {
+    items = raw.split(",");
+    coerced = true;
+  } else {
+    return { extensions: [...DEFAULT_INDEX_EXTENSIONS], coerced: true };
+  }
+
+  const extensions: string[] = [];
+  for (const item of items) {
+    const e = typeof item === "string" ? item.trim().toLowerCase() : "";
+    if (!e || e === ".") { coerced = true; continue; }
+    extensions.push(e.startsWith(".") ? e : `.${e}`);
+  }
+  if (extensions.length === 0) return { extensions: [...DEFAULT_INDEX_EXTENSIONS], coerced: true };
+  return { extensions, coerced };
+}
+
+/** Parse a CLI `--limit` value; returns null unless it is a positive integer. */
+function parseLimit(raw: string): number | null {
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : null;
 }
 
 const graphitiPlugin = {
@@ -79,18 +138,30 @@ const graphitiPlugin = {
   kind: "context-engine" as const,
 
   register(api: OpenClawPluginApi) {
-    const cfg = (api.pluginConfig ?? {}) as PluginConfig;
-    const url = cfg.url ?? "http://localhost:8100";
-    const groupId = cfg.groupId ?? "core";
-    const autoRecall = cfg.autoRecall === true;
-    const autoCapture = cfg.autoCapture !== false;
-    const recallMaxFacts = cfg.recallMaxFacts ?? 10;
-    const minPromptLength = cfg.minPromptLength ?? 10;
-    const apiKey = cfg.apiKey;
-    const autoIndex = cfg.autoIndex !== false;
-    const autoIndexExtensions = (cfg.autoIndexExtensions ?? [...DEFAULT_INDEX_EXTENSIONS])
-      .map((ext) => { const e = ext.toLowerCase(); return e.startsWith(".") ? e : `.${e}`; });
-    const debugLog = cfg.debug !== false ? new DebugLog(cfg.logFile) : NOOP_LOG;
+    const raw = (api.pluginConfig ?? {}) as PluginConfig;
+    const indexExt = normalizeIndexExtensions(raw.autoIndexExtensions);
+    if (indexExt.coerced) {
+      api.logger.warn(
+        `graphiti: autoIndexExtensions should be an array of strings like [".md", ".txt"]; ` +
+        `coerced to ${JSON.stringify(indexExt.extensions)}`,
+      );
+    }
+    // One normalised config: tools, hooks, CLI and the ContextEngine all read this.
+    const config: NormalizedConfig = {
+      url: raw.url ?? "http://localhost:8100",
+      groupId: raw.groupId ?? "core",
+      autoRecall: raw.autoRecall === true,
+      autoCapture: raw.autoCapture !== false,
+      recallMaxFacts: raw.recallMaxFacts ?? 10,
+      minPromptLength: raw.minPromptLength ?? 10,
+      apiKey: raw.apiKey,
+      autoIndex: raw.autoIndex !== false,
+      autoIndexExtensions: indexExt.extensions,
+      debug: raw.debug !== false,
+      logFile: raw.logFile,
+    };
+    const { url, groupId, autoRecall, autoCapture, recallMaxFacts, minPromptLength, apiKey, autoIndex, autoIndexExtensions } = config;
+    const debugLog = config.debug ? new DebugLog(config.logFile) : NOOP_LOG;
     const stateDir = path.join(os.homedir(), ".openclaw", "state", "graphiti");
 
     const client = new GraphitiClient(url, groupId, api.logger, apiKey, debugLog);
@@ -230,8 +301,10 @@ const graphitiPlugin = {
         label: "Graphiti Forget",
         description:
           "Delete a fact or episode from the knowledge graph. " +
-          "Delete directly by UUID (supports both facts and episodes), or search by query to find and remove. " +
-          "Note: query-based search only supports facts — to delete an episode, use its UUID directly.",
+          "Deletion is irreversible. Delete directly by UUID (supports both facts and episodes). " +
+          "A query never deletes on its own: it lists the matching facts with their UUIDs so you can call again " +
+          "with the uuid (or repeat the query with confirm: true when exactly one fact matches). " +
+          "Query-based search only supports facts — to delete an episode, use its UUID directly.",
         parameters: Type.Object({
           query: Type.Optional(Type.String({ description: "Search query to find the fact/episode to delete" })),
           uuid: Type.Optional(Type.String({ description: "Direct UUID of the fact/episode to delete" })),
@@ -241,10 +314,13 @@ const graphitiPlugin = {
               default: "fact",
             })
           ),
+          confirm: Type.Optional(
+            Type.Boolean({ description: "Query path only: set true to delete when the query matches exactly one fact (default: false — list matches, delete nothing)" })
+          ),
         }),
         async execute(_toolCallId, params) {
-          const { query, uuid, type = "fact" } = params as {
-            query?: string; uuid?: string; type?: "fact" | "episode";
+          const { query, uuid, type = "fact", confirm = false } = params as {
+            query?: string; uuid?: string; type?: "fact" | "episode"; confirm?: boolean;
           };
 
           if (!query && !uuid) {
@@ -291,6 +367,21 @@ const graphitiPlugin = {
               return {
                 content: [{ type: "text", text: `No matching facts found for "${query}".` }],
                 details: { deleted: false, reason: "no_matches" },
+              };
+            }
+
+            // A fuzzy search hit is not consent to an irreversible delete:
+            // without confirm, report the candidate and delete nothing.
+            if (facts.length === 1 && confirm !== true) {
+              return {
+                content: [{
+                  type: "text",
+                  text:
+                    `Found 1 matching fact — nothing deleted yet:\n\n` +
+                    `1. [${facts[0].uuid}] **${facts[0].name}**: ${facts[0].fact}\n\n` +
+                    `To delete it, call graphiti_forget again with uuid "${facts[0].uuid}" (or the same query with confirm: true).`,
+                }],
+                details: { deleted: false, reason: "confirmation_required", uuid: facts[0].uuid, type: "fact" },
               };
             }
 
@@ -409,11 +500,12 @@ const graphitiPlugin = {
     // ContextEngine registration (OpenClaw v2026.3.7+)
     // ========================================================================
 
-    const hasEngineSupport = typeof api.registerContextEngine === "function";
+    const registerContextEngine = api.registerContextEngine;
+    const hasEngineSupport = typeof registerContextEngine === "function";
 
-    if (hasEngineSupport) {
-      api.registerContextEngine("graphiti", () =>
-        new GraphitiContextEngine(client, cfg, groupId, debugLog, api.logger),
+    if (registerContextEngine && hasEngineSupport) {
+      registerContextEngine.call(api, "graphiti", () =>
+        new GraphitiContextEngine(client, config, groupId, debugLog, api.logger),
       );
     } else {
       debugLog.log("register", { contextEngine: false, reason: "api_version" });
@@ -557,7 +649,12 @@ const graphitiPlugin = {
     // timestamp so subsequent capture hooks can embed it in provenance metadata.
     api.on("session_start", async (_event: any, ctx: HookContext | undefined) => {
       if (ctx?.sessionId) {
-        if (sessionStarts.size >= 1000) sessionStarts.clear();
+        // Evict the oldest entries at the cap — clearing would wipe the
+        // provenance of every live session.
+        sessionStarts.delete(ctx.sessionId);
+        while (sessionStarts.size >= MAX_SESSION_STARTS) {
+          sessionStarts.delete(sessionStarts.keys().next().value as string);
+        }
         sessionStarts.set(ctx.sessionId, new Date().toISOString());
       }
     });
@@ -567,8 +664,11 @@ const graphitiPlugin = {
       api.on("after_tool_call", async (event: any) => {
         if (event.error) return;
 
-        const memPath = extractMemoryPath(event.toolName, event.params);
-        if (!memPath) return;
+        // Only files inside THIS workspace's memory dir count: a write to
+        // another checkout's memory/ folder must not index the local file.
+        const write = resolveMemoryWrite(event.toolName, event.params, api.resolvePath("memory"));
+        if (!write) return;
+        const memPath = write.filePath;
 
         if (!isIndexableFile(memPath, autoIndexExtensions)) {
           debugLog.log("mem-index", { skipped: true, reason: "extension_filtered", file: memPath });
@@ -579,11 +679,10 @@ const graphitiPlugin = {
           const healthy = await client.healthy();
           if (!healthy) return;
 
-          const absolutePath = api.resolvePath(memPath);
-          await upsertIndexEpisode({
+          await ingestIndexEpisode({
             client,
             filePath: memPath,
-            absolutePath,
+            absolutePath: write.absolutePath,
             groupId,
             debugLog,
             stateDir,
@@ -611,8 +710,7 @@ const graphitiPlugin = {
           console.log(`  Group: ${groupId}`);
           const stats = await client.episodeCount();
           if (stats.count > 0) {
-            const countLabel = stats.count >= 10000 ? "10000+" : String(stats.count);
-            console.log(`  Episodes: ${countLabel}`);
+            console.log(`  Episodes: ${formatEpisodeCount(stats.count)}`);
           }
           if (stats.latestAt) {
             console.log(`  Last capture: ${formatTimeAgo(stats.latestAt)}`);
@@ -628,8 +726,14 @@ const graphitiPlugin = {
           .argument("<query>", "Search query")
           .option("-n, --limit <n>", "Max results", "10")
           .action(async (query: string, opts: { limit: string }) => {
+            const limit = parseLimit(opts.limit);
+            if (limit === null) {
+              console.error(`Invalid --limit "${opts.limit}": expected a positive integer`);
+              process.exitCode = 1;
+              return;
+            }
             try {
-              const facts = await client.search(query, parseInt(opts.limit));
+              const facts = await client.search(query, limit);
               if (facts.length === 0) { console.log("No facts found."); return; }
               for (const f of facts) {
                 const valid = f.valid_at ?? "ongoing";
@@ -647,19 +751,26 @@ const graphitiPlugin = {
           .option("--json", "Output raw JSON")
           .option("-s, --session-key <key>", "Filter episodes by session key")
           .action(async (opts: { limit: string; json?: boolean; sessionKey?: string }) => {
-            let eps = await client.episodes(parseInt(opts.limit));
+            const limit = parseLimit(opts.limit);
+            if (limit === null) {
+              console.error(`Invalid --limit "${opts.limit}": expected a positive integer`);
+              process.exitCode = 1;
+              return;
+            }
+            let eps = await client.episodes(limit);
             // NOTE: --session-key filters the fetched set client-side.
             // If your session has many episodes and --limit is low, increase
             // --limit or use --json to retrieve all and filter externally.
-            if (opts.sessionKey) {
+            const sessionKey = opts.sessionKey;
+            if (sessionKey) {
               eps = eps.filter((ep: GraphitiEpisode) => {
                 try {
                   const prov = JSON.parse(ep.source_description ?? "");
-                  return prov.session_key === opts.sessionKey;
+                  return prov.session_key === sessionKey;
                 } catch {
                   // Legacy plain-text format fallback
-                  return ep.source_description?.includes(`session=${opts.sessionKey}`) ||
-                    ep.name?.includes(opts.sessionKey);
+                  return ep.source_description?.includes(`session=${sessionKey}`) ||
+                    ep.name?.includes(sessionKey);
                 }
               });
             }
@@ -776,47 +887,67 @@ const graphitiPlugin = {
             const ok = await client.healthy();
             if (!ok) { console.log("Graphiti server unreachable. Aborting backfill."); return; }
 
-            // Batch state writes: read once, accumulate updates, write once
+            // Read state once and accumulate updates. Progress is flushed every
+            // BACKFILL_FLUSH_EVERY files and in `finally`, so a failure (or a
+            // crash) never loses what was already ingested — otherwise the next
+            // run would ingest those files again as duplicate episodes.
             const state = readIndexState(stateDir);
             let indexed = 0;
             let skipped = 0;
             let unreadable = 0;
             let filtered = 0;
-            for (const f of files) {
-              if (!isIndexableFile(f, autoIndexExtensions)) { filtered++; continue; }
-              const absPath = path.join(memoryDir, path.relative(prefix, f));
-              const meta = readMemoryFileMeta(absPath);
-              if (!meta) { unreadable++; continue; }
+            let failed = 0;
+            let unflushed = 0;
+            try {
+              for (const f of files) {
+                if (!isIndexableFile(f, autoIndexExtensions)) { filtered++; continue; }
+                const absPath = path.join(memoryDir, path.relative(prefix, f));
+                const meta = readMemoryFileMeta(absPath);
+                if (!meta) { unreadable++; continue; }
 
-              const existing = state[f];
-              if (existing && existing.lastModified === meta.lastModified) {
-                skipped++;
-                continue;
+                const existing = state[f];
+                if (existing && existing.lastModified === meta.lastModified) {
+                  skipped++;
+                  continue;
+                }
+
+                try {
+                  const episodeContent = buildIndexContent(f, meta.lastModified, meta.excerpt, meta.fileSize);
+                  const fileType = path.extname(f).toLowerCase() || "unknown";
+                  await client.ingest([{
+                    content: episodeContent,
+                    role_type: "system",
+                    role: "memory-index",
+                    name: indexEpisodeName(f),
+                    timestamp: meta.lastModified,
+                    source_description: buildProvenance(groupId, { event: "memory_index", file: f, file_type: fileType }),
+                  }]);
+                } catch (err) {
+                  failed++;
+                  console.error(`  [failed] ${f}: ${err instanceof Error ? err.message : String(err)}`);
+                  continue;
+                }
+
+                state[f] = {
+                  lastModified: meta.lastModified,
+                  lastIndexed: new Date().toISOString(),
+                };
+                indexed++;
+                if (++unflushed >= BACKFILL_FLUSH_EVERY) {
+                  writeIndexState(stateDir, state);
+                  unflushed = 0;
+                }
               }
-
-              const episodeContent = buildIndexContent(f, meta.lastModified, meta.excerpt, meta.fileSize);
-              const fileType = path.extname(f).toLowerCase() || "unknown";
-              await client.ingest([{
-                content: episodeContent,
-                role_type: "system",
-                role: "memory-index",
-                name: indexEpisodeName(f),
-                timestamp: meta.lastModified,
-                source_description: buildProvenance(groupId, { event: "memory_index", file: f, file_type: fileType }),
-              }]);
-
-              state[f] = {
-                lastModified: meta.lastModified,
-                lastIndexed: new Date().toISOString(),
-              };
-              indexed++;
+            } finally {
+              if (unflushed > 0) writeIndexState(stateDir, state);
             }
-            writeIndexState(stateDir, state);
             const parts = [`Indexed ${indexed} files`];
             if (skipped) parts.push(`${skipped} unchanged`);
             if (unreadable) parts.push(`${unreadable} unreadable`);
             if (filtered) parts.push(`${filtered} filtered`);
+            if (failed) parts.push(`${failed} failed`);
             console.log(parts.length > 1 ? `${parts[0]} (${parts.slice(1).join(", ")})` : parts[0]);
+            if (failed) process.exitCode = 1;
           });
       },
       { commands: ["graphiti"] },

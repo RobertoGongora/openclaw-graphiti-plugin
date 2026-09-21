@@ -111,6 +111,20 @@ export type MockOverrides = {
   searchErrorBody?: string;
   episodes?: any[];
   episodesStatus?: number;
+  /** Raw JSON body for POST /search (e.g. "null"), bypassing `searchFacts`. */
+  searchRawBody?: string;
+  /** Raw JSON body for GET /episodes (e.g. "{}"), bypassing `episodes`. */
+  episodesRawBody?: string;
+  /** Status for DELETE /entity-edge and /episode (default 200). */
+  deleteStatus?: number;
+  /** Delay before answering POST /messages, in ms. */
+  ingestDelayMs?: number;
+  /** Answer POST /messages with 500 when the first message name contains this. */
+  ingestFailOnName?: string;
+  /** Pathname prefixes that never get a response (for abort-timeout tests). */
+  hangPaths?: string[];
+  /** Pathname prefixes that get 200 headers and half a body, then stall. */
+  stallBodyPaths?: string[];
 };
 
 let server: http.Server;
@@ -120,6 +134,10 @@ export let mockOverrides: MockOverrides = {};
 export const lastRequest: Record<string, unknown> = {};
 /** Headers from the most recent request to each path (lowercase keys). */
 export const lastHeaders: Record<string, Record<string, string>> = {};
+/** Number of requests received per pathname since the last reset. */
+export const requestCounts: Record<string, number> = {};
+/** Every POST /messages body since the last reset, in arrival order. */
+export const ingestRequests: any[] = [];
 
 export function getMockPort(): number {
   return port;
@@ -129,6 +147,8 @@ export function resetMockState(): void {
   mockOverrides = {};
   for (const key of Object.keys(lastRequest)) delete lastRequest[key];
   for (const key of Object.keys(lastHeaders)) delete lastHeaders[key];
+  for (const key of Object.keys(requestCounts)) delete requestCounts[key];
+  ingestRequests.length = 0;
 }
 
 function readBody(req: http.IncomingMessage): Promise<string> {
@@ -154,6 +174,19 @@ export function startMockServer(): Promise<void> {
 
       // Capture headers for every request
       captureHeaders(url.pathname, req);
+      requestCounts[url.pathname] = (requestCounts[url.pathname] ?? 0) + 1;
+
+      // Simulate a stalled server: accept the request, never answer.
+      if (mockOverrides.hangPaths?.some((p) => url.pathname.startsWith(p))) {
+        req.resume();
+        return;
+      }
+      if (mockOverrides.stallBodyPaths?.some((p) => url.pathname.startsWith(p))) {
+        req.resume();
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.write('{"facts": [');
+        return;
+      }
 
       // GET /healthcheck
       if (req.method === "GET" && url.pathname === "/healthcheck") {
@@ -179,6 +212,7 @@ export function startMockServer(): Promise<void> {
         }
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(
+          mockOverrides.searchRawBody ??
           JSON.stringify({
             facts: mockOverrides.searchFacts ?? SAMPLE_FACTS,
           }),
@@ -189,7 +223,18 @@ export function startMockServer(): Promise<void> {
       // POST /messages  (returns 202 like real Graphiti)
       if (req.method === "POST" && url.pathname === "/messages") {
         const body = await readBody(req);
-        lastRequest["/messages"] = JSON.parse(body);
+        const parsed = JSON.parse(body);
+        lastRequest["/messages"] = parsed;
+        ingestRequests.push(parsed);
+        if (mockOverrides.ingestDelayMs) {
+          await new Promise((r) => setTimeout(r, mockOverrides.ingestDelayMs));
+        }
+        const failOn = mockOverrides.ingestFailOnName;
+        if (failOn && String(parsed?.messages?.[0]?.name ?? "").includes(failOn)) {
+          res.writeHead(500);
+          res.end(JSON.stringify({ detail: "ingest error" }));
+          return;
+        }
         const status = mockOverrides.ingestStatus ?? 202;
         res.writeHead(status, { "Content-Type": "application/json" });
         res.end(
@@ -229,7 +274,14 @@ export function startMockServer(): Promise<void> {
           return;
         }
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify(mockOverrides.episodes ?? SAMPLE_EPISODES));
+        if (mockOverrides.episodesRawBody !== undefined) {
+          res.end(mockOverrides.episodesRawBody);
+          return;
+        }
+        // Honour last_n like the real server: never return more than asked for.
+        const all = mockOverrides.episodes ?? SAMPLE_EPISODES;
+        const lastN = Number(url.searchParams.get("last_n"));
+        res.end(JSON.stringify(Number.isInteger(lastN) && lastN >= 0 ? all.slice(0, lastN) : all));
         return;
       }
 
@@ -237,8 +289,9 @@ export function startMockServer(): Promise<void> {
       if (req.method === "DELETE" && url.pathname.startsWith("/entity-edge/")) {
         const uuid = url.pathname.split("/")[2];
         lastRequest["/entity-edge"] = { uuid };
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ status: "ok" }));
+        const delStatus = mockOverrides.deleteStatus ?? 200;
+        res.writeHead(delStatus, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(delStatus === 200 ? { status: "ok" } : { detail: "delete error" }));
         return;
       }
 
@@ -246,8 +299,9 @@ export function startMockServer(): Promise<void> {
       if (req.method === "DELETE" && url.pathname.startsWith("/episode/")) {
         const uuid = url.pathname.split("/")[2];
         lastRequest["/episode"] = { uuid };
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ status: "ok" }));
+        const delStatus = mockOverrides.deleteStatus ?? 200;
+        res.writeHead(delStatus, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(delStatus === 200 ? { status: "ok" } : { detail: "delete error" }));
         return;
       }
 
@@ -266,6 +320,8 @@ export function startMockServer(): Promise<void> {
 export function stopMockServer(): Promise<void> {
   return new Promise((resolve) => {
     server.close(() => resolve());
+    // Drop sockets parked by `hangPaths` so close() can finish.
+    server.closeAllConnections();
   });
 }
 
@@ -353,4 +409,62 @@ export function createMockApiWithEngineSupport(configOverrides: Record<string, u
   });
 
   return result;
+}
+
+// ============================================================================
+// CLI helpers
+// ============================================================================
+
+/**
+ * Run the plugin's `graphiti` CLI registration against a mock Commander chain
+ * and return every subcommand's action handler, keyed by subcommand name.
+ */
+export function captureCliActions(
+  clis: { reg: any; opts: any }[],
+): Record<string, (...args: any[]) => Promise<void>> {
+  const graphitiCli = clis.find((c) => c.opts.commands.includes("graphiti"));
+  if (!graphitiCli) throw new Error("graphiti CLI not registered");
+
+  const actions: Record<string, (...args: any[]) => Promise<void>> = {};
+  const mockCmd: any = {
+    description: () => mockCmd,
+    action: () => mockCmd,
+    command: (name: string) => {
+      const sub: any = {
+        description: () => sub,
+        argument: () => sub,
+        option: () => sub,
+        action: (fn: any) => { actions[name] = fn; return sub; },
+      };
+      return sub;
+    },
+    outputHelp: () => {},
+  };
+  graphitiCli.reg({ program: { command: () => mockCmd } });
+  return actions;
+}
+
+/**
+ * Run a CLI action with console.log/console.error captured. `process.exitCode`
+ * is reported and always restored, even when the action throws.
+ */
+export async function runCli(
+  fn: () => Promise<void>,
+): Promise<{ logs: string[]; errors: string[]; exitCode: typeof process.exitCode }> {
+  const logs: string[] = [];
+  const errors: string[] = [];
+  const origLog = console.log;
+  const origError = console.error;
+  const origExitCode = process.exitCode;
+  console.log = (...args: any[]) => logs.push(args.join(" "));
+  console.error = (...args: any[]) => errors.push(args.join(" "));
+  try {
+    process.exitCode = undefined;
+    await fn();
+    return { logs, errors, exitCode: process.exitCode };
+  } finally {
+    console.log = origLog;
+    console.error = origError;
+    process.exitCode = origExitCode;
+  }
 }

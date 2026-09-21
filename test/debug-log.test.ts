@@ -4,11 +4,11 @@
  * Covers: DebugLog class behavior, client integration, and PII safety.
  */
 
-import { describe, test, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
+import { describe, test, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { DebugLog, NOOP_LOG } from "../debug-log.js";
+import { DebugLog, NOOP_LOG, TAIL_READ_BYTES } from "../debug-log.js";
 import { GraphitiClient } from "../client.js";
 import {
   startMockServer,
@@ -166,7 +166,8 @@ describe("DebugLog", () => {
     // Should be a single line — newline escaped
     const lines = content.trimEnd().split("\n");
     expect(lines).toHaveLength(1);
-    expect(content).toContain("error=line1\\nline2");
+    // The escaped newline contains a backslash, so the value is quoted.
+    expect(content).toContain('error="line1\\nline2"');
   });
 
   test("escapes quotes in field values", () => {
@@ -174,9 +175,47 @@ describe("DebugLog", () => {
     log.log("test", { msg: 'has "quotes" inside' });
 
     const content = fs.readFileSync(logPath, "utf-8");
-    // Quotes should be escaped, not breaking the format
-    expect(content).not.toMatch(/msg="has "quotes"/);
-    expect(content).toContain('\\"');
+    expect(content).toContain('msg="has \\"quotes\\" inside"');
+  });
+
+  test("quotes values containing a quote, '=', or backslash even without spaces", () => {
+    const log = new DebugLog(logPath);
+    log.log("test", { q: 'a"b', eq: "k=v", bs: "C:\\tmp", plain: "abc", empty: "" });
+
+    const content = fs.readFileSync(logPath, "utf-8");
+    expect(content).toContain('q="a\\"b"');
+    expect(content).toContain('eq="k=v"');
+    expect(content).toContain('bs="C:\\\\tmp"');
+    expect(content).toContain(" plain=abc ");
+    expect(content).toContain('empty=""');
+  });
+
+  test("rotates to <file>.1 once the size cap is reached", () => {
+    const log = new DebugLog(logPath, true, 200);
+    for (let i = 0; i < 10; i++) log.log("fill", { i, pad: "x".repeat(40) });
+
+    expect(fs.existsSync(`${logPath}.1`)).toBe(true);
+    // The live file restarted after rotation, so it stays near the cap.
+    expect(fs.statSync(logPath).size).toBeLessThan(400);
+    expect(fs.readFileSync(logPath, "utf-8")).toContain("i=9");
+    // Only one generation is kept.
+    expect(fs.existsSync(`${logPath}.2`)).toBe(false);
+  });
+
+  test("tail() reads only the last TAIL_READ_BYTES of a large file", () => {
+    const log = new DebugLog(logPath);
+    const line = `${"y".repeat(1023)}\n`;
+    fs.writeFileSync(logPath, "FIRST-LINE\n" + line.repeat(600)); // ~600 KB
+    const spy = vi.spyOn(fs, "readFileSync");
+
+    const tail = log.tail(1000);
+
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+    const lines = tail.split("\n");
+    expect(lines.length).toBeLessThanOrEqual(Math.ceil(TAIL_READ_BYTES / 1024));
+    expect(lines.every((l) => l.length === 1023)).toBe(true); // partial first line dropped
+    expect(tail).not.toContain("FIRST-LINE");
   });
 });
 

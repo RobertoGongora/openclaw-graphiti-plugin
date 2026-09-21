@@ -7,6 +7,7 @@
  */
 
 import { createRequire } from "node:module";
+import { BOOTSTRAP_EPISODE_COUNT_CAP } from "./client.js";
 import type { GraphitiClient, GraphitiMessage } from "./client.js";
 import type { DebugLog } from "./debug-log.js";
 import { buildEpisodeName, buildProvenance, extractEpisodeContinuity, extractTextContent, extractTextsFromMessages, formatContinuityBlock, formatFactsAsContext, hasDeicticReferences, isContinuityGap, readSessionFileTail, sanitizeForCapture } from "./shared.js";
@@ -62,14 +63,23 @@ export interface SubagentSpawnPreparation {
 // Configuration
 // ---------------------------------------------------------------------------
 
-interface PluginConfig {
+/** The subset of the (normalised) plugin config the engine reads. */
+export interface EngineConfig {
   recallMaxFacts?: number;
   autoRecall?: boolean;
   autoCapture?: boolean;
-  debug?: boolean;
-  /** Allow extension without breaking. */
-  [key: string]: unknown;
 }
+
+/** Per-session Smart autoRecall state. */
+interface SessionState {
+  /** One-shot lifecycle flag consumed by the next assemble() for this session. */
+  lastEvent: LifecycleEvent | null;
+  sessionFile: string | null;
+  threadId: string | null;
+}
+
+/** Cap for the per-session maps/sets; the oldest entry is evicted past this. */
+export const MAX_TRACKED_SESSIONS = 1000;
 
 // ---------------------------------------------------------------------------
 // GraphitiContextEngine
@@ -87,24 +97,49 @@ export class GraphitiContextEngine {
   private _healthCache: { result: boolean; ts: number } | null = null;
   private static readonly HEALTH_CACHE_TTL_MS = 15_000;
 
-  /** Smart autoRecall state — tracks lifecycle events for continuity gap detection. */
-  private _lastEvent: LifecycleEvent | null = null;
-  private _sessionFile: string | null = null;
-  private _sessionId: string | null = null;
-  private _threadId: string | null = null;
+  /**
+   * Smart autoRecall state, keyed by session id. One engine instance serves
+   * every session, so nothing session-specific may live in a scalar field.
+   */
+  private _sessions = new Map<string, SessionState>();
   private _recalledSessions = new Set<string>();
 
   constructor(
     private client: GraphitiClient,
-    private cfg: PluginConfig,
+    private cfg: EngineConfig,
     private groupId: string,
     private debugLog: DebugLog,
     private logger?: { info?: (...args: any[]) => void; warn: (...args: any[]) => void },
   ) {}
 
+  /**
+   * Get (or create) the state for a session and mark it most recently used.
+   * Past MAX_TRACKED_SESSIONS the oldest session is evicted — never the whole map.
+   */
+  private session(sessionId: string): SessionState {
+    let state = this._sessions.get(sessionId);
+    if (state) {
+      this._sessions.delete(sessionId);
+    } else {
+      state = { lastEvent: null, sessionFile: null, threadId: null };
+      while (this._sessions.size >= MAX_TRACKED_SESSIONS) {
+        const oldest = this._sessions.keys().next().value as string;
+        this._sessions.delete(oldest);
+        this.debugLog.log("ce-session", { action: "session_evicted" });
+      }
+    }
+    this._sessions.set(sessionId, state);
+    return state;
+  }
+
+  /** Thread id recorded for a session, without creating state for unknown ids. */
+  private threadIdFor(sessionId: string): string | undefined {
+    return this._sessions.get(sessionId)?.threadId ?? undefined;
+  }
+
   /** Signal that the next assemble() should fire recovery for this session. */
   private signalRecovery(sessionId: string, event: LifecycleEvent): void {
-    this._lastEvent = event;
+    this.session(sessionId).lastEvent = event;
     this._recalledSessions.delete(sessionId);
   }
 
@@ -162,7 +197,7 @@ export class GraphitiContextEngine {
         role,
         name: `ingest-${params.sessionId}-${Date.now()}`,
         timestamp: new Date().toISOString(),
-        source_description: buildProvenance(this.groupId, { event: "ingest", session_key: params.sessionId, thread_id: this._threadId ?? undefined }),
+        source_description: buildProvenance(this.groupId, { event: "ingest", session_key: params.sessionId, thread_id: this.threadIdFor(params.sessionId) }),
       }]);
 
       this.debugLog.log("ce-ingest", { ingested: true, role, ms: Date.now() - start });
@@ -210,19 +245,20 @@ export class GraphitiContextEngine {
         return passThrough;
       }
 
-      if (params.threadId) this._threadId = params.threadId;
+      const state = this.session(params.sessionId);
+      if (params.threadId) state.threadId = params.threadId;
 
       const lastUserText = this.extractLastUserText(params.messages);
-      const gapDetected = isContinuityGap(params.messages.length, { recentEvent: this._lastEvent });
+      const gapDetected = isContinuityGap(params.messages.length, { recentEvent: state.lastEvent });
       const deicticDetected = !!lastUserText && hasDeicticReferences(lastUserText);
 
       // Session-scoped short-circuit: skip recall if this session already received
-      // Graphiti context.  Lifecycle events (bootstrap/compact via _lastEvent) and
+      // Graphiti context.  Lifecycle events (bootstrap/compact via lastEvent) and
       // deictic references override the gate so recovery still fires when needed.
       // TODO(#171): if the plugin-sdk exposes effective system-prompt contents or
       // placement control for ContextEngine additions, replace this session-scoped
       // short-circuit with direct Graphiti-tag detection or append-based placement.
-      if (this._recalledSessions.has(params.sessionId) && !this._lastEvent && !deicticDetected) {
+      if (this._recalledSessions.has(params.sessionId) && !state.lastEvent && !deicticDetected) {
         this.debugLog.log("ce-assemble", { skipped: true, reason: "already_injected" });
         return passThrough;
       }
@@ -234,25 +270,25 @@ export class GraphitiContextEngine {
 
       // Consume the one-shot event flag.  Safe: JS is single-threaded so no
       // concurrent assemble() can read between capture and clear.
-      const triggerEvent = this._lastEvent;
-      this._lastEvent = null;
+      const triggerEvent = state.lastEvent;
+      state.lastEvent = null;
       const maxFacts = this.cfg.recallMaxFacts ?? 10;
 
       // Stage A: recover continuity from session transcript
       let continuityBlock: string | null = null;
       let continuityTail: string | null = null;
-      if (this._sessionFile) {
-        continuityTail = await readSessionFileTail(this._sessionFile);
+      if (state.sessionFile) {
+        continuityTail = await readSessionFileTail(state.sessionFile);
         if (continuityTail) {
           continuityBlock = formatContinuityBlock(continuityTail);
         }
       }
 
       // Stage A fallback: episode-based recovery when session file is empty/missing
-      if (!continuityTail && this._sessionId) {
+      if (!continuityTail) {
         const episodes = await this.client.episodes(20);
-        const episodeText = extractEpisodeContinuity(episodes, this._sessionId, {
-          threadId: this._threadId ?? undefined,
+        const episodeText = extractEpisodeContinuity(episodes, params.sessionId, {
+          threadId: state.threadId ?? undefined,
         });
         if (episodeText) {
           continuityTail = episodeText;
@@ -301,9 +337,13 @@ export class GraphitiContextEngine {
         ms: Date.now() - start,
       });
 
-      if (this._recalledSessions.size >= 1000) {
-        this.debugLog.log("ce-assemble", { action: "recalled_sessions_reset", previousSize: this._recalledSessions.size });
-        this._recalledSessions.clear();
+      // Re-insert so the set stays ordered by last recall, then evict the oldest
+      // entries past the cap (never clear: that would re-inject every live session).
+      this._recalledSessions.delete(params.sessionId);
+      while (this._recalledSessions.size >= MAX_TRACKED_SESSIONS) {
+        const oldest = this._recalledSessions.values().next().value as string;
+        this._recalledSessions.delete(oldest);
+        this.debugLog.log("ce-assemble", { action: "recalled_session_evicted" });
       }
       this._recalledSessions.add(params.sessionId);
       return { messages: params.messages, systemPromptAddition, estimatedTokens };
@@ -392,7 +432,7 @@ export class GraphitiContextEngine {
           role: "conversation",
           name: buildEpisodeName("compact", { sessionKey: params.sessionId }),
           timestamp: new Date().toISOString(),
-          source_description: buildProvenance(this.groupId, { event: "compact", session_key: params.sessionId, thread_id: this._threadId ?? undefined }),
+          source_description: buildProvenance(this.groupId, { event: "compact", session_key: params.sessionId, thread_id: this.threadIdFor(params.sessionId) }),
         }]);
 
         this.signalRecovery(params.sessionId, "compact");
@@ -422,6 +462,9 @@ export class GraphitiContextEngine {
 
   /**
    * Batch-ingest multiple messages at once.
+   *
+   * The messages are joined into a single episode; `ingestedCount` is the
+   * number of episodes committed (0 or 1), not the number of input messages.
    */
   async ingestBatch(params: {
     sessionId: string;
@@ -458,12 +501,13 @@ export class GraphitiContextEngine {
         source_description: buildProvenance(this.groupId, {
           event: "ingest_batch",
           session_key: params.sessionId,
-          thread_id: this._threadId ?? undefined,
+          thread_id: this.threadIdFor(params.sessionId),
         }),
       }]);
 
-      this.debugLog.log("ce-ingestBatch", { count: texts.length, ms: Date.now() - start });
-      return { ingestedCount: texts.length };
+      // All messages are joined into ONE episode, so one episode was committed.
+      this.debugLog.log("ce-ingestBatch", { episodes: 1, messages: texts.length, ms: Date.now() - start });
+      return { ingestedCount: 1 };
     } catch (err) {
       this.logger?.warn(`graphiti: ingestBatch failed: ${String(err)}`);
       this.debugLog.log("ce-ingestBatch", { error: String(err) });
@@ -484,8 +528,9 @@ export class GraphitiContextEngine {
     tokenBudget?: number;
   }): Promise<void> {
     // Keep session state fresh for Smart autoRecall
-    if (params.sessionFile) this._sessionFile = params.sessionFile;
-    if (params.sessionId) this._sessionId = params.sessionId;
+    if (params.sessionId && params.sessionFile) {
+      this.session(params.sessionId).sessionFile = params.sessionFile;
+    }
 
     if (this.cfg.autoCapture === false) {
       this.debugLog.log("ce-afterTurn", { skipped: true, reason: "autoCapture_disabled" });
@@ -546,7 +591,7 @@ export class GraphitiContextEngine {
         source_description: buildProvenance(this.groupId, {
           event,
           session_key: params.sessionId,
-          thread_id: this._threadId ?? undefined,
+          thread_id: this.threadIdFor(params.sessionId),
         }),
       }]);
 
@@ -575,9 +620,9 @@ export class GraphitiContextEngine {
     threadId?: string;
   }): Promise<BootstrapResult> {
     try {
-      this._sessionFile = params.sessionFile ?? null;
-      this._sessionId = params.sessionId;
-      this._threadId = params.threadId ?? this._threadId;
+      const state = this.session(params.sessionId);
+      state.sessionFile = params.sessionFile ?? null;
+      if (params.threadId) state.threadId = params.threadId;
 
       const healthy = await this.cachedHealthy();
       if (!healthy) {
@@ -587,7 +632,8 @@ export class GraphitiContextEngine {
 
       this.signalRecovery(params.sessionId, "bootstrap");
 
-      const stats = await this.client.episodeCount();
+      // Bounded on purpose: episodeCount is a lower bound capped at BOOTSTRAP_EPISODE_COUNT_CAP.
+      const stats = await this.client.episodeCount(BOOTSTRAP_EPISODE_COUNT_CAP);
       this.debugLog.log("ce-bootstrap", { healthy: true, episodes: stats.count });
       return { bootstrapped: true, episodeCount: stats.count };
     } catch (err) {
@@ -647,7 +693,7 @@ export class GraphitiContextEngine {
         source_description: buildProvenance(this.groupId, {
           event: "subagent_ended",
           session_key: params.childSessionKey,
-          thread_id: this._threadId ?? undefined,
+          thread_id: this.threadIdFor(params.childSessionKey),
         }),
       }]);
 
@@ -689,9 +735,12 @@ export class GraphitiContextEngine {
   }
 
   /**
-   * Dispose: no-op (no persistent connections).
+   * Dispose: release in-memory session state (no persistent connections).
    */
   dispose(): void {
-    // No persistent connections to clean up
+    // No persistent connections to clean up; drop per-session state
+    this._sessions.clear();
+    this._recalledSessions.clear();
+    this._healthCache = null;
   }
 }

@@ -1,4 +1,29 @@
 # Changelog
+## [Unreleased]
+
+### Fixed
+
+- **Cross-session leak in ContextEngine mode**: per-session state was kept on the
+  shared engine instance, so `assemble()` for one session could inject another
+  session's transcript and lifecycle events. State is now keyed by session id.
+- `backfill` records progress per file and survives a failed ingest instead of
+  losing the whole run; concurrent memory-file writes no longer lose index state.
+- Auto-index only reads files inside the workspace `memory/` directory.
+- The abort timeout now covers reading the response body; `null` and non-array
+  response bodies no longer crash; `--limit` is validated.
+- `autoIndexExtensions` accepts an array or a comma-separated string.
+- The debug log rotates at 5 MB and `logs` reads only its tail.
+
+### Changed
+
+- `graphiti_forget` by query returns the single match for confirmation and deletes
+  only with `confirm: true`.
+- `ingestBatch` reports episodes committed (one), not messages joined.
+- Episode counts are capped at 500 (`500+`); bootstrap reads at most 50 episodes.
+- `upsertIndexEpisode` is now `ingestIndexEpisode` (the server returns no id, so an
+  index episode is appended, never replaced); the unused `extractMemoryPath` is gone.
+- The npm package ships a plugin README; the repository README describes the
+  Python service.
 ## [0.7.0-beta.5] — 2026-04-01
 
 ### Fixed

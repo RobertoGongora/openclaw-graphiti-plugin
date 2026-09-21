@@ -27,12 +27,16 @@
     "debug-log.ts",
     "memory-index.ts",
     "openclaw.plugin.json",
-    "README.md",
+    "README.plugin.md",
     "skills"
   ],
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "prepack": "node -e \"const fs=require('fs');if(fs.existsSync('.README.repo.md')){console.error('prepack: .README.repo.md already exists; move it back to README.md first');process.exit(1)}fs.renameSync('README.md','.README.repo.md');fs.copyFileSync('README.plugin.md','README.md')\"",
+    "postpack": "node -e \"const fs=require('fs');if(fs.existsSync('.README.repo.md'))fs.renameSync('.README.repo.md','README.md')\""
   },
+  "packageManager": "npm@11.17.0",
   "engines": {
     "node": ">=20"
   },
@@ -45,6 +49,8 @@
     "@sinclair/typebox": "^0.34.48"
   },
   "devDependencies": {
+    "@types/node": "^22.20.4",
+    "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   }
 }

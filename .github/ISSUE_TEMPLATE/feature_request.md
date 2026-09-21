@@ -6,6 +6,11 @@ labels: enhancement
 assignees: ""
 ---
 
+## Component
+
+- [ ] `graph_memory` Python service (CLI, daemon, MCP server, Docker image)
+- [ ] Legacy OpenClaw plugin (archived — new features are unlikely to be accepted; see `docs/legacy-openclaw.md`)
+
 ## Problem Description
 
 A clear description of the problem or limitation you're experiencing.

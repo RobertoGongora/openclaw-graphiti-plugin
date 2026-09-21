@@ -8,7 +8,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { describe, test, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
+import { describe, test, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import {
   startMockServer,
   stopMockServer,
@@ -16,12 +16,14 @@ import {
   getMockPort,
   mockOverrides,
   lastRequest,
+  ingestRequests,
+  requestCounts,
   SAMPLE_EPISODES_WITH_SESSION,
   SAMPLE_FACTS,
 } from "./helpers.js";
-import { GraphitiClient } from "../client.js";
+import { GraphitiClient, BOOTSTRAP_EPISODE_COUNT_CAP } from "../client.js";
 import { NOOP_LOG } from "../debug-log.js";
-import { GraphitiContextEngine } from "../context-engine.js";
+import { GraphitiContextEngine, MAX_TRACKED_SESSIONS } from "../context-engine.js";
 import { formatFactsAsContext, isContinuityGap, hasDeicticReferences, readSessionFileTail, formatContinuityBlock, extractEpisodeContinuity } from "../shared.js";
 import { createRequire } from "node:module";
 
@@ -178,7 +180,8 @@ describe("GraphitiContextEngine", () => {
         ],
       });
 
-      expect(result.ingestedCount).toBe(2);
+      // Two messages survive the filter, but they are joined into ONE episode.
+      expect(result.ingestedCount).toBe(1);
       const req = lastRequest["/messages"] as any;
       expect(req).toBeDefined();
       expect(req.messages).toHaveLength(1); // single episode
@@ -202,7 +205,7 @@ describe("GraphitiContextEngine", () => {
       expect(lastRequest["/messages"]).toBeUndefined();
     });
 
-    test("returns correct ingestedCount", async () => {
+    test("ingestedCount is the number of episodes committed, not messages", async () => {
       const engine = createEngine();
       const result = await engine.ingestBatch({
         sessionId: "sess-1",
@@ -213,7 +216,9 @@ describe("GraphitiContextEngine", () => {
         ],
       });
 
-      expect(result.ingestedCount).toBe(3);
+      expect(result.ingestedCount).toBe(1);
+      expect(ingestRequests).toHaveLength(1);
+      expect(ingestRequests[0].messages).toHaveLength(1);
     });
   });
 
@@ -1561,7 +1566,7 @@ describe("GraphitiContextEngine", () => {
         expect(result2.systemPromptAddition).toBeDefined();
       });
 
-      test("1000-entry cap clears Set and allows re-injection", async () => {
+      test("1000-entry cap evicts only the oldest recalled session", async () => {
         const sessionFile = createSessionFile(tmpDir, [
           { role: "user", content: "Architecture discussion for cap testing" },
           { role: "assistant", content: "The system uses event-driven design patterns" },
@@ -1570,23 +1575,25 @@ describe("GraphitiContextEngine", () => {
         const engine = createEngine();
         await engine.bootstrap({ sessionId: "sess-cap", sessionFile });
 
-        // Pre-fill _recalledSessions with 1000 entries so the cap fires on next add
+        // Pre-fill _recalledSessions to the cap so the next add must evict
         const recalled = (engine as any)._recalledSessions as Set<string>;
-        for (let i = 0; i < 1000; i++) {
+        for (let i = 0; i < MAX_TRACKED_SESSIONS; i++) {
           recalled.add(`filler-session-${i}`);
         }
-        expect(recalled.size).toBe(1000);
+        expect(recalled.size).toBe(MAX_TRACKED_SESSIONS);
 
-        // Mark the real session (hits 1000 → cap triggers: clear + re-add)
+        // Mark the real session (at the cap → oldest entry evicted, rest kept)
         const result1 = await engine.assemble({
           sessionId: "sess-cap",
           messages: [{ role: "user", content: "Hello" }],
         });
         expect(result1.systemPromptAddition).toBeDefined();
 
-        // Cap should have triggered: Set cleared, then sess-cap re-added
-        expect(recalled.size).toBe(1);
+        // Only the oldest filler is gone — live sessions keep their recalled flag
+        expect(recalled.size).toBe(MAX_TRACKED_SESSIONS);
         expect(recalled.has("sess-cap")).toBe(true);
+        expect(recalled.has("filler-session-0")).toBe(false);
+        expect(recalled.has("filler-session-1")).toBe(true);
 
         // A new session should still get recall
         await engine.bootstrap({ sessionId: "sess-cap-2", sessionFile });
@@ -1666,6 +1673,7 @@ describe("GraphitiContextEngine", () => {
           { role: "user", content: "Tell me about the deployment pipeline and its stages" },
           { role: "assistant", content: "The pipeline uses Docker containers with GitHub Actions for CI/CD" },
         ],
+        prePromptMessageCount: 0,
       });
 
       // Capture should still work even with recall disabled
@@ -1956,6 +1964,192 @@ describe("GraphitiContextEngine", () => {
       const req = lastRequest["/messages"] as any;
       const prov = JSON.parse(req.messages[0].source_description);
       expect(prov.thread_id).toBe("thread-xyz");
+    });
+  });
+
+  // ========================================================================
+  // Session isolation (one engine instance serves every session)
+  // ========================================================================
+
+  describe("interleaved sessions", () => {
+    let dirA: string;
+    let dirB: string;
+
+    beforeEach(async () => {
+      dirA = await fs.mkdtemp(path.join(os.tmpdir(), "ce-iso-a-"));
+      dirB = await fs.mkdtemp(path.join(os.tmpdir(), "ce-iso-b-"));
+    });
+
+    afterEach(async () => {
+      await fs.rm(dirA, { recursive: true, force: true });
+      await fs.rm(dirB, { recursive: true, force: true });
+    });
+
+    test("assemble for A never injects B's transcript after B bootstraps", async () => {
+      const fileA = createSessionFile(dirA, [
+        { role: "user", content: "ALPHA-SECRET: rotate the staging credentials" },
+        { role: "assistant", content: "ALPHA-REPLY: credentials rotated on staging" },
+      ]);
+      const fileB = createSessionFile(dirB, [
+        { role: "user", content: "BRAVO-SECRET: draft the quarterly finance memo" },
+        { role: "assistant", content: "BRAVO-REPLY: memo drafted and shared" },
+      ]);
+
+      const engine = createEngine();
+      await engine.bootstrap({ sessionId: "sess-A", sessionFile: fileA, threadId: "thread-A" });
+      await engine.bootstrap({ sessionId: "sess-B", sessionFile: fileB, threadId: "thread-B" }); // last writer
+
+      const a = await engine.assemble({ sessionId: "sess-A", messages: [{ role: "user", content: "Hello" }] });
+      expect(a.systemPromptAddition).toContain("ALPHA-SECRET");
+      expect(a.systemPromptAddition).not.toContain("BRAVO");
+
+      const b = await engine.assemble({ sessionId: "sess-B", messages: [{ role: "user", content: "Hello" }] });
+      expect(b.systemPromptAddition).toContain("BRAVO-SECRET");
+      expect(b.systemPromptAddition).not.toContain("ALPHA");
+    });
+
+    test("afterTurn for B does not repoint A's session file", async () => {
+      const fileA = createSessionFile(dirA, [{ role: "user", content: "ALPHA-ONLY transcript line for isolation" }]);
+      const fileB = createSessionFile(dirB, [{ role: "user", content: "BRAVO-ONLY transcript line for isolation" }]);
+
+      const engine = createEngine();
+      await engine.bootstrap({ sessionId: "sess-A", sessionFile: fileA });
+      await engine.afterTurn({ sessionId: "sess-B", sessionFile: fileB, messages: [], prePromptMessageCount: 0 });
+
+      const a = await engine.assemble({ sessionId: "sess-A", messages: [{ role: "user", content: "Hello" }] });
+      expect(a.systemPromptAddition).toContain("ALPHA-ONLY");
+      expect(a.systemPromptAddition).not.toContain("BRAVO-ONLY");
+    });
+
+    test("a compaction in B does not trigger a recovery in A", async () => {
+      const fileA = createSessionFile(dirA, [{ role: "user", content: "ALPHA long-running session transcript" }]);
+      const engine = createEngine();
+      const longWindow = Array.from({ length: 8 }, (_, i) => ({
+        role: i % 2 === 0 ? "user" : "assistant",
+        content: `plain message number ${i}`,
+      }));
+
+      // A bootstraps and consumes its one-shot recovery
+      await engine.bootstrap({ sessionId: "sess-A", sessionFile: fileA });
+      const first = await engine.assemble({ sessionId: "sess-A", messages: [{ role: "user", content: "Hello" }] });
+      expect(first.systemPromptAddition).toBeDefined();
+
+      // B compacts
+      const compacted = await engine.compact({
+        sessionId: "sess-B",
+        messages: [
+          { role: "user", content: "BRAVO message that is being compacted away now" },
+          { role: "assistant", content: "BRAVO reply that is being compacted away now" },
+        ],
+      });
+      expect(compacted.compacted).toBe(true);
+
+      // A's next normal turn must pass through: no gap, no deictic, no event of its own
+      resetMockState();
+      const a = await engine.assemble({ sessionId: "sess-A", messages: longWindow });
+      expect(a.systemPromptAddition).toBeUndefined();
+      expect(lastRequest["/search"]).toBeUndefined();
+
+      // ...while B itself does recover, tagged with its own trigger
+      await engine.assemble({ sessionId: "sess-B", messages: longWindow });
+      expect(lastRequest["/episodes"]).toBeDefined();
+    });
+
+    test("thread ids stay with their session in provenance and episode fallback", async () => {
+      const engine = createEngine();
+      await engine.bootstrap({ sessionId: "sess-A", threadId: "thread-A" });
+      await engine.bootstrap({ sessionId: "sess-B", threadId: "thread-B" });
+
+      await engine.ingest({
+        sessionId: "sess-A",
+        message: { role: "user", content: "A message from session A for provenance" },
+      });
+      const prov = JSON.parse((lastRequest["/messages"] as any).messages[0].source_description);
+      expect(prov.session_key).toBe("sess-A");
+      expect(prov.thread_id).toBe("thread-A");
+
+      // Episode fallback filters by the ASSEMBLING session, not the last bootstrapped one
+      mockOverrides.episodes = SAMPLE_EPISODES_WITH_SESSION;
+      await engine.bootstrap({ sessionId: "sess-1" });
+      await engine.bootstrap({ sessionId: "other-session" }); // last writer
+      const r = await engine.assemble({ sessionId: "sess-1", messages: [{ role: "user", content: "Hello" }] });
+      expect(r.systemPromptAddition).toContain("microservices");
+      expect(r.systemPromptAddition).not.toContain("Unrelated conversation");
+    });
+
+    test("session state is capped by evicting the oldest, not by clearing", async () => {
+      const engine = createEngine();
+      await engine.bootstrap({ sessionId: "oldest" });
+      for (let i = 0; i < MAX_TRACKED_SESSIONS - 1; i++) {
+        (engine as any).session(`filler-${i}`);
+      }
+      const sessions = (engine as any)._sessions as Map<string, unknown>;
+      expect(sessions.size).toBe(MAX_TRACKED_SESSIONS);
+
+      (engine as any).session("filler-0"); // touch: now most recently used
+      await engine.bootstrap({ sessionId: "newcomer" });
+
+      expect(sessions.size).toBe(MAX_TRACKED_SESSIONS);
+      expect(sessions.has("oldest")).toBe(false);
+      expect(sessions.has("filler-0")).toBe(true);
+      expect(sessions.has("newcomer")).toBe(true);
+    });
+
+    test("bootstrap() fetches a small bounded page to report graph population", async () => {
+      mockOverrides.episodes = Array.from({ length: BOOTSTRAP_EPISODE_COUNT_CAP + 20 }, (_, i) => ({ uuid: `e${i}` }));
+      const result = await createEngine().bootstrap({ sessionId: "s-bounded" });
+
+      expect((lastRequest["/episodes"] as any).last_n).toBe(String(BOOTSTRAP_EPISODE_COUNT_CAP));
+      expect(BOOTSTRAP_EPISODE_COUNT_CAP).toBeLessThanOrEqual(100);
+      expect(result.episodeCount).toBe(BOOTSTRAP_EPISODE_COUNT_CAP);
+    });
+
+    test("dispose() drops per-session state", async () => {
+      const engine = createEngine();
+      await engine.bootstrap({ sessionId: "sess-A" });
+      engine.dispose();
+      expect(((engine as any)._sessions as Map<string, unknown>).size).toBe(0);
+    });
+  });
+
+  // ========================================================================
+  // Health cache TTL (15 s)
+  // ========================================================================
+
+  describe("health cache TTL", () => {
+    afterEach(() => { vi.useRealTimers(); });
+
+    test("reuses the cached result inside 15 s and re-checks after it", async () => {
+      // Fake only Date: the cache is keyed on Date.now(), and real timers keep fetch working.
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+      const engine = createEngineWithConfig({ autoRecall: false });
+      const call = () => engine.assemble({ sessionId: "s", messages: [] });
+
+      await call();
+      expect(requestCounts["/healthcheck"]).toBe(1);
+
+      vi.setSystemTime(new Date("2026-01-01T00:00:14.999Z"));
+      await call();
+      expect(requestCounts["/healthcheck"]).toBe(1);
+
+      vi.setSystemTime(new Date("2026-01-01T00:00:15.000Z"));
+      await call();
+      expect(requestCounts["/healthcheck"]).toBe(2);
+    });
+
+    test("a cached unhealthy result also expires", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+      const engine = createEngine();
+      mockOverrides.healthy = false;
+      expect((await engine.bootstrap({ sessionId: "s" })).bootstrapped).toBe(false);
+
+      mockOverrides.healthy = true;
+      expect((await engine.bootstrap({ sessionId: "s" })).bootstrapped).toBe(false); // still cached
+
+      vi.setSystemTime(new Date("2026-01-01T00:00:16Z"));
+      expect((await engine.bootstrap({ sessionId: "s" })).bootstrapped).toBe(true);
     });
   });
 });

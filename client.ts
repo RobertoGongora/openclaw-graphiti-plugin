@@ -39,6 +39,31 @@ export interface GraphitiMessage {
   source_description?: string;
 }
 
+/**
+ * Upper bound on how many episodes `episodeCount()` fetches in order to count
+ * them. The Graphiti REST API has no count endpoint, so counting means
+ * downloading a page of full episodes; the cap keeps that page small. A count
+ * equal to the cap means "at least this many" and is displayed as `<cap>+`.
+ */
+export const EPISODE_COUNT_CAP = 500;
+
+/**
+ * Smaller cap for `bootstrap()`, which runs on every session start and only
+ * needs to know whether the graph is populated, not how large it is.
+ */
+export const BOOTSTRAP_EPISODE_COUNT_CAP = 50;
+
+/** Render an episode count, marking it as a lower bound when it hit the cap. */
+export function formatEpisodeCount(count: number, cap = EPISODE_COUNT_CAP): string {
+  return count >= cap ? `${cap}+` : String(count);
+}
+
+/** Pull the `facts` array out of a response body, tolerating null/odd bodies. */
+function factsFrom(data: unknown): GraphitiFact[] {
+  const facts = (data as { facts?: unknown } | null | undefined)?.facts;
+  return Array.isArray(facts) ? (facts as GraphitiFact[]) : [];
+}
+
 export class GraphitiClient {
   constructor(
     private url: string,
@@ -46,6 +71,8 @@ export class GraphitiClient {
     private logger?: { info?: (...args: any[]) => void; warn: (...args: any[]) => void },
     private apiKey?: string,
     private debugLog: DebugLog = NOOP_LOG,
+    /** Abort timeouts in ms. Defaults: 15 s requests, 5 s health, 10 s episodes. */
+    private timeouts: { requestMs?: number; healthMs?: number; episodesMs?: number } = {},
   ) {}
 
   /** Build headers, optionally including the Authorization bearer token. */
@@ -57,7 +84,7 @@ export class GraphitiClient {
 
   private async fetch(path: string, body: unknown): Promise<any> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15_000);
+    const timeout = setTimeout(() => controller.abort(), this.timeouts.requestMs ?? 15_000);
     const start = Date.now();
 
     try {
@@ -74,7 +101,9 @@ export class GraphitiClient {
         throw new Error(`Graphiti ${path} returned ${res.status}: ${text}`);
       }
 
-      return res.json();
+      // Await the body inside the try so the abort timer still covers a
+      // stalled response body, not just the headers.
+      return await res.json();
     } finally {
       clearTimeout(timeout);
     }
@@ -82,7 +111,7 @@ export class GraphitiClient {
 
   private async fetchDelete(path: string): Promise<void> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15_000);
+    const timeout = setTimeout(() => controller.abort(), this.timeouts.requestMs ?? 15_000);
     const start = Date.now();
 
     try {
@@ -115,7 +144,7 @@ export class GraphitiClient {
       group_ids: groupIds ?? [this.groupId],
       max_facts: maxFacts,
     });
-    const facts = data.facts ?? [];
+    const facts = factsFrom(data);
     this.debugLog.log("search", { status: 200, group: this.groupId, count: facts.length, ms: Date.now() - start });
     return facts;
   }
@@ -131,7 +160,7 @@ export class GraphitiClient {
       messages,
       max_facts: maxFacts,
     });
-    const facts = data.facts ?? [];
+    const facts = factsFrom(data);
     this.debugLog.log("get-memory", { status: 200, group: this.groupId, count: facts.length, ms: Date.now() - start });
     return facts;
   }
@@ -159,12 +188,14 @@ export class GraphitiClient {
     const start = Date.now();
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5_000);
+      const timeout = setTimeout(() => controller.abort(), this.timeouts.healthMs ?? 5_000);
       try {
         const res = await fetch(`${this.url}/healthcheck`, {
           headers: this.headers(),
           signal: controller.signal,
         });
+        // Consume the response body to allow connection reuse (HTTP keep-alive)
+        await res.text().catch(() => {});
         this.debugLog.log("healthcheck", { status: res.status, ms: Date.now() - start });
         return res.ok;
       } finally {
@@ -179,37 +210,55 @@ export class GraphitiClient {
   /**
    * Get episode count and most recent episode timestamp.
    * Returns { count: 0, latestAt: null } on error or empty graph.
+   *
+   * The count is bounded: at most `cap` episodes (default EPISODE_COUNT_CAP)
+   * are fetched, so `count === cap` means "cap or more" — display it with
+   * `formatEpisodeCount()`. `latestAt` is the newest `created_at` in that page
+   * (the server returns the most recent `last_n` episodes, in either order).
    */
-  async episodeCount(): Promise<{ count: number; latestAt: string | null }> {
-    const eps = await this.episodes(10000);
-    return {
-      count: eps.length,
-      latestAt: eps.length > 0 ? (eps[0].created_at ?? null) : null,
-    };
+  async episodeCount(cap = EPISODE_COUNT_CAP): Promise<{ count: number; latestAt: string | null }> {
+    const eps = await this.episodes(cap);
+    let latestAt: string | null = null;
+    let latestMs = -Infinity;
+    for (const ep of eps) {
+      if (!ep.created_at) continue;
+      const ms = Date.parse(ep.created_at);
+      if (!Number.isNaN(ms) && ms > latestMs) { latestMs = ms; latestAt = ep.created_at; }
+    }
+    return { count: Math.min(eps.length, cap), latestAt };
   }
 
   /**
    * Get recent episodes.
    *
    * Note: The server returns a bare JSON array, not a wrapped object.
+   * Contract: this method never throws — a non-2xx status, an unreachable
+   * server, a timeout, or a non-array body all yield `[]` (logged to the
+   * debug log) so status/recall paths degrade instead of failing.
    */
   async episodes(lastN = 10): Promise<GraphitiEpisode[]> {
     const start = Date.now();
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 10_000);
+      const timeout = setTimeout(() => controller.abort(), this.timeouts.episodesMs ?? 10_000);
       try {
         const res = await fetch(`${this.url}/episodes/${this.groupId}?last_n=${lastN}`, {
           headers: this.headers(),
           signal: controller.signal,
         });
         if (!res.ok) {
+          // Consume the response body to allow connection reuse (HTTP keep-alive)
+          await res.text().catch(() => {});
           this.debugLog.log("episodes", { status: res.status, group: this.groupId, error: "HTTP error", ms: Date.now() - start });
           return [];
         }
-        const data = await res.json();
+        const data: unknown = await res.json();
+        if (!Array.isArray(data)) {
+          this.debugLog.log("episodes", { status: 200, group: this.groupId, error: "non-array body", ms: Date.now() - start });
+          return [];
+        }
         this.debugLog.log("episodes", { status: 200, group: this.groupId, count: data.length, ms: Date.now() - start });
-        return data;
+        return data as GraphitiEpisode[];
       } finally {
         clearTimeout(timeout);
       }

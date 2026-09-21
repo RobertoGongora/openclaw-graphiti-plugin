@@ -49,13 +49,38 @@ describe("manifest and packaging contract", () => {
     expect(fs.existsSync(skillPath)).toBe(true);
   });
 
-  test("package.json files[] includes README.md and skills", async () => {
+  test("package.json ships the plugin readme, not the repository README", async () => {
     const fs = await import("node:fs");
     const pkg = JSON.parse(
       fs.readFileSync(new URL("../package.json", import.meta.url), "utf-8"),
     );
-    expect(pkg.files).toContain("README.md");
+    expect(pkg.files).toContain("README.plugin.md");
     expect(pkg.files).toContain("skills");
+    // The repository README.md documents the Python service.
+    expect(pkg.files).not.toContain("README.md");
+    // npm force-includes a root README.md, so prepack swaps the plugin readme in
+    // and postpack restores the repository one.
+    expect(pkg.scripts.prepack).toContain("README.plugin.md");
+    expect(pkg.scripts.postpack).toContain("README.md");
+  });
+
+  test("the shipped readme documents the plugin and marks it legacy", async () => {
+    const fs = await import("node:fs");
+    const readme = fs.readFileSync(new URL("../README.plugin.md", import.meta.url), "utf-8");
+    expect(readme).toContain("graphiti_search");
+    expect(readme).toContain("openclaw plugins install");
+    expect(readme).toMatch(/legacy/i);
+    expect(readme).toContain("docs/legacy-openclaw.md");
+  });
+
+  test("every shipped source file exists", async () => {
+    const fs = await import("node:fs");
+    const pkg = JSON.parse(
+      fs.readFileSync(new URL("../package.json", import.meta.url), "utf-8"),
+    );
+    for (const f of pkg.files) {
+      expect(fs.existsSync(new URL(`../${f}`, import.meta.url)), f).toBe(true);
+    }
   });
 });
 
@@ -216,6 +241,40 @@ describe("registration", () => {
     const engine = contextEngines[0].factory();
     expect(engine.info.id).toBe("graphiti");
     expect(engine.info.ownsCompaction).toBe(false);
+  });
+
+  test("the engine receives the normalised config, not the raw plugin config", async () => {
+    const { default: plugin } = await import("../index.js");
+    // Raw values that only normalisation gets right: a truthy non-boolean
+    // autoRecall must NOT enable recall (hooks mode requires `=== true`).
+    const { api, contextEngines } = createMockApiWithEngineSupport({ autoRecall: "true" });
+    plugin.register(api as any);
+
+    const engine = contextEngines[0].factory();
+    expect((engine as any).cfg).toMatchObject({
+      autoRecall: false,
+      autoCapture: true,
+      recallMaxFacts: 10,
+      autoIndexExtensions: [".md", ".txt"],
+    });
+
+    await engine.bootstrap({ sessionId: "s-norm" });
+    const result = await engine.assemble({ sessionId: "s-norm", messages: [{ role: "user", content: "Hello" }] });
+    expect(result.systemPromptAddition).toBeUndefined();
+  });
+
+  test("a non-array autoIndexExtensions does not crash registration", async () => {
+    const { default: plugin, normalizeIndexExtensions } = await import("../index.js");
+    for (const bad of [".md, .txt", 42, { a: 1 }, [".md", 7, null, " TXT "]]) {
+      const { api } = createMockApi({ autoIndexExtensions: bad });
+      expect(() => plugin.register(api as any)).not.toThrow();
+      expect(api.logger.warn).toHaveBeenCalledWith(expect.stringContaining("autoIndexExtensions"));
+    }
+    expect(normalizeIndexExtensions(".md, txt")).toEqual({ extensions: [".md", ".txt"], coerced: true });
+    expect(normalizeIndexExtensions([".md", 7, " TXT "])).toEqual({ extensions: [".md", ".txt"], coerced: true });
+    expect(normalizeIndexExtensions(["MD", ".org"])).toEqual({ extensions: [".md", ".org"], coerced: false });
+    expect(normalizeIndexExtensions(undefined)).toEqual({ extensions: [".md", ".txt"], coerced: false });
+    expect(normalizeIndexExtensions(42)).toEqual({ extensions: [".md", ".txt"], coerced: true });
   });
 
   test("skips recall/capture hooks when context engine is registered", async () => {

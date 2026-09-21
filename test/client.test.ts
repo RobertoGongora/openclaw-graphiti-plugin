@@ -6,7 +6,7 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { GraphitiClient } from "../client.js";
+import { GraphitiClient, EPISODE_COUNT_CAP, formatEpisodeCount } from "../client.js";
 import {
   startMockServer,
   stopMockServer,
@@ -135,9 +135,81 @@ describe("GraphitiClient", () => {
     expect(eps[0].content).toBe("user(user): Hello");
   });
 
-  test("episodes() returns empty array on server error", async () => {
+  test("episodes() returns empty array when server is unreachable", async () => {
     const eps = await client("http://127.0.0.1:1").episodes(10);
     expect(eps).toEqual([]);
+  });
+
+  test("episodes() swallows HTTP 500 and returns [] (documented contract)", async () => {
+    mockOverrides.episodesStatus = 500;
+    await expect(client().episodes(10)).resolves.toEqual([]);
+  });
+
+  test("episodes() returns [] for a non-array body", async () => {
+    mockOverrides.episodesRawBody = JSON.stringify({ detail: "not a list" });
+    expect(await client().episodes(10)).toEqual([]);
+    mockOverrides.episodesRawBody = "null";
+    expect(await client().episodes(10)).toEqual([]);
+  });
+
+  test("mock server honours last_n", async () => {
+    mockOverrides.episodes = Array.from({ length: 8 }, (_, i) => ({ uuid: `ep-${i}` }));
+    expect(await client().episodes(3)).toHaveLength(3);
+    expect(await client().episodes(50)).toHaveLength(8);
+  });
+
+  // -- null / odd bodies --
+
+  test("search() returns [] for a bare null body", async () => {
+    mockOverrides.searchRawBody = "null";
+    expect(await client().search("anything")).toEqual([]);
+  });
+
+  test("search() returns [] when facts is not an array", async () => {
+    mockOverrides.searchRawBody = JSON.stringify({ facts: "nope" });
+    expect(await client().search("anything")).toEqual([]);
+  });
+
+  // -- delete --
+
+  test("deleteEdge() / deleteEpisode() throw on non-2xx", async () => {
+    mockOverrides.deleteStatus = 404;
+    await expect(client().deleteEdge("abc")).rejects.toThrow(/DELETE \/entity-edge\/abc returned 404/);
+    await expect(client().deleteEpisode("abc")).rejects.toThrow(/DELETE \/episode\/abc returned 404/);
+  });
+
+  // -- abort timeouts --
+
+  function fastClient() {
+    return new GraphitiClient(
+      `http://127.0.0.1:${getMockPort()}`, "test-group", undefined, undefined, undefined,
+      { requestMs: 50, healthMs: 50, episodesMs: 50 },
+    );
+  }
+
+  test("search() aborts when the server never answers", async () => {
+    mockOverrides.hangPaths = ["/search"];
+    await expect(fastClient().search("x")).rejects.toThrow(/abort/i);
+  });
+
+  test("search() aborts when the response BODY stalls after the headers", async () => {
+    mockOverrides.stallBodyPaths = ["/search"];
+    await expect(fastClient().search("x")).rejects.toThrow(/abort/i);
+  });
+
+  test("deleteEdge() aborts when the server never answers", async () => {
+    mockOverrides.hangPaths = ["/entity-edge"];
+    await expect(fastClient().deleteEdge("abc")).rejects.toThrow(/abort/i);
+  });
+
+  test("healthy() returns false on timeout", async () => {
+    mockOverrides.hangPaths = ["/healthcheck"];
+    expect(await fastClient().healthy()).toBe(false);
+  });
+
+  test("episodes() returns [] on timeout", async () => {
+    mockOverrides.hangPaths = ["/episodes"];
+    expect(await fastClient().episodes(5)).toEqual([]);
   });
 
   // -- episodeCount --
@@ -146,6 +218,28 @@ describe("GraphitiClient", () => {
     const stats = await client().episodeCount();
     expect(stats.count).toBe(1);
     expect(stats.latestAt).toBe("2024-01-15T10:30:00+00:00");
+  });
+
+  test("episodeCount() asks for at most EPISODE_COUNT_CAP episodes", async () => {
+    await client().episodeCount();
+    expect(lastRequest["/episodes"]).toEqual({ group_id: "test-group", last_n: String(EPISODE_COUNT_CAP) });
+    expect(EPISODE_COUNT_CAP).toBeLessThanOrEqual(1000);
+  });
+
+  test("episodeCount() caps the count and picks the newest created_at in any order", async () => {
+    mockOverrides.episodes = [
+      { uuid: "a", created_at: "2024-01-01T00:00:00+00:00" },
+      { uuid: "b", created_at: "2024-03-01T00:00:00+00:00" },
+      { uuid: "c", created_at: "2024-02-01T00:00:00+00:00" },
+      { uuid: "d" },
+    ];
+    expect(await client().episodeCount()).toEqual({ count: 4, latestAt: "2024-03-01T00:00:00+00:00" });
+    expect((await client().episodeCount(2)).count).toBe(2);
+  });
+
+  test("formatEpisodeCount() marks a capped count as a lower bound", () => {
+    expect(formatEpisodeCount(EPISODE_COUNT_CAP - 1)).toBe(String(EPISODE_COUNT_CAP - 1));
+    expect(formatEpisodeCount(EPISODE_COUNT_CAP)).toBe(`${EPISODE_COUNT_CAP}+`);
   });
 
   test("episodeCount() returns zeros when server is unreachable", async () => {

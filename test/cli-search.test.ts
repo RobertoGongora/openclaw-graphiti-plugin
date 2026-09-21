@@ -96,14 +96,16 @@ describe("CLI search command", () => {
     const origError = console.error;
     console.error = (...args: any[]) => errors.push(args.join(" "));
     const origExitCode = process.exitCode;
+    let exitCode: typeof process.exitCode;
     try {
       await action("test query", { limit: "10" });
+      exitCode = process.exitCode;
     } finally {
       console.error = origError;
+      process.exitCode = origExitCode;
     }
 
     expect(errors.some((e) => e.includes("Search failed"))).toBe(true);
-    expect(process.exitCode).toBe(1);
-    process.exitCode = origExitCode;
+    expect(exitCode).toBe(1);
   });
 });

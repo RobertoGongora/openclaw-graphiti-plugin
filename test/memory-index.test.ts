@@ -7,14 +7,15 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import {
-  extractMemoryPath,
+  resolveMemoryWrite,
   indexEpisodeName,
   buildIndexContent,
   readMemoryFileMeta,
   readIndexState,
   writeIndexState,
-  upsertIndexEpisode,
+  ingestIndexEpisode,
   scanMemoryFiles,
+  MAX_SCAN_DEPTH,
   isIndexableFile,
 } from "../memory-index.js";
 import {
@@ -29,62 +30,64 @@ import { GraphitiClient } from "../client.js";
 import { NOOP_LOG } from "../debug-log.js";
 
 // ============================================================================
-// extractMemoryPath
+// resolveMemoryWrite
 // ============================================================================
 
-describe("extractMemoryPath", () => {
-  test("extracts from file_path with /memory/ segment", () => {
-    expect(
-      extractMemoryPath("Write", { file_path: "/Users/rob/.claude/memory/2026-03-05.md" }),
-    ).toBe("memory/2026-03-05.md");
+describe("resolveMemoryWrite", () => {
+  const workspace = path.join(os.tmpdir(), "ws-here");
+  const memoryDir = path.join(workspace, "memory");
+
+  test("resolves an absolute path inside the workspace memory dir", () => {
+    const abs = path.join(memoryDir, "2026-03-05.md");
+    expect(resolveMemoryWrite("Write", { file_path: abs }, memoryDir)).toEqual({
+      filePath: "memory/2026-03-05.md",
+      absolutePath: abs,
+    });
   });
 
-  test("extracts from path param", () => {
-    expect(
-      extractMemoryPath("Edit", { path: "/home/user/project/memory/notes.md" }),
-    ).toBe("memory/notes.md");
+  test("resolves a workspace-relative path", () => {
+    expect(resolveMemoryWrite("write", { filePath: "memory/MEMORY.md" }, memoryDir)).toEqual({
+      filePath: "memory/MEMORY.md",
+      absolutePath: path.join(memoryDir, "MEMORY.md"),
+    });
   });
 
-  test("extracts from filePath param", () => {
-    expect(
-      extractMemoryPath("write", { filePath: "memory/MEMORY.md" }),
-    ).toBe("memory/MEMORY.md");
+  test("keeps nested paths and reads every supported param key", () => {
+    const abs = path.join(memoryDir, "sub", "deep.md");
+    for (const key of ["file_path", "path", "filePath", "target_file"]) {
+      expect(resolveMemoryWrite("edit", { [key]: abs }, memoryDir)?.filePath).toBe("memory/sub/deep.md");
+    }
   });
 
-  test("extracts from target_file param", () => {
-    expect(
-      extractMemoryPath("edit", { target_file: "/foo/memory/sub/deep.md" }),
-    ).toBe("memory/sub/deep.md");
+  test("ignores a memory/ dir in ANOTHER checkout", () => {
+    const other = path.join(os.tmpdir(), "ws-other", "memory", "2026-03-05.md");
+    expect(resolveMemoryWrite("Write", { file_path: other }, memoryDir)).toBeNull();
+  });
+
+  test("ignores a nested memory/ dir that is not the workspace memory dir", () => {
+    const nested = path.join(workspace, "packages", "x", "memory", "n.md");
+    expect(resolveMemoryWrite("Write", { file_path: nested }, memoryDir)).toBeNull();
+    expect(resolveMemoryWrite("Write", { file_path: "packages/x/memory/n.md" }, memoryDir)).toBeNull();
+  });
+
+  test("rejects traversal out of the memory dir and the dir itself", () => {
+    expect(resolveMemoryWrite("Write", { file_path: "memory/../src/index.ts" }, memoryDir)).toBeNull();
+    expect(resolveMemoryWrite("Write", { file_path: memoryDir }, memoryDir)).toBeNull();
   });
 
   test("returns null for non-write tools", () => {
-    expect(
-      extractMemoryPath("Read", { file_path: "memory/test.md" }),
-    ).toBeNull();
+    expect(resolveMemoryWrite("Read", { file_path: "memory/test.md" }, memoryDir)).toBeNull();
   });
 
-  test("returns null for non-memory paths", () => {
-    expect(
-      extractMemoryPath("Write", { file_path: "/Users/rob/src/index.ts" }),
-    ).toBeNull();
-  });
-
-  test("returns null for missing params", () => {
-    expect(extractMemoryPath("Write", undefined)).toBeNull();
-    expect(extractMemoryPath("Write", {})).toBeNull();
-  });
-
-  test("returns null for non-string path values", () => {
-    expect(extractMemoryPath("Write", { file_path: 42 })).toBeNull();
+  test("returns null for missing params and non-string values", () => {
+    expect(resolveMemoryWrite("Write", undefined, memoryDir)).toBeNull();
+    expect(resolveMemoryWrite("Write", {}, memoryDir)).toBeNull();
+    expect(resolveMemoryWrite("Write", { file_path: 42 }, memoryDir)).toBeNull();
   });
 
   test("handles write_file and create_file tool names", () => {
-    expect(
-      extractMemoryPath("write_file", { file_path: "memory/test.md" }),
-    ).toBe("memory/test.md");
-    expect(
-      extractMemoryPath("create_file", { path: "/x/memory/y.md" }),
-    ).toBe("memory/y.md");
+    expect(resolveMemoryWrite("write_file", { file_path: "memory/test.md" }, memoryDir)?.filePath).toBe("memory/test.md");
+    expect(resolveMemoryWrite("create_file", { path: "memory/y.md" }, memoryDir)?.filePath).toBe("memory/y.md");
   });
 });
 
@@ -213,6 +216,25 @@ describe("readMemoryFileMeta", () => {
   test("returns null for non-existent file", () => {
     expect(readMemoryFileMeta(path.join(tmpDir, "nope.md"))).toBeNull();
   });
+
+  test("never ends the excerpt on half a surrogate pair", () => {
+    const filePath = path.join(tmpDir, "emoji.md");
+    // "a" shifts every emoji so UTF-16 index 499 is a high surrogate.
+    fs.writeFileSync(filePath, "a" + "\u{1F600}".repeat(600));
+
+    const excerpt = readMemoryFileMeta(filePath)!.excerpt;
+    expect(/[\uD800-\uDBFF]$/.test(excerpt)).toBe(false); // no dangling high surrogate
+    expect(excerpt).not.toContain("\uFFFD");
+  });
+
+  test("does not emit U+FFFD when the 2048-byte read splits a multi-byte char", () => {
+    const filePath = path.join(tmpDir, "euro.md");
+    // 3-byte chars: byte 2048 lands inside one.
+    fs.writeFileSync(filePath, "\u20AC".repeat(1000));
+
+    const excerpt = readMemoryFileMeta(filePath)!.excerpt;
+    expect(excerpt).toBe("\u20AC".repeat(500));
+  });
 });
 
 // ============================================================================
@@ -249,6 +271,18 @@ describe("state persistence", () => {
     const nested = path.join(tmpDir, "a", "b", "c");
     writeIndexState(nested, { "memory/x.md": { lastModified: "x", lastIndexed: "y" } });
     expect(readIndexState(nested)).toHaveProperty("memory/x.md");
+  });
+
+  test("corrupt state JSON reads as empty state", () => {
+    fs.writeFileSync(path.join(tmpDir, "graphiti-memory-index.json"), "{ not json");
+    expect(readIndexState(tmpDir)).toEqual({});
+  });
+
+  test("valid JSON that is not an object reads as empty state", () => {
+    for (const body of ["null", "[]", "\"str\"", "42"]) {
+      fs.writeFileSync(path.join(tmpDir, "graphiti-memory-index.json"), body);
+      expect(readIndexState(tmpDir)).toEqual({});
+    }
   });
 
   test("atomic write uses tmp file", () => {
@@ -291,6 +325,25 @@ describe("scanMemoryFiles", () => {
     expect(scanMemoryFiles(path.join(tmpDir, "nope"))).toEqual([]);
   });
 
+  test("stops at MAX_SCAN_DEPTH", () => {
+    let dir = tmpDir;
+    for (let i = 0; i <= MAX_SCAN_DEPTH; i++) {
+      dir = path.join(dir, "d");
+      fs.mkdirSync(dir);
+      fs.writeFileSync(path.join(dir, `f${i}.md`), "x");
+    }
+    // f0 sits at depth 1, f<MAX-1> at depth MAX; the last one is one level too deep.
+    const files = scanMemoryFiles(tmpDir);
+    expect(files).toHaveLength(MAX_SCAN_DEPTH);
+    expect(files.some((f) => f.endsWith(`f${MAX_SCAN_DEPTH}.md`))).toBe(false);
+  });
+
+  test("does not follow directory symlinks (no cycles)", () => {
+    fs.writeFileSync(path.join(tmpDir, "a.md"), "a");
+    fs.symlinkSync(tmpDir, path.join(tmpDir, "loop"), "dir");
+    expect(scanMemoryFiles(tmpDir)).toEqual(["memory/a.md"]);
+  });
+
   test("uses custom prefix for path construction", () => {
     fs.writeFileSync(path.join(tmpDir, "a.md"), "a");
     fs.mkdirSync(path.join(tmpDir, "sub"));
@@ -304,10 +357,10 @@ describe("scanMemoryFiles", () => {
 });
 
 // ============================================================================
-// upsertIndexEpisode — integration with mock server
+// ingestIndexEpisode — integration with mock server
 // ============================================================================
 
-describe("upsertIndexEpisode", () => {
+describe("ingestIndexEpisode", () => {
   let tmpDir: string;
   let stateDir: string;
 
@@ -336,7 +389,7 @@ describe("upsertIndexEpisode", () => {
       NOOP_LOG,
     );
 
-    const result = await upsertIndexEpisode({
+    const result = await ingestIndexEpisode({
       client,
       filePath: "memory/test.md",
       absolutePath: filePath,
@@ -386,11 +439,11 @@ describe("upsertIndexEpisode", () => {
     };
 
     // First call — should index
-    await upsertIndexEpisode(opts);
+    await ingestIndexEpisode(opts);
     resetMockState();
 
     // Second call — should skip (mtime unchanged)
-    const result = await upsertIndexEpisode(opts);
+    const result = await ingestIndexEpisode(opts);
     expect(result).toBe(false);
     expect(lastRequest["/messages"]).toBeUndefined();
   });
@@ -416,7 +469,7 @@ describe("upsertIndexEpisode", () => {
       stateDir,
     };
 
-    await upsertIndexEpisode(opts);
+    await ingestIndexEpisode(opts);
     resetMockState();
 
     // Modify the file (force different mtime)
@@ -424,7 +477,7 @@ describe("upsertIndexEpisode", () => {
     fs.writeFileSync(filePath, "Updated content");
     fs.utimesSync(filePath, futureTime, futureTime);
 
-    const result = await upsertIndexEpisode(opts);
+    const result = await ingestIndexEpisode(opts);
     expect(result).toBe(true);
     const req = lastRequest["/messages"] as any;
     expect(req.messages[0].content).toContain("Updated content");
@@ -439,7 +492,7 @@ describe("upsertIndexEpisode", () => {
       NOOP_LOG,
     );
 
-    const result = await upsertIndexEpisode({
+    const result = await ingestIndexEpisode({
       client,
       filePath: "memory/nope.md",
       absolutePath: path.join(tmpDir, "nope.md"),
@@ -449,5 +502,40 @@ describe("upsertIndexEpisode", () => {
     });
 
     expect(result).toBe(false);
+  });
+
+  test("concurrent calls do not lose each other's state entries", async () => {
+    const client = new GraphitiClient(`http://127.0.0.1:${getMockPort()}`, "test-group", undefined, undefined, NOOP_LOG);
+    const names = ["a.md", "b.md", "c.md"];
+    for (const n of names) fs.writeFileSync(path.join(tmpDir, n), `content of ${n}`);
+    // Hold each ingest open so unserialised calls would all read the same empty state.
+    mockOverrides.ingestDelayMs = 20;
+
+    const results = await Promise.all(names.map((n) => ingestIndexEpisode({
+      client,
+      filePath: `memory/${n}`,
+      absolutePath: path.join(tmpDir, n),
+      groupId: "test-group",
+      debugLog: NOOP_LOG,
+      stateDir,
+    })));
+
+    expect(results).toEqual([true, true, true]);
+    expect(Object.keys(readIndexState(stateDir)).sort()).toEqual(names.map((n) => `memory/${n}`));
+  });
+
+  test("a failed ingest rejects but does not block later calls", async () => {
+    const client = new GraphitiClient(`http://127.0.0.1:${getMockPort()}`, "test-group", undefined, undefined, NOOP_LOG);
+    fs.writeFileSync(path.join(tmpDir, "bad.md"), "bad");
+    fs.writeFileSync(path.join(tmpDir, "good.md"), "good");
+    mockOverrides.ingestFailOnName = "bad.md";
+    const base = { client, groupId: "test-group", debugLog: NOOP_LOG, stateDir };
+
+    const bad = ingestIndexEpisode({ ...base, filePath: "memory/bad.md", absolutePath: path.join(tmpDir, "bad.md") });
+    const good = ingestIndexEpisode({ ...base, filePath: "memory/good.md", absolutePath: path.join(tmpDir, "good.md") });
+
+    await expect(bad).rejects.toThrow(/returned 500/);
+    expect(await good).toBe(true);
+    expect(Object.keys(readIndexState(stateDir))).toEqual(["memory/good.md"]);
   });
 });

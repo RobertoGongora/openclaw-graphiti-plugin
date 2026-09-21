@@ -329,127 +329,132 @@ describe("hooks", () => {
 
   describe("after_tool_call", () => {
     let tmpDir: string;
+    let workspace: string;
+    let realHome: string | undefined;
 
     beforeEach(() => {
       tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hooks-atc-test-"));
+      workspace = path.join(tmpDir, "workspace");
+      fs.mkdirSync(path.join(workspace, "memory"), { recursive: true });
+      // The index state lives under ~/.openclaw — keep it out of the real home.
+      realHome = process.env.HOME;
+      process.env.HOME = path.join(tmpDir, "home");
     });
 
     afterEach(() => {
+      process.env.HOME = realHome;
       fs.rmSync(tmpDir, { recursive: true, force: true });
     });
 
-    test("memory file write triggers ingest", async () => {
-      const memFile = path.join(tmpDir, "test.md");
-      fs.writeFileSync(memFile, "Memory file content for indexing");
-
+    /** Register the plugin with `workspace` as the OpenClaw workspace root. */
+    async function registerInWorkspace() {
       const { default: plugin } = await import("../index.js");
-      const { api, hooks } = createMockApi();
-      // Make resolvePath return our temp file
-      api.resolvePath = () => memFile;
-      plugin.register(api as any);
+      const mock = createMockApi();
+      mock.api.resolvePath = (p: string) => path.resolve(workspace, p);
+      plugin.register(mock.api as any);
+      return { ...mock, handler: mock.hooks["after_tool_call"][0] };
+    }
 
-      const handler = hooks["after_tool_call"][0];
-      await handler({
-        toolName: "Write",
-        params: { file_path: "/project/memory/test.md" },
-      });
+    function writeMemoryFile(name: string, content: string): string {
+      const file = path.join(workspace, "memory", name);
+      fs.writeFileSync(file, content);
+      return file;
+    }
+
+    test("memory file write triggers ingest", async () => {
+      const memFile = writeMemoryFile("test.md", "Memory file content for indexing");
+      const { handler } = await registerInWorkspace();
+
+      await handler({ toolName: "Write", params: { file_path: memFile } });
 
       const req = lastRequest["/messages"] as any;
       expect(req).toBeDefined();
       expect(req.messages[0].name).toBe("memory-index::memory/test.md");
       expect(req.messages[0].role).toBe("memory-index");
+      expect(req.messages[0].content).toContain("Memory file content for indexing");
       const prov = JSON.parse(req.messages[0].source_description);
       expect(prov.plugin).toBe("openclaw-graphiti");
       expect(prov.event).toBe("memory_index");
       expect(prov.file).toBe("memory/test.md");
     });
 
-    test("non-memory write is ignored", async () => {
-      const { default: plugin } = await import("../index.js");
-      const { api, hooks } = createMockApi();
-      plugin.register(api as any);
+    test("workspace-relative memory path triggers ingest", async () => {
+      writeMemoryFile("rel.md", "relative content");
+      const { handler } = await registerInWorkspace();
 
-      const handler = hooks["after_tool_call"][0];
-      await handler({
-        toolName: "Write",
-        params: { file_path: "/project/src/index.ts" },
-      });
+      await handler({ toolName: "Write", params: { file_path: "memory/rel.md" } });
+
+      expect((lastRequest["/messages"] as any)?.messages[0].name).toBe("memory-index::memory/rel.md");
+    });
+
+    test("a write to ANOTHER checkout's memory/ does not index the local file", async () => {
+      writeMemoryFile("test.md", "LOCAL content that was not written");
+      const otherMem = path.join(tmpDir, "other-checkout", "memory");
+      fs.mkdirSync(otherMem, { recursive: true });
+      fs.writeFileSync(path.join(otherMem, "test.md"), "OTHER checkout content");
+      const { handler } = await registerInWorkspace();
+
+      await handler({ toolName: "Write", params: { file_path: path.join(otherMem, "test.md") } });
+
+      expect(lastRequest["/messages"]).toBeUndefined();
+    });
+
+    test("non-memory write is ignored", async () => {
+      const { handler } = await registerInWorkspace();
+
+      await handler({ toolName: "Write", params: { file_path: path.join(workspace, "src", "index.ts") } });
 
       expect(lastRequest["/messages"]).toBeUndefined();
     });
 
     test("error in event skips indexing", async () => {
-      const memFile = path.join(tmpDir, "test.md");
-      fs.writeFileSync(memFile, "content");
+      const memFile = writeMemoryFile("test.md", "content");
+      const { handler } = await registerInWorkspace();
 
-      const { default: plugin } = await import("../index.js");
-      const { api, hooks } = createMockApi();
-      api.resolvePath = () => memFile;
-      plugin.register(api as any);
-
-      const handler = hooks["after_tool_call"][0];
-      await handler({
-        toolName: "Write",
-        params: { file_path: "/project/memory/test.md" },
-        error: "Tool execution failed",
-      });
+      await handler({ toolName: "Write", params: { file_path: memFile }, error: "Tool execution failed" });
 
       expect(lastRequest["/messages"]).toBeUndefined();
     });
 
     test("skips when server is unhealthy", async () => {
       mockOverrides.healthy = false;
-      const memFile = path.join(tmpDir, "test.md");
-      fs.writeFileSync(memFile, "content");
+      const memFile = writeMemoryFile("test.md", "content");
+      const { handler } = await registerInWorkspace();
 
-      const { default: plugin } = await import("../index.js");
-      const { api, hooks } = createMockApi();
-      api.resolvePath = () => memFile;
-      plugin.register(api as any);
-
-      const handler = hooks["after_tool_call"][0];
-      await handler({
-        toolName: "Write",
-        params: { file_path: "/project/memory/test.md" },
-      });
+      await handler({ toolName: "Write", params: { file_path: memFile } });
 
       expect(lastRequest["/messages"]).toBeUndefined();
     });
 
     test("non-prose file extension is filtered", async () => {
-      const memFile = path.join(tmpDir, "state.json");
-      fs.writeFileSync(memFile, '{"key": "value"}');
+      const memFile = writeMemoryFile("state.json", '{"key": "value"}');
+      const { handler } = await registerInWorkspace();
 
-      const { default: plugin } = await import("../index.js");
-      const { api, hooks } = createMockApi();
-      api.resolvePath = () => memFile;
-      plugin.register(api as any);
-
-      const handler = hooks["after_tool_call"][0];
-      await handler({
-        toolName: "Write",
-        params: { file_path: "/project/memory/state.json" },
-      });
+      await handler({ toolName: "Write", params: { file_path: memFile } });
 
       expect(lastRequest["/messages"]).toBeUndefined();
     });
 
     test(".png file is filtered", async () => {
-      const memFile = path.join(tmpDir, "screenshot.png");
-      fs.writeFileSync(memFile, "fake png data");
+      const memFile = writeMemoryFile("screenshot.png", "fake png data");
+      const { handler } = await registerInWorkspace();
 
-      const { default: plugin } = await import("../index.js");
-      const { api, hooks } = createMockApi();
-      api.resolvePath = () => memFile;
-      plugin.register(api as any);
-
-      const handler = hooks["after_tool_call"][0];
-      await handler({
-        toolName: "Write",
-        params: { file_path: "/project/memory/screenshot.png" },
-      });
+      await handler({ toolName: "Write", params: { file_path: memFile } });
 
       expect(lastRequest["/messages"]).toBeUndefined();
+    });
+
+    test("autoIndexExtensions given as a comma string is coerced, not a crash", async () => {
+      const memFile = writeMemoryFile("notes.rst", "restructured text notes");
+      const { default: plugin } = await import("../index.js");
+      const mock = createMockApi({ autoIndexExtensions: ".md, RST" });
+      mock.api.resolvePath = (p: string) => path.resolve(workspace, p);
+      expect(() => plugin.register(mock.api as any)).not.toThrow();
+      expect(mock.api.logger.warn).toHaveBeenCalledWith(expect.stringContaining("autoIndexExtensions"));
+
+      await mock.hooks["after_tool_call"][0]({ toolName: "Write", params: { file_path: memFile } });
+
+      expect((lastRequest["/messages"] as any)?.messages[0].name).toBe("memory-index::memory/notes.rst");
     });
   });
 
@@ -692,6 +697,34 @@ describe("hooks", () => {
       expect(prov.session_start).toBeDefined();
       expect(prov.agent).toBe("a1");
       expect(prov.channel).toBe("slack");
+    });
+
+    test("session_start overflow evicts the oldest session, not the live ones", async () => {
+      const { default: plugin, MAX_SESSION_STARTS } = await import("../index.js");
+      const { api, hooks } = createMockApi();
+      plugin.register(api as any);
+      const start = hooks["session_start"][0];
+
+      await start({}, { sessionId: "oldest" });
+      await start({}, { sessionId: "live" });
+      for (let i = 0; i < MAX_SESSION_STARTS - 1; i++) await start({}, { sessionId: `filler-${i}` });
+
+      const messages = [
+        { role: "user", content: "What is the architecture of our system?" },
+        { role: "assistant", content: "The system uses a microservices architecture with Neo4j." },
+        { role: "user", content: "Tell me more about the graph database." },
+        { role: "assistant", content: "Neo4j stores entities and relationships as a knowledge graph." },
+      ];
+      const sessionStartFor = async (sessionId: string) => {
+        resetMockState();
+        await hooks["before_compaction"][0]({ messages }, { sessionKey: sessionId, sessionId });
+        return JSON.parse((lastRequest["/messages"] as any).messages[0].source_description).session_start;
+      };
+
+      // One entry over the cap: only the oldest is evicted.
+      expect(await sessionStartFor("oldest")).toBeUndefined();
+      expect(await sessionStartFor("live")).toBeDefined();
+      expect(await sessionStartFor(`filler-${MAX_SESSION_STARTS - 2}`)).toBeDefined();
     });
   });
 });

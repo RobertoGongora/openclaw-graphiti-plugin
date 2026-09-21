@@ -30,7 +30,7 @@
       },
       "minPromptLength": {
         "type": "number",
-        "description": "Minimum prompt length to trigger auto-recall"
+        "description": "Minimum prompt length to trigger auto-recall (hooks mode only)"
       },
       "apiKey": {
         "type": "string",
@@ -84,7 +84,7 @@
       "label": "Min Prompt Length",
       "advanced": true,
       "placeholder": "10",
-      "help": "Minimum prompt length to trigger auto-recall (default: 10)"
+      "help": "Minimum prompt length to trigger auto-recall — hooks mode only, ignored in ContextEngine mode (default: 10)"
     },
     "apiKey": {
       "label": "API Key",
@@ -99,12 +99,12 @@
     "autoIndexExtensions": {
       "label": "Index File Extensions",
       "advanced": true,
-      "placeholder": ".md, .txt",
-      "help": "Only index memory files with these extensions (default: .md, .txt)"
+      "placeholder": "[\".md\", \".txt\"]",
+      "help": "JSON array of extensions to index, e.g. [\".md\", \".txt\"] (default). A comma-separated string is tolerated and coerced with a warning"
     },
     "debug": {
       "label": "Debug Log",
-      "help": "Write structured debug log for diagnostics — no conversation content logged (default: on)"
+      "help": "Write structured debug log for diagnostics — no conversation content logged; rotates at 5 MB (default: on)"
     },
     "logFile": {
       "label": "Debug Log Path",

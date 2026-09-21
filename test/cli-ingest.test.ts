@@ -143,15 +143,17 @@ describe("CLI ingest command", () => {
     const origError = console.error;
     console.error = (...args: any[]) => errors.push(args.join(" "));
     const origExitCode = process.exitCode;
+    let exitCode: typeof process.exitCode;
     try {
       await action({ sourceFile: "/nonexistent/path/file.txt" });
+      exitCode = process.exitCode;
     } finally {
       console.error = origError;
+      process.exitCode = origExitCode;
     }
 
     expect(errors.some((e) => e.includes("Ingest failed"))).toBe(true);
-    expect(process.exitCode).toBe(1);
-    process.exitCode = origExitCode;
+    expect(exitCode).toBe(1);
   });
 
   test("server error prints error and sets exitCode", async () => {
@@ -162,15 +164,17 @@ describe("CLI ingest command", () => {
     const origError = console.error;
     console.error = (...args: any[]) => errors.push(args.join(" "));
     const origExitCode = process.exitCode;
+    let exitCode: typeof process.exitCode;
     try {
       await action({ content: "test content" });
+      exitCode = process.exitCode;
     } finally {
       console.error = origError;
+      process.exitCode = origExitCode;
     }
 
     expect(errors.some((e) => e.includes("Ingest failed"))).toBe(true);
-    expect(process.exitCode).toBe(1);
-    process.exitCode = origExitCode;
+    expect(exitCode).toBe(1);
   });
 
   test("no --source-file or --content prints usage error", async () => {
@@ -180,15 +184,17 @@ describe("CLI ingest command", () => {
     const origError = console.error;
     console.error = (...args: any[]) => errors.push(args.join(" "));
     const origExitCode = process.exitCode;
+    let exitCode: typeof process.exitCode;
     try {
       await action({});
+      exitCode = process.exitCode;
     } finally {
       console.error = origError;
+      process.exitCode = origExitCode;
     }
 
     expect(errors.some((e) => e.includes("--source-file or --content"))).toBe(true);
-    expect(process.exitCode).toBe(1);
-    process.exitCode = origExitCode;
+    expect(exitCode).toBe(1);
   });
 
   test("--source-file truncates content exceeding 12,000 chars", async () => {

@@ -156,7 +156,7 @@ describe("tool execution", () => {
     expect(lastRequest["/episode"]).toEqual({ uuid: validUuid });
   });
 
-  test("graphiti_forget auto-deletes single search match", async () => {
+  test("graphiti_forget does NOT delete on a single fuzzy search match", async () => {
     mockOverrides.searchFacts = [SAMPLE_FACTS[0]];
     const { default: plugin } = await import("../index.js");
     const { api, tools } = createMockApi();
@@ -165,9 +165,39 @@ describe("tool execution", () => {
     const tool = tools.find((t) => t.opts.name === "graphiti_forget")!.tool;
     const result = await tool.execute("call-f3", { query: "Alice" });
 
+    expect(result.details.deleted).toBe(false);
+    expect(result.details.reason).toBe("confirmation_required");
+    expect(result.details.uuid).toBe("fact-001");
+    expect(result.content[0].text).toContain("fact-001");
+    expect(result.content[0].text).toContain("nothing deleted");
+    expect(lastRequest["/entity-edge"]).toBeUndefined();
+  });
+
+  test("graphiti_forget deletes a single search match with confirm: true", async () => {
+    mockOverrides.searchFacts = [SAMPLE_FACTS[0]];
+    const { default: plugin } = await import("../index.js");
+    const { api, tools } = createMockApi();
+    plugin.register(api as any);
+
+    const tool = tools.find((t) => t.opts.name === "graphiti_forget")!.tool;
+    const result = await tool.execute("call-f3b", { query: "Alice", confirm: true });
+
     expect(result.details.deleted).toBe(true);
     expect(result.details.uuid).toBe("fact-001");
     expect(lastRequest["/entity-edge"]).toEqual({ uuid: "fact-001" });
+  });
+
+  test("graphiti_forget confirm: true still refuses when several facts match", async () => {
+    const { default: plugin } = await import("../index.js");
+    const { api, tools } = createMockApi();
+    plugin.register(api as any);
+
+    const tool = tools.find((t) => t.opts.name === "graphiti_forget")!.tool;
+    const result = await tool.execute("call-f3c", { query: "test", confirm: true });
+
+    expect(result.details.deleted).toBe(false);
+    expect(result.details.reason).toBe("multiple_matches");
+    expect(lastRequest["/entity-edge"]).toBeUndefined();
   });
 
   test("graphiti_forget lists multiple matches without deleting", async () => {
@@ -298,28 +328,33 @@ describe("tool execution", () => {
     expect(result.details.count).toBe(1);
   });
 
-  test("graphiti_episodes error response includes details object", async () => {
-    // Force the episodes endpoint to return 500 — the client returns []
-    // for HTTP errors, so the tool returns "No episodes found" (the empty path).
-    // This verifies the error path IS reachable by using a non-iterable value.
-    // Set episodes to an object (not array) — client passes it through, then
-    // eps.filter() throws because a plain object has no .filter method.
-    mockOverrides.episodes = { broken: true } as any;
+  test("graphiti_episodes reports 'No episodes found' on HTTP 500 (client swallows it)", async () => {
+    // Documented contract: GraphitiClient.episodes() never throws — a non-2xx
+    // answer becomes [] — so the tool takes the empty path, not the error path.
+    mockOverrides.episodesStatus = 500;
 
     const { default: plugin } = await import("../index.js");
     const { api, tools } = createMockApi();
     plugin.register(api as any);
 
     const tool = tools.find((t) => t.opts.name === "graphiti_episodes")!.tool;
-    // Use sessionKey to trigger the filter path which calls .filter() on the object
-    const result = await tool.execute("call-ep-err", { sessionKey: "trigger-error" });
+    const result = await tool.execute("call-ep-err", { sessionKey: "any" });
 
-    // The error should be caught and return a details object
-    expect(result.content[0].text).toContain("Graphiti episodes failed");
-    expect(result.details).toBeDefined();
-    expect(result.details.count).toBe(0);
-    expect(result.details.reason).toBe("error");
-    expect(result.details.error).toBeDefined();
+    expect(result.content[0].text).toBe("No episodes found.");
+    expect(result.details).toEqual({ count: 0 });
+  });
+
+  test("graphiti_episodes treats a non-array body as no episodes", async () => {
+    mockOverrides.episodesRawBody = JSON.stringify({ broken: true });
+
+    const { default: plugin } = await import("../index.js");
+    const { api, tools } = createMockApi();
+    plugin.register(api as any);
+
+    const tool = tools.find((t) => t.opts.name === "graphiti_episodes")!.tool;
+    const result = await tool.execute("call-ep-err2", { sessionKey: "any" });
+
+    expect(result.content[0].text).toBe("No episodes found.");
   });
 
   test("graphiti_episodes filters by sessionKey", async () => {

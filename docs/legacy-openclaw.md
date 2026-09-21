@@ -1,8 +1,10 @@
 # @robertogongora/graphiti
 
+**Status: archived (legacy).** This OpenClaw plugin is no longer maintained. It is superseded by the standalone `graph_memory` Python service — see [ADR 001: Standalone temporal memory](adr/001-standalone-temporal-memory.md) and the repository [README](../README.md). This page is kept as a migration reference for existing plugin installs; new setups should use the Python service.
+
 Temporal knowledge graph plugin for [OpenClaw](https://github.com/openclaw/openclaw) using [Graphiti](https://github.com/getzep/graphiti) + Neo4j.
 
-> **⚠️ Upgrading from v0.2.x?** As of v0.3.0, Graphiti no longer claims the `plugins.slots.memory` slot. If you were using `plugins.slots.memory = "graphiti"`, you must re-enable `memory-core` manually — see [Migrating from v0.2.x](#migrating-from-v02x).
+**Upgrading from v0.2.x?** As of v0.3.0, Graphiti no longer claims the `plugins.slots.memory` slot. If you were using `plugins.slots.memory = "graphiti"`, you must re-enable `memory-core` manually — see [Migrating from v0.2.x](#migrating-from-v02x).
 
 
 ## What it does
@@ -11,7 +13,7 @@ Temporal knowledge graph plugin for [OpenClaw](https://github.com/openclaw/openc
 - **Auto-capture**: Automatically ingests conversation content into the knowledge graph (per-turn in ContextEngine mode, on compaction/reset in hooks mode) for entity/relationship extraction (async, via Graphiti's LLM pipeline)
 - **Auto-index**: Automatically creates index episodes in Graphiti when files are written to `memory/`, bridging file-based memory with the knowledge graph
 - **Auto-recall**: Optionally injects relevant facts before each turn — off by default, see [Auto-recall vs on-demand search](#auto-recall-vs-on-demand-search)
-- **CLI**: `openclaw graphiti status|search|episodes|ingest|backfill`
+- **CLI**: `openclaw graphiti status|search|episodes|ingest|logs|backfill`
 - **Slash command**: `/graphiti` for quick health check
 
 ## Requirements
@@ -39,21 +41,25 @@ The plugin declares `openclaw.extensions` in `package.json`, so OpenClaw discove
 
 ### Stable vs beta
 
-For production use, pin to an exact stable version:
+The package is no longer maintained: no further stable or beta releases are planned.
+The newest stable release is **0.6.2** (ContextEngine mode, no Smart autoRecall); the
+0.7.0 line, which adds Smart autoRecall, only ever shipped as betas (newest:
+`0.7.0-beta.5`).
+
+For production use, pin to the exact stable version:
 
 ```bash
-openclaw plugins install @robertogongora/graphiti@<stable-version>
+openclaw plugins install @robertogongora/graphiti@0.6.2
 ```
 
-For development or early access to unreleased features:
+For the unreleased 0.7.0 features:
 
 ```bash
 openclaw plugins install @robertogongora/graphiti@beta
 ```
 
-The `@beta` tag resolves to the latest pre-release at install time. The resolved
-version is locked, but future `openclaw plugins update` runs will pull the newest
-beta. For reproducible deployments, always use an exact version.
+The `@beta` tag resolves to the latest pre-release at install time. For reproducible
+deployments, always use an exact version.
 
 ### Known issue: config overwrite on install/update
 
@@ -114,6 +120,12 @@ knowledge graph, operating independently on different data.
 | "Forget this outdated fact" | `graphiti_forget` |
 | "What was captured recently?" | `graphiti_episodes` |
 
+**Deleting is a two-step operation.** `graphiti_forget` deletes irreversibly, so a
+`query` never deletes on its own: it returns the matching facts with their UUIDs. Call
+the tool again with the `uuid` of the fact to remove (add `type: "episode"` for an
+episode UUID from `graphiti_episodes`). The same `query` with `confirm: true` also
+deletes, but only when exactly one fact matches.
+
 ## Configuration
 
 | Option | Type | Default | Description |
@@ -124,9 +136,9 @@ knowledge graph, operating independently on different data.
 | `autoRecall` | boolean | `false` | Inject relevant facts before each turn (opt-in) |
 | `autoCapture` | boolean | `true` | Automatically ingest conversation content into the graph |
 | `autoIndex` | boolean | `true` | Create index episodes when files are written to `memory/` |
-| `autoIndexExtensions` | string[] | `[".md", ".txt"]` | File extensions to index (non-matching files are skipped) |
+| `autoIndexExtensions` | string[] | `[".md", ".txt"]` | File extensions to index (non-matching files are skipped). A comma-separated string is tolerated and coerced with a warning |
 | `recallMaxFacts` | number | `10` | Max facts to inject per turn when auto-recall is on |
-| `minPromptLength` | number | `10` | Min prompt length to trigger auto-recall |
+| `minPromptLength` | number | `10` | Min prompt length to trigger auto-recall — **hooks mode only**; ignored in ContextEngine mode |
 | `debug` | boolean | `true` | Enable structured debug log file |
 | `logFile` | string | `~/.openclaw/logs/graphiti-plugin.log` | Custom debug log file path |
 
@@ -137,12 +149,15 @@ time using the `graphiti_search` tool — this is the recommended approach. The 
 decides when graph context is relevant rather than injecting facts on every turn.
 
 When `autoRecall: true`, the plugin injects relevant knowledge graph facts before
-turns that need them. In **ContextEngine mode** (v0.7.0+), this uses Smart autoRecall —
-a two-stage pipeline that only fires on continuity gaps (bootstrap, compaction, reset,
-few messages) or when the user references prior context. Stage A recovers continuity
+turns that need them. In **ContextEngine mode** (plugin v0.6.0+; Smart autoRecall arrived
+in v0.7.0), this uses Smart autoRecall — a two-stage pipeline that only fires on
+continuity gaps (bootstrap, compaction, or a short message window of 3 messages or
+fewer) or when the user references prior context. A `/new` reset is not a trigger by
+itself: the new session recovers through its own bootstrap. Stage A recovers continuity
 from the session transcript or recent episodes; Stage B runs a targeted semantic recall
 (`/search` against recovered continuity, or `/get-memory` on the current window as
-fallback). In **hooks mode**, it fires `before_agent_start` on every turn. Useful when
+fallback). All recall state is tracked per session. In **hooks mode**, it fires
+`before_agent_start` on every turn whose prompt is at least `minPromptLength` characters. Useful when
 you want persistent background context without explicitly calling `graphiti_search`.
 
 ```json
@@ -162,9 +177,9 @@ you want persistent background context without explicitly calling `graphiti_sear
 
 ## Auto-capture flow
 
-> **Note:** The flow below describes **hooks mode** (OpenClaw < v2026.3.7). In
-> **ContextEngine mode** (v2026.3.7+), auto-capture runs per-turn via `afterTurn()`
-> instead of waiting for compaction/reset — see [ContextEngine mode](#contextengine-mode-v060).
+**Note.** The flow below describes **hooks mode** (OpenClaw < v2026.3.7). In
+**ContextEngine mode** (v2026.3.7+), auto-capture runs per-turn via `afterTurn()`
+instead of waiting for compaction/reset — see [ContextEngine mode](#contextengine-mode-v060).
 
 ```
 Session compacts or resets
@@ -193,12 +208,13 @@ methods that the runtime calls directly:
 |------------------|---------------|---------|
 | `assemble()` | `before_agent_start` | Smart autoRecall — conditionally inject continuity and facts |
 | `ingest()` | _(new)_ | Ingest a single message into the graph |
-| `ingestBatch()` | _(new)_ | Batch-ingest multiple messages |
+| `ingestBatch()` | _(new)_ | Batch-ingest multiple messages as one episode (`ingestedCount` counts episodes) |
 | `afterTurn()` | _(new)_ | Ingest new messages after each turn (replaces batch fallback) |
 | `compact()` | `before_compaction` | Graph-aware compaction — ingest then truncate |
-| `bootstrap()` | _(new)_ | Health-check and report graph population on startup |
+| `bootstrap()` | _(new)_ | Health-check and report graph population on startup (episode count is a lower bound, capped at 50) |
 | `onSubagentEnded()` | _(new)_ | Ingest a subagent's findings into the parent graph scope |
 | `prepareSubagentSpawn()` | _(new)_ | Inject relevant facts into a spawning subagent's context |
+| `dispose()` | _(new)_ | Release in-memory per-session state (there are no persistent connections) |
 
 The engine declares `ownsCompaction: false`, deferring session truncation to OpenClaw's
 built-in auto-compaction. The plugin captures conversation knowledge into the graph via
@@ -241,6 +257,7 @@ Every ingested episode carries a JSON-encoded provenance object in `source_descr
 | `after_turn_sweep` | ContextEngine after-turn sweep (post-compaction safety re-ingest) |
 | `compact` | ContextEngine graph-aware compaction |
 | `subagent_ended` | ContextEngine subagent result ingestion |
+| `memory_index` | Auto-index of a `memory/` file write, or `openclaw graphiti backfill` (adds `file` and `file_type`) |
 
 Session fields (`session_key`, `thread_id`, `agent`, `channel`, `session_start`) are
 included when available and omitted otherwise. The `openclaw graphiti episodes` command
@@ -256,11 +273,14 @@ Only prose files are indexed by default (`.md` and `.txt`). Structured data file
 ```
 Agent writes to memory/file.md
   -> after_tool_call hook fires
-  -> Plugin detects memory/ path in tool params
+  -> Plugin resolves the written path; it must be inside this workspace's memory/ dir
+     (a write to another checkout's memory/ folder is ignored)
   -> Extension check: skip unless file matches autoIndexExtensions
   -> Reads file metadata (mtime, size, first 500 chars)
   -> Checks state file for idempotency (skips if mtime unchanged)
   -> Ingests index episode with YAML frontmatter + excerpt
+     (appended: earlier index episodes for the same file are not replaced, because
+      Graphiti's 202 response carries no episode uuid to delete)
   -> Updates state file (~/.openclaw/state/graphiti/graphiti-memory-index.json)
 ```
 
@@ -268,13 +288,21 @@ Index episodes are distinguishable from other episode types:
 
 | Type | name pattern | role | source_description |
 |------|-------------|------|--------------------|
-| Manual | `manual-<ts>` | `shiba` | `{"plugin":"openclaw-graphiti","event":"manual",...}` |
-| Compaction | `compaction-<ts>` | `conversation` | `{"plugin":"openclaw-graphiti","event":"before_compaction",...}` |
-| Reset | `session-reset-<ts>` | `conversation` | `{"plugin":"openclaw-graphiti","event":"before_reset",...}` |
-| CLI ingest | `<filename>` | `shiba` | `{"plugin":"openclaw-graphiti","event":"cli_ingest",...}` |
+| Manual | `manual-<ts>` (or the `name` parameter) | `shiba` | `{"plugin":"openclaw-graphiti","event":"manual",...}` |
+| Compaction (hooks) | `compaction-<sessionKey>-<ts>` | `conversation` | `{"plugin":"openclaw-graphiti","event":"before_compaction",...}` |
+| Reset (hooks) | `session-reset-<sessionKey>-<ts>` | `conversation` | `{"plugin":"openclaw-graphiti","event":"before_reset",...}` |
+| CLI ingest | `--name`, else `<filename>`, else `cli-<ts>` | `shiba` | `{"plugin":"openclaw-graphiti","event":"cli_ingest",...}` |
+| ContextEngine `ingest()` | `ingest-<sessionId>-<ts>` | `user` / `assistant` | `{"plugin":"openclaw-graphiti","event":"ingest",...}` |
+| ContextEngine `ingestBatch()` | `batch-<sessionId>-<ts>` | `conversation` | `{"plugin":"openclaw-graphiti","event":"ingest_batch",...}` |
+| ContextEngine `afterTurn()` | `turn-<sessionId>-<ts>` | `conversation` | `{"plugin":"openclaw-graphiti","event":"after_turn" or "after_turn_sweep",...}` |
+| ContextEngine `compact()` | `compact-<sessionId>-<ts>` | `conversation` | `{"plugin":"openclaw-graphiti","event":"compact",...}` |
+| ContextEngine `onSubagentEnded()` | `subagent-<childSessionKey>-<ts>` | `subagent-result` | `{"plugin":"openclaw-graphiti","event":"subagent_ended",...}` |
 | **Index** | `memory-index::memory/file.md` | `memory-index` | `{"plugin":"openclaw-graphiti","event":"memory_index","file_type":".md",...}` |
 
-> **Privacy note:** Indexed memory files are sent to the Graphiti server for entity extraction, which calls your configured LLM. Avoid storing secrets (API keys, passwords) in `memory/` files, or set `autoIndex: false` to disable this feature.
+`<ts>` is `Date.now()` in milliseconds. The session key segment is omitted
+(`compaction-<ts>`, `session-reset-<ts>`) when the hook context carries no session key.
+
+**Privacy note.** Indexed memory files are sent to the Graphiti server for entity extraction, which calls your configured LLM. Avoid storing secrets (API keys, passwords) in `memory/` files, or set `autoIndex: false` to disable this feature.
 
 ### Backfill existing memory files
 
@@ -287,6 +315,9 @@ openclaw graphiti backfill --dry-run        # Show what would be indexed
 ```
 
 The backfill command checks the state file and only ingests new or modified files.
+A file that fails to ingest is reported as `[failed]`, counted in the summary, and makes
+the command exit with code 1; the other files still proceed, and progress is saved as it
+goes, so a re-run only retries what is missing.
 
 To disable auto-indexing or customize which file types are indexed:
 
@@ -401,7 +432,7 @@ volumes:
 ```
 
 **Environment variables:**
-- `OPENAI_API_KEY` — required. Must be set in your shell or a `.env` file alongside `docker-compose.yml`. If missing, Graphiti silently accepts ingestion but skips extraction — check `docker logs openclaw-graphiti` if episodes are not appearing after ingest.
+- `OPENAI_API_KEY` — required. Must be set in your shell or a `.env` file alongside `docker-compose.yml`. If missing, Graphiti silently accepts ingestion but skips extraction — check `docker compose logs graphiti` if episodes are not appearing after ingest.
 - `MODEL_NAME` — the LLM used for entity and relationship extraction. Defaults to `gpt-4o-mini` if omitted. Recommended: `gpt-4.1-mini` or `gpt-5-nano` for a cost-efficient option that works well for extraction workloads.
 
 See the [Graphiti GitHub](https://github.com/getzep/graphiti) for full deployment options including Coolify, Railway, and cloud-hosted Neo4j.
@@ -409,7 +440,7 @@ See the [Graphiti GitHub](https://github.com/getzep/graphiti) for full deploymen
 ## Status commands
 
 ```bash
-openclaw graphiti status          # Graphiti server health + episode count
+openclaw graphiti status          # Graphiti server health + episode count (shown as "500+" at the count cap)
 openclaw graphiti search "query"  # Search the knowledge graph
 openclaw graphiti episodes        # Recent episodes (human-readable provenance)
 openclaw graphiti episodes --json # Raw JSON output
@@ -417,12 +448,13 @@ openclaw graphiti episodes -s <session-key>         # Filter by session key
 openclaw graphiti ingest --source-file ./notes.md   # Ingest a file
 openclaw graphiti ingest --content "key fact"        # Ingest text directly
 openclaw graphiti backfill                           # Index existing memory files into Graphiti
+openclaw graphiti logs                               # Show the debug log (--clear truncates it)
 openclaw memory status            # File-based memory index (memory-core)
 ```
 
 ## Debug logging
 
-The plugin writes a structured, append-only debug log for diagnostics. It records HTTP status codes, timing, and result counts -- **never** conversation content, search queries, or PII. Safe to paste in bug reports.
+The plugin writes a structured debug log for diagnostics. The file rotates at 5 MB (one previous generation is kept as `<logFile>.1`), and values containing whitespace, quotes, `=`, or a backslash are quoted. It records HTTP status codes, timing, and result counts -- **never** conversation content, search queries, or PII. Safe to paste in bug reports.
 
 ```bash
 openclaw graphiti logs           # Show last 50 log entries
