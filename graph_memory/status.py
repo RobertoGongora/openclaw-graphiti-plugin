@@ -125,10 +125,26 @@ def status(store, request):
                 )
             )
         ]
+        names = tx.run(
+            "MATCH (s:MemorySpace {id:$ns}) "
+            "CALL { MATCH (a:MemoryAlias {namespace:$ns}) RETURN count(a) AS nodes } "
+            "CALL { MATCH (e:MemoryEntity {namespace:$ns}) WHERE e.merged_into IS NULL "
+            "RETURN sum(size(e.aliases)) AS listed } "
+            "RETURN coalesce(s.aliases_indexed,false) AS indexed,nodes,listed",
+            **params,
+        ).single()
         return {
             "namespace": request.namespace,
             "checked_at": checked.isoformat(),
             "workers": workers,
+            # The name lookup is derived from the alias lists. Fewer nodes than names
+            # means something wrote entities without it (an older process): run
+            # `aliases rebuild`.
+            "entity_names": {
+                "indexed": bool(names and names["indexed"]),
+                "lookup_nodes": names["nodes"] if names else 0,
+                "listed_names": (names["listed"] or 0) if names else 0,
+            },
             "episodes": {"total": sum(counts.values()), "by_status": counts},
             "processing": {
                 **processing,

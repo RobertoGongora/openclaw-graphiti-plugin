@@ -204,6 +204,8 @@ def run():
     call.add_argument("tool")
     call.add_argument("arguments", help="JSON object, or @path to a JSON file")
     commands.add_parser("repair")
+    names = commands.add_parser("aliases", help="Maintain the indexed entity-name lookup")
+    names.add_argument("action", choices=("rebuild",))
     revision = commands.add_parser("revision")
     revision.add_argument(
         "action", choices=("create", "build", "diff", "get", "validate", "promote")
@@ -304,6 +306,12 @@ def run():
                 except Exception as exc:
                     failures.append({"path": str(path), "error": type(exc).__name__})
             result = {"receipts": outputs, "failures": failures}
+        elif args.command == "aliases":
+            from . import aliases
+
+            # Seconds even on a large namespace, in batches under the namespace lock;
+            # a full repair would also re-join every message and fact.
+            result = aliases.rebuild(service.store, args.namespace)
         elif args.command == "revision":
             from .revisions import Revisions
 
