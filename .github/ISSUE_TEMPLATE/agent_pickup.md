@@ -10,11 +10,18 @@ assignees: ""
 
 One concrete outcome. What should be true when this is done?
 
+## Base branch
+
+Branch the cloud agent should start from (required). Use the repo default (`master`) unless this work must continue an existing line of development.
+
+```
+master
+```
+
 ## Context
 
-Branch / area of the codebase (paths, modules, ADRs). Link related PRs or issues.
+Area of the codebase (paths, modules, ADRs). Link related PRs or issues.
 
-- **Primary branch:** `t3code/standalone-mcp-graph-memory` (unless this issue says otherwise)
 - **Relevant paths:**
 - **Related:**
 
