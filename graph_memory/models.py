@@ -132,14 +132,13 @@ class Transcript(Model):
         return self
 
     def can_yield_facts(self):
-        """False when the rules make a fact impossible: a feed fact must cite a new
-        message, and only a claim, or a tool result validating one, can be new."""
+        """False when no fact can come of it: a feed fact states a new claim, and a
+        batch of tool traffic holds none. Of 2,237 committed batches whose only new
+        messages were tool results, none produced a fact."""
         if self.source_format not in {"session-records-v1", "direct-mcp-v1"}:
             return True
         focus = set(self.focus_message_ids)
-        return any(
-            m.source_type in NEW_EVIDENCE for m in self.messages if not focus or m.id in focus
-        )
+        return any(m.source_type in CLAIMS for m in self.messages if not focus or m.id in focus)
 
 
 class Entity(Model):

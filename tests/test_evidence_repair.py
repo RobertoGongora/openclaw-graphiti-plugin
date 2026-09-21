@@ -154,3 +154,40 @@ def test_namespace_fault_charges_no_episode_and_pauses_the_queue(graph, tmp_path
         ).data()
     )
     assert all(r["attempts"] == 0 and r["quarantine"] is None for r in rows)
+
+
+def test_only_a_new_claim_makes_a_batch_worth_a_model_call():
+    def batch(*focus_types):
+        messages = [
+            {
+                "id": "c",
+                "role": "assistant",
+                "content": "Earlier claim.",
+                "source_type": "assistant_report",
+            }
+        ]
+        messages += [
+            {
+                "id": f"f{i}",
+                "role": "tool" if t == "tool_result" else "user",
+                "content": f"Text {i}.",
+                "source_type": t,
+            }
+            for i, t in enumerate(focus_types)
+        ]
+        return Transcript.model_validate(
+            {
+                "namespace": "eval:unit",
+                "source_id": "s",
+                "session_id": "s",
+                "source_format": "session-records-v1",
+                "focus_message_ids": [m["id"] for m in messages[1:]],
+                "messages": messages,
+            }
+        )
+
+    assert batch("user_assertion").can_yield_facts()
+    assert batch("tool_result", "assistant_report").can_yield_facts()
+    # An earlier claim in context does not make tool traffic new.
+    assert not batch("tool_result").can_yield_facts()
+    assert not batch("tool_call", "context").can_yield_facts()
