@@ -107,6 +107,7 @@ export type MockOverrides = {
   getMemoryFacts?: GraphitiFact[];
   ingestStatus?: number;
   ingestBody?: Record<string, unknown>;
+  ingestDelayMs?: number;
   searchStatus?: number;
   searchErrorBody?: string;
   episodes?: any[];
@@ -118,6 +119,7 @@ let port: number;
 
 export let mockOverrides: MockOverrides = {};
 export const lastRequest: Record<string, unknown> = {};
+export const requestBodies: Record<string, unknown[]> = {};
 /** Headers from the most recent request to each path (lowercase keys). */
 export const lastHeaders: Record<string, Record<string, string>> = {};
 
@@ -128,6 +130,7 @@ export function getMockPort(): number {
 export function resetMockState(): void {
   mockOverrides = {};
   for (const key of Object.keys(lastRequest)) delete lastRequest[key];
+  for (const key of Object.keys(requestBodies)) delete requestBodies[key];
   for (const key of Object.keys(lastHeaders)) delete lastHeaders[key];
 }
 
@@ -189,7 +192,12 @@ export function startMockServer(): Promise<void> {
       // POST /messages  (returns 202 like real Graphiti)
       if (req.method === "POST" && url.pathname === "/messages") {
         const body = await readBody(req);
-        lastRequest["/messages"] = JSON.parse(body);
+        const parsed = JSON.parse(body);
+        lastRequest["/messages"] = parsed;
+        (requestBodies["/messages"] ??= []).push(parsed);
+        if (mockOverrides.ingestDelayMs) {
+          await new Promise((resolve) => setTimeout(resolve, mockOverrides.ingestDelayMs));
+        }
         const status = mockOverrides.ingestStatus ?? 202;
         res.writeHead(status, { "Content-Type": "application/json" });
         res.end(
