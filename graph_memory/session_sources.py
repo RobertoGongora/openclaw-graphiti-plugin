@@ -392,6 +392,39 @@ def turn_results(messages, count, held, room):
     return carried
 
 
+def batch(messages, count, lookback=LOOKBACK_CHARS):
+    """The next bounded batch after `count`: where it ends, and its messages in
+    source order with the context they are read against."""
+    end, size = count, 0
+    while end < len(messages) and end - count < 8:
+        n = len(messages[end].content)
+        if end > count and size + n > MAX_BATCH_CHARS:
+            break
+        size += n
+        end += 1
+    selected = messages[max(0, count - 4) : end]
+    ids = {m.id for m in selected}
+    selected += turn_results(messages, count, ids, lookback)
+    result_calls = {m.call_id for m in messages[count:end] if m.role == "tool" and m.call_id}
+    # Pair a late result with its call even if more than four messages apart.
+    for m in messages[:count]:
+        if m.source_type == "tool_call" and m.call_id in result_calls and m.id not in ids:
+            if (
+                sum(len(x.content) for x in selected) + len(m.content) <= 450_000
+                and len(selected) < 490
+            ):
+                selected.append(m)
+                ids.add(m.id)
+    selected.sort(
+        key=lambda m: (
+            int(m.id.split("-")[1]),
+            int(m.id.split("-")[3]),
+            int(m.id.split("-")[4]),
+        )
+    )
+    return end, selected
+
+
 def feed_records(
     service,
     namespace,
@@ -439,35 +472,7 @@ def feed_records(
             )
         receipts = []
         while count < len(messages) and len(receipts) < max_batches:
-            end, size = count, 0
-            while end < len(messages) and end - count < 8:
-                n = len(messages[end].content)
-                if end > count and size + n > MAX_BATCH_CHARS:
-                    break
-                size += n
-                end += 1
-            selected = messages[max(0, count - 4) : end]
-            ids = {m.id for m in selected}
-            selected += turn_results(messages, count, ids, LOOKBACK_CHARS)
-            result_calls = {
-                m.call_id for m in messages[count:end] if m.role == "tool" and m.call_id
-            }
-            # Pair a late result with its call even if more than four messages apart.
-            for m in messages[:count]:
-                if m.source_type == "tool_call" and m.call_id in result_calls and m.id not in ids:
-                    if (
-                        sum(len(x.content) for x in selected) + len(m.content) <= 450_000
-                        and len(selected) < 490
-                    ):
-                        selected.append(m)
-                        ids.add(m.id)
-            selected.sort(
-                key=lambda m: (
-                    int(m.id.split("-")[1]),
-                    int(m.id.split("-")[3]),
-                    int(m.id.split("-")[4]),
-                )
-            )
+            end, selected = batch(messages, count)
             t = Transcript(
                 namespace=namespace,
                 session_id=session_id,
