@@ -62,7 +62,7 @@ same text twice.
 messages were consumed and a hash of that prefix. A file whose consumed prefix
 changed is refused. New messages become batches of at most eight messages, with
 four earlier messages as context. With source records a batch also carries the
-successful tool results of the turn in progress (up to 40,000 characters), so a
+successful tool results of the turn in progress (up to 20,000 characters), so a
 report written after a long run of tool calls can cite them, and holds at most
 90,000 characters, and at most four batches are staged per file per scan.
 

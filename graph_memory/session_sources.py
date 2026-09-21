@@ -21,7 +21,7 @@ MAX_BATCH_CHARS = 90_000
 # Earlier tool results of the turn in progress, carried into a batch as context: an
 # agent reports after its tool calls, and the results that back the report are
 # usually many messages behind it.
-LOOKBACK_CHARS = 40_000
+LOOKBACK_CHARS = 20_000
 LOOKBACK_MESSAGES = 400
 OPAQUE_CALL = "opaque_command_artifacts_not_resolved"
 SHELL_OUTPUT = "shell_output_not_attributed_to_files"

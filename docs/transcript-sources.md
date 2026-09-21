@@ -38,7 +38,7 @@ A session stays a single source identity with multiple bounded episodes. Each
 batch contains at most eight new text chunks (90,000 characters), four preceding
 chunks of context, and available earlier calls for late results. A batch also
 carries the successful tool results of the turn in progress (back to the last user
-message, newest first, with their calls, up to 40,000 characters): an agent reports
+message, newest first, with their calls, up to 20,000 characters): an agent reports
 after its tool calls, and the results behind the report are usually far more than
 four messages back. Individual
 records are split at 24,000 characters without dropping remaining text. Each
