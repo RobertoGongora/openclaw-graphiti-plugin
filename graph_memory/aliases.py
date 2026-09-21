@@ -19,7 +19,8 @@ SWEEP = 50_000
 # for an entity that already exists.
 WORD = re.compile(r"[^\W_]+")
 # Neo4j refuses to index a property value over about 8 kB and fails the whole write.
-INDEXABLE = 2000
+# Counted in characters (at most four bytes each) so a query can apply the same rule.
+INDEXABLE = 500
 
 
 def alias_id(namespace, kind, text, entity_id):
@@ -45,7 +46,7 @@ def rows(namespace, kind, entity_id, texts):
         }
         for text in dict.fromkeys(texts)
         # A name too long to index is left to the alias list; nothing resolves by it.
-        if len(text.encode()) <= INDEXABLE
+        if len(text) <= INDEXABLE
     ]
 
 

@@ -3,6 +3,7 @@
 import json
 from datetime import datetime
 
+from .aliases import INDEXABLE
 from .inventory import inventory_id
 from .models import now
 
@@ -129,9 +130,11 @@ def status(store, request):
             "MATCH (s:MemorySpace {id:$ns}) "
             "CALL { MATCH (a:MemoryAlias {namespace:$ns}) RETURN count(a) AS nodes } "
             "CALL { MATCH (e:MemoryEntity {namespace:$ns}) WHERE e.merged_into IS NULL "
-            "RETURN sum(size(e.aliases)) AS listed } "
+            # Only names short enough to have a lookup node, or the two never agree.
+            "RETURN sum(size([a IN e.aliases WHERE size(a)<=$indexable])) AS listed } "
             "RETURN coalesce(s.aliases_indexed,false) AS indexed,nodes,listed",
             **params,
+            indexable=INDEXABLE,
         ).single()
         return {
             "namespace": request.namespace,
