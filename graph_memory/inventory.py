@@ -7,6 +7,7 @@ import threading
 from pathlib import Path
 
 from .diagnostics import diagnostic
+from .feed_identity import Feeds, parse_roots
 from .models import now
 from .session_sources import FORMAT, MAX_BATCH_CHARS, records
 from .store import digest
@@ -72,25 +73,28 @@ def census(store, namespace, roots, stop=None):
         gaps["traversal_errors"] += 1
         failure(exc)
 
-    files = set()
-    for root in roots:
-        root = Path(root)
+    # The watcher's resolution, so a remounted root is not counted as a new backlog.
+    feeds = Feeds(store, namespace)
+    files = {}
+    for root in parse_roots(roots):
         if root.is_file():
-            files.add(root.resolve())
-        elif root.is_dir():
-            for directory, _, names in os.walk(root, onerror=traversal_error):
-                files.update((Path(directory) / n).resolve() for n in names if n.endswith(".jsonl"))
+            files.setdefault(*root.key(root.given))
+        elif root.given.is_dir():
+            for directory, _, names in os.walk(root.given, onerror=traversal_error):
+                for n in names:
+                    if n.endswith(".jsonl"):
+                        files.setdefault(*root.key(Path(directory) / n))
         else:
             gaps["inaccessible_roots"] += 1
     counts["files"] = len(files)
-    for path in sorted(files):
+    for name, key in sorted(files.items()):
         if stop and stop.is_set():
             return None  # Keep the last finished snapshot on shutdown.
+        path = Path(name)
         try:
             before = path.stat()
             messages = list(records(path))
-            fid = digest([FORMAT, namespace, str(path), "host:" + digest(str(path))])
-            cursor = cursors.get(fid, {})
+            cursor = cursors.get(feeds.resolve(key, name).feed_id, {})
             count = cursor.get("message_count", 0)
             if count > len(messages) or (
                 count

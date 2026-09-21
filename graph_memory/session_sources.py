@@ -353,15 +353,27 @@ def records(path: Path):
                 )
 
 
-def feed_records(service, namespace, path: Path, session_id: str, max_batches=4):
+def feed_records(
+    service,
+    namespace,
+    path: Path,
+    session_id: str,
+    max_batches=4,
+    *,
+    feed_id=None,
+    source_key=None,
+    session_uid=None,
+):
     """Incremental, restart-safe intake into a separate source-model graph.
 
     Cursor versioning prevents accidentally resuming the old text-only parser.
     Batches are bounded; earlier tool calls are attached as context when needed.
+    The watcher passes the feed it resolved for the file (see feed_identity), so a
+    moved file keeps its cursor; without one the feed is named by path and session.
     """
     path = path.expanduser().resolve(strict=True)
     messages = list(records(path))
-    fid = digest([FORMAT, namespace, str(path), session_id])
+    fid = feed_id or digest([FORMAT, namespace, str(path), session_id])
     title_message = next(
         (
             m
@@ -428,8 +440,11 @@ def feed_records(service, namespace, path: Path, session_id: str, max_batches=4)
             receipts.append(service.store.stage(t, transaction=tx))
             count = end
         tx.run(
-            "MERGE (f:MemoryFeed {id:$id}) SET f.name=$name,f.namespace=$ns,f.session_id=$session,f.source_uri=$path,f.source_format=$format,f.message_count=$count,f.prefix_hash=$hash",
+            "MERGE (f:MemoryFeed {id:$id}) SET f.name=$name,f.namespace=$ns,f.session_id=$session,f.source_uri=$path,f.source_format=$format,f.message_count=$count,f.prefix_hash=$hash,"
+            "f.source_key=coalesce($key,f.source_key),f.session_uid=coalesce($uid,f.session_uid)",
             id=fid,
+            key=source_key,
+            uid=session_uid,
             ns=namespace,
             session=session_id,
             path=str(path),
