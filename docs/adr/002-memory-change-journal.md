@@ -14,6 +14,21 @@ The contracts in this ADR are unchanged. See
 [ingestion pipeline](../ingestion-pipeline.md#journal-write-path) and
 [operations](../operations.md#journal-maintenance).
 
+**Updated 2026-09-21, format version 3.** Journal events are now format version 3.
+Embedding every source text and periodic full snapshots had made the journal the
+largest part of the store, and a single checkpoint had become one string of several hundred
+megabytes. Write-once text (episode payloads, message and artifact observation
+content) is now journaled as a sha256 reference and read back from the live
+node, checked, when a reader needs it. Checkpoints are stored as compressed
+parts whose hashes sit in the chained event, and are taken when enough change
+has accumulated. The trade is explicit: replaying events proves the chain and the
+declared hashes, while a text is proved when it is resolved and by verification.
+The journal head is fenced so that an engine from before this format refuses to
+write, which makes a rollback to an older image read-only. Older events remain
+readable and mixed chains replay. The two-clock contract and replay isolation in
+this ADR are unchanged. See [history](../history.md#what-each-command-proves) and
+[operations](../operations.md#what-is-irreversible).
+
 ## Decision
 
 Keep the current graph as the ordinary recall view. Add append-only `MemoryChange`

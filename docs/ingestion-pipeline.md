@@ -80,6 +80,48 @@ Source-records intake is bounded so that a large archive cannot flood the queue:
   file's modification time and size. A restarted daemon loads these stamps and
   skips unchanged files without parsing them.
 
+### Feed identity
+
+A transcript file is named by its source key, `LABEL:relative/path.jsonl`: the
+path below the transcript root it was found in, prefixed by a label for that
+root. The key does not contain the mount point, so moving `/sessions/claude` to
+another host path does not make every file look new.
+
+The label comes from the root's own name, going upwards and skipping the generic
+directory names `projects` and `sessions` and a leading dot. `/sessions/claude`
+and `~/.claude/projects` both get the label `claude`. A root given as `LABEL=PATH`
+states its label. A root with no usable name is labelled `root`, and two such
+roots clash. Two different directories under one label are refused, because
+their files would merge. The daemon validates its roots once at start and stops
+with a message if they clash.
+
+A file's feed is found by key first, then by the absolute path it was last stored
+with. Feeds created before source keys existed keep their ids, because episodes,
+messages and the journal already reference them. The first scan stamps them with
+the key their stored path has under the current roots and logs `feed_identity`
+with the counts `feeds`, `stamped`, `already_stamped`, `unmatched` and
+`conflicts`. A feed found by its path alone is given today's key on that scan
+too, since a fully fed file is never opened again.
+
+Two refusals protect the graph from a second copy of a session:
+
+- **Blocked.** While any older feed cannot be named under the current roots, or
+  two feeds claim one key, intake stages nothing at all. Each scan reports
+  `feed_identity_blocked` with the counts. Every file of those feeds would read
+  as new and be staged again. The operator stamps the feeds with the roots they
+  were written under, using `feeds stamp`, and the next scan continues.
+- **Refused.** A file that is new by key and by path but carries the name of a
+  known feed is not read. The scan reports `feed_identity_refused` once per
+  version of the file, with the known feed's id and key. Session ids, rollout
+  names and long hashes name a file by basename. Other names, such as
+  `journal.jsonl`, count together with their directory.
+
+`MEMORY_FEED_ACCEPT_UNMATCHED=1` turns both refusals off. Every file that cannot
+be matched then gets a new feed, and a session the graph already holds is staged
+and extracted a second time under new ids. There is no undo short of a restore.
+The inventory uses the same resolution and reports `identity_blocked` instead of
+a backlog while intake is blocked.
+
 Staging links only the nodes of the episode being staged: its session, messages
 and artifact observations. It does not rescan the namespace for missing links.
 Restoring links across a namespace is the explicit `repair` command.
@@ -119,10 +161,11 @@ One run of a claimed episode follows this order.
 1. **Cached extraction.** If the episode holds a validated extraction from the
    same engine identity and the same provider, model and effort, the worker
    validates it again against the source and commits it. No model call is made.
-2. **Skip rule.** For source-record and direct MCP episodes, a fact must cite a
-   new message, and only a user assertion, an assistant report, or a tool result
-   can be new evidence. If no focus message has one of those
-   types, the episode is committed empty without a model call. The receipt
+2. **Skip rule.** For source-record and direct MCP episodes, a fact states a new
+   claim, so it must cite a new user assertion or assistant report. A batch whose
+   only new messages are tool results, tool calls or context holds no claim. If
+   no focus message is a claim, the episode is committed empty without a model
+   call. The receipt
    carries `skipped: no_claim_in_focus`. Other formats always go to the model.
 3. **Model call.** The model receives the transcript, matching existing entities
    and their relationships, and the rejection feedback of the previous run if
@@ -148,9 +191,11 @@ that repair moved to another message is held to that message's role and focus,
 so moving a quote cannot sidestep those rules.
 
 The focus rule requires each fact of a feed batch to cite at least one new
-message, and that message must be a claim or a tool result. Any other message
-type in focus is context. Plain transcripts carry no roles, so any of their
-messages qualifies.
+message, and that message must be a claim: a user assertion or an assistant
+report. This is the same rule that decides whether a batch is worth a model
+call. A new tool result can validate a claim but cannot be the new message a
+fact rests on. Plain transcripts carry no roles, so any of their messages
+qualifies.
 
 Evidence must be text that occurs in the cited message. Models often copy a
 passage with small differences, so validation looks for the source span a quote
@@ -198,7 +243,7 @@ decides who pays for the failure.
 | Other episode failure | Database error at commit, `unclassified_error` | Attempt | Backoff |
 | Provider outage | `model_timeout` or `model_invocation_failed` while the breaker opens or is open | Nothing | Status unchanged, retry in 60 s |
 | Model failure that follows the episode | The same codes while the provider serves other episodes | `infra_failures` | Status unchanged, retry in 60 s |
-| Namespace fault | `journal_state_mismatch`, `engine_changed` | Nothing | Status unchanged. The worker stops claiming. See below |
+| Namespace fault | `journal_state_mismatch`, `engine_changed`, `database_unavailable` | Nothing | Status unchanged. The worker stops claiming. See below |
 
 **Backoff.** A charged attempt delays the next try by 60 seconds doubled for each
 earlier attempt: 60, 120, 240, 480, 960, 1,920 and 3,600 seconds. Counters
@@ -263,7 +308,7 @@ failed probe, and `provider_recovered` when it closes. Both carry `open`,
 
 ## Namespace faults
 
-Two faults belong to the namespace or the process. The next episode would fail
+Three faults belong to the namespace, the process or the database. The next episode would fail
 the same way, so no episode is charged, marked failed or quarantined for them.
 They pause the queue through the same breaker, opened at once, but they are
 announced under their own names: `namespace_fault` when the pause starts and
@@ -273,6 +318,10 @@ events keep their names.
 - **`journal_state_mismatch`.** The graph no longer matches its journal.
   Writes stay refused until an operator resolves it. See
   [operations](operations.md#journal-maintenance).
+- **`database_unavailable`.** A lock wait that ran out, a deadlock victim or a
+  dropped connection. The database's trouble would meet the next episode too.
+  The diagnostic carries the Neo4j status code as `database_code`. The pause ends
+  by itself when a probe succeeds.
 - **`engine_changed`.** The engine files on disk differ from the ones the
   process loaded. The daemon drains and exits with reason `engine_changed`, and
   the container supervisor starts a new process with the new code.
@@ -320,7 +369,7 @@ Every knowledge write and its journal entry share one transaction under the
 namespace lock. Leases, retries, feedback, cached extractions and quarantine
 marks are operational state and are not journaled.
 
-**Scoped writes.** Stage, commit, retract and merge declare the nodes they are
+**Scoped writes.** Stage, commit, retract, confirm, merge and revision promotion declare the nodes they are
 about to change before writing them. The journal reads those nodes before and
 after the write and records the property differences. The cost follows the size
 of the change, not the size of the graph. A write that changes nothing appends
@@ -331,13 +380,13 @@ The sum does not depend on order, so a scoped write updates it by subtracting
 the old node hashes and adding the new ones, without reading the rest of the
 graph.
 
-**Full-capture writes.** Dream and revision operations still capture the whole
-namespace before and after the write. They compare the captured state with the
+**Full-capture writes.** Dream operations still capture the whole namespace
+before and after the write. Revision promotion is a scoped write. They compare the captured state with the
 journal head first and refuse to write on a mismatch.
 
 **Where untracked writes are detected.** A scoped write does not read the whole
 graph, so it cannot notice a change made outside the journal. Detection happens
-in `history verify-live`, in `history verify`, in `history checkpoint`, in any
+in `history verify-live`, in `history verify`, in every checkpoint, in any
 full-capture write, and in the sampled audit. `verify-live` streams the live
 graph and compares its hash with the journal head. It takes seconds and constant
 memory, which makes it the routine check. `verify` also reads the whole history. With `MEMORY_JOURNAL_AUDIT=N`, the writes whose sequence is a
@@ -345,18 +394,84 @@ multiple of `N` stream the live graph and compare its hash with the head. `1`
 checks every write and `0` turns the audit off. A sampled audit skips writes
 that changed nothing.
 
-**Checkpoints.** Only a baseline and an explicit `history checkpoint` embed the
-full state in an event. There are no periodic snapshots, because a periodic full
-snapshot grows with the graph. Historical reads start at the latest checkpoint
-at or before the requested change and replay differences from there, checking
-the hash chain and the state hash of every event. Journals written by earlier
-versions embedded a snapshot every 100 changes. Those remain readable.
+**Write-once text by reference.** Three properties are written once and never
+changed: an episode's payload, a message's content and an artifact observation's
+content. From event version 3 the journal stores the sha256 of such a text when
+it is 128 characters or longer, and leaves the text on the live node. A reader
+that needs the text fetches it from the node and checks it against the hash. A
+mismatch is an integrity error. An episode's extraction is not write-once,
+because a revision can commit the same episode again, so it stays in the journal
+in full.
 
-**Format migration.** Journals written before the per-node hash carry a digest
-of the whole state. The first write by the current code checks that digest,
-then stores the new hash in both head fields. An older process then fails its
-own state check and cannot append to the journal. The step cannot be undone
+**Two hashes per change.** Each change records the hash of the whole node after
+the write, taken while the writer had the text in hand. Replay uses it to keep
+the running state hash without reading any text. For a node that holds a
+reference the change also records a `shape` hash over the node with references
+in place of text. Replay recomputes that one, so it still proves it rebuilt the
+node the writer saw.
+
+**Checkpoints.** Only a baseline and a checkpoint carry the full state. There are
+no snapshots every N changes embedded in events. A checkpoint is stored as
+separate `MemorySnapshotPart` nodes of about 4 MB each before zlib compression,
+one label per part. The chained event lists each part's sha256, size and record
+count, so the chain hash covers them. Writing and reading a checkpoint holds one
+part in memory at a time. A checkpoint compares the streamed live graph with the
+journal head before it writes anything, so a mismatch costs one read of the
+namespace and not a set of parts that is then rolled back.
+
+A checkpoint is due when the changes since the last one add up to 64 MB or to
+the size of the last checkpoint, whichever is larger, or after 2,000 events. The
+write path never takes one, because it reads the namespace under its lock. The
+daemon checks between scans and logs `journal_checkpoint` with the seconds taken
+and the record count. A failure logs `journal_checkpoint_error` once and is not
+retried for an hour, since a journal that differs from its graph will differ on
+the next scan too and every attempt stalls the workers.
+
+**Historical reads.** A read starts at the latest checkpoint at or before the
+requested change and applies one event at a time, checking the hash chain, each
+change's declared hashes and the state hash of every event. Events of all three
+versions replay in one chain, including the snapshots that the first version
+embedded every 100 changes.
+
+**What replay proves.** Replay proves the chain and the declared hashes. It does
+not prove that a live text is still the text that was journaled. That is proved
+when the text is resolved, and by `verify` and `verify-live`, which hash every
+live text.
+
+**Fence against older engines.** The head's state field carries a `v3:` prefix.
+An engine that predates references compares that field with its own idea of the
+state, finds a mismatch and refuses to write, instead of appending changes this
+journal could not replay. The first write by the current code sets the fence.
+Journals from before the per-node hash are checked against their whole-state
+digest once and then migrate in the same step. Neither step can be undone
 without restoring a backup.
+
+## Namespace lock
+
+Journaled writes and canonical identity resolution serialise on one lock per
+namespace, taken by writing the `MemorySpace` node. A transaction takes it once.
+Writing the node again while another writer is queued on it makes Neo4j report a
+deadlock and kill the waiting transaction, which a revision or a stage of several
+batches would otherwise cause at every step.
+
+## Name lookup
+
+Neo4j cannot index a list property, so each name in an entity's alias list is
+mirrored as a `MemoryAlias` node that the engine finds by index. The alias list
+stays the journaled record. The alias nodes are derived, sit outside the journal,
+and `aliases rebuild` recreates them from the lists at any time.
+
+Finding the entities a transcript mentions matches on word boundaries, and an
+underscore separates words. `atlas` inside `atlas_api_key` is a mention. Missing
+it would make the extractor invent a new key for an entity that exists.
+
+A namespace written before the alias nodes keeps using the older list scans
+until `aliases rebuild` has run once. A namespace with no entities switches on
+its first write. Every writer must run the current code before the rebuild. An
+older writer adds entities without alias nodes, and lookups would then miss
+them. `memory_status.entity_names` shows `indexed`, `lookup_nodes` and
+`listed_names`. Fewer nodes than names means something wrote entities without
+the lookup, and the rebuild is due again.
 
 ## Confirming an uncertain fact
 
@@ -367,5 +482,9 @@ confirmation time, the note, and a date: the one given, or the time the cited
 message was written. Recall then treats it as established from that date, and it
 competes for its slot like any confirmed fact. The confirmation is a journaled
 change to that one fact, so knowledge as of an earlier change still shows the doubt,
-and `memory_retract` takes the fact out again. Only an uncertain fact that has not
-been retracted can be confirmed.
+and `memory_retract` takes the fact out again. Retracting also removes the
+confirmation, so a fact that is ever committed again returns as it was first
+learned. Only an uncertain fact that has not been retracted can be confirmed. A
+date in the future is refused, and a fact with no dated message needs an explicit
+date. A confirmed fact fulfils a plan the way any established fact does. Compact
+recall marks it `confirmed_by_user`.

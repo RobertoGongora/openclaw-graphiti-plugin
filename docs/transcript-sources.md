@@ -44,7 +44,10 @@ counting pending and failed episodes whose retry time has come and leaving out
 quarantined ones. The scan resumes after the last file it examined, and a fully
 fed file is stamped on its feed node so a restart skips it without parsing.
 All staging pauses while the model provider is unavailable or a namespace fault
-is open. See
+is open. A file is identified by `LABEL:relative/path` under its transcript root,
+not by its absolute path, so a changed mount point does not feed it again. Intake
+stages nothing while older feeds cannot be named under the current roots; see
+[feed identity](ingestion-pipeline.md#feed-identity). See
 [ingestion pipeline](ingestion-pipeline.md#intake).
 Source files must remain available until intake has caught up.
 
@@ -136,7 +139,10 @@ and `GRAPH_MEMORY_TAG`. The template defaults to eight consumers
 - Bolt: bolt://127.0.0.1:27687 (user `neo4j`, `NEO4J_PASSWORD`)
 - MCP: http://127.0.0.1:8766/mcp (private token; namespace `transcripts`)
 
-Set the paths/token named in the Compose file; mount sources read-only. Do not
+Set the paths/token named in the Compose file; mount sources read-only. Keep the
+container paths `/sessions/claude` and `/sessions/codex` as they are. Their last
+component is the label in every feed key, and the daemon refuses two different
+directories under one label. Do not
 mount model-worker-generated session directories, which would ingest extraction
 prompts and outputs recursively.
 
@@ -260,6 +266,8 @@ extraction conflicts and damaged checkpoints pause immediately. A journal
 mismatch or changed engine files are faults of the namespace or process, so no
 episode is charged or paused for them. A batch whose new messages cannot carry
 a fact is committed empty without a model call (`skipped: no_claim_in_focus`).
+That includes a batch whose only new messages are tool results: a fact must cite
+a new user assertion or assistant report.
 The full rules are in [ingestion pipeline](ingestion-pipeline.md). Source-role validation errors now carry specific diagnostics
 and correction feedback instead of being classified as unknown failures.
 

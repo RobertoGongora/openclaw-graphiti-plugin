@@ -36,8 +36,11 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-`.env.example` documents every variable the Compose files read. Both stacks
-refuse to start without `NEO4J_PASSWORD`.
+`.env.example` documents every variable the Compose files read. The personal
+stack starts with the default password and token `graph-memory`, and its services
+stop with instructions until you change both or set
+`MEMORY_ALLOW_DEFAULT_PASSWORD=1` for a throwaway graph. The transcripts stack has
+no defaults.
 
 The MCP endpoint is `http://127.0.0.1:8765/mcp`. `serve` defaults to stdio for
 clients that launch subprocesses. See [MCP requests and client setup](docs/mcp.md).
@@ -140,7 +143,9 @@ Knowledge changes are journaled atomically under `audit:<namespace>`. Ordinary
 recall uses the current graph; optional `known_at` or `at_change` inputs reconstruct
 past identities, facts, corrections, and published insights. `as_of` remains the
 event-time cutoff. Existing data starts with a dated baseline, not invented past
-history. A write journals only the nodes it changes. [History commands and
+history. A write journals only the nodes it changes, and long source text is
+journaled by hash and read back from the live node when needed. Once the current
+code has written to a namespace, older engines refuse to write to it. [History commands and
 examples](docs/history.md) describe the routine `verify-live` check, the full
 audit, checkpoints and read-only
 replay into a separate namespace.
@@ -236,6 +241,8 @@ automatically. See [revision workflow](docs/revisions.md).
 | `MEMORY_INTAKE_QUEUE` | `32` due episodes at which transcript intake stops staging |
 | `MEMORY_INTAKE_FILES` | `4` files with work that one transcript scan may open |
 | `MEMORY_JOURNAL_AUDIT` | `0` (off). `N` checks every Nth journal write against the whole graph |
+| `MEMORY_FEED_ACCEPT_UNMATCHED` | Unset. `1` lets transcript intake continue when older feeds cannot be matched to the current roots. It can stage known sessions a second time; see [operations](docs/operations.md#feed-identity) |
+| `MEMORY_ALLOW_DEFAULT_PASSWORD` | Unset. `1` accepts the default `graph-memory` password and token of the personal stack for a throwaway graph |
 
 `.env.example` is the reference for the Compose variables. `graph-memory --version`
 prints the package version and the engine identity. CLI failures exit with 2 for

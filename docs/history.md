@@ -30,7 +30,8 @@ graph-memory --namespace personal history verify-live
 # Full audit: the whole hash chain, then the live graph against its reconstruction.
 # Holds the namespace lock and reads every event: run it in a maintenance window.
 graph-memory --namespace personal history verify
-# Embed the current state so historical reads replay from here (maintenance action).
+# Record the current state so historical reads replay from here. The daemon
+# takes one when it is due; by hand it is a maintenance action.
 graph-memory --namespace personal history checkpoint
 # Query the graph as it stood after a particular change.
 graph-memory --namespace personal recall Atlas --at-change 10
@@ -42,26 +43,50 @@ graph-memory --namespace personal history replay --at-change 10 --target replay:
 ```
 
 Use change numbers and dates actually present in your journal; the examples above
-are illustrative. `history snapshot` returns full private evidence, while `history
-list` returns only change metadata. `history init` explicitly establishes a baseline
+are illustrative. `history snapshot` returns the reconstructed nodes, which are
+private. Long write-once text (an episode payload, a message or an artifact
+observation of 128 characters or more) is printed as a `{"$ref": sha256}`
+reference, not as the text. The text lives on the live node; `history replay`
+and historical recall resolve and check it. `history list` returns only change
+metadata. `history init` explicitly establishes a baseline
 for an existing namespace and is idempotent.
 
 ## How the journal is written
 
-A stage, commit, retract or merge journals only the nodes it changes. The state
-hash is a sum of per-node hashes that does not depend on order, so such a write
-updates it without reading the rest of the graph. Dream and revision writes still
-capture the whole namespace.
+A stage, commit, retract, confirm, merge or revision promotion journals only the
+nodes it changes. The state hash is a sum of per-node hashes that does not depend
+on order, so such a write updates it without reading the rest of the graph. Dream
+writes still capture the whole namespace.
 
-Only a baseline and an explicit `history checkpoint` embed the full state. There
-are no periodic snapshots. A historical read starts at the latest checkpoint at
-or before the requested change and replays the differences, checking every hash
-on the way. After a long run of changes, a checkpoint shortens those reads.
-Snapshots that earlier versions embedded every 100 changes remain readable.
+Events are written in format version 3. Write-once text is journaled as a sha256
+reference and read back from the live node, checked, only when a reader needs
+it. Each change carries the node's hash, and for a node holding a reference a
+second `shape` hash that replay recomputes without the text. Older events stay
+readable, and a chain that mixes versions replays.
+
+Only a baseline and a checkpoint carry the full state, as compressed parts of
+about 4 MB (`MemorySnapshotPart` nodes) whose hashes sit in the chained event.
+A historical read starts at the latest checkpoint at or before the requested
+change and replays one event at a time. A checkpoint is due after 64 MB of
+changes (or the size of the last checkpoint, if larger) or 2,000 events. The
+daemon takes it between scans and logs `journal_checkpoint`.
+
+## What each command proves
+
+| Command | Reads | Proves |
+| --- | --- | --- |
+| `history snapshot`, historical recall | The latest checkpoint and the events after it | The hash chain from that checkpoint, the checkpoint parts, every declared node and shape hash, and the state hash of every event. It does not read write-once text, so it does not prove that a live text is unchanged |
+| `history replay` | The same, plus every referenced text | The above, and that each text copied into the replay matches its journaled hash |
+| `history verify-live` | The live graph, streamed | That the live graph, including every live text, hashes to the journal head. It does not read the history |
+| `history verify` | Every event, then the live graph node by node | The whole chain from change 0, the reconstruction from the latest checkpoint, and that every live property equals the reconstruction, with referenced text compared by hash |
+| `history checkpoint` | The live graph, streamed, before writing | The same comparison as `verify-live`. A mismatch stops it before any part is written, unless `--accept-live` is given |
+
+`verify-live` and `verify` hold the namespace lock while they run. `verify-live`
+takes seconds. `verify` takes time in proportion to the number of events.
 
 A write that touches a few nodes cannot notice a change made elsewhere outside
 the journal. Untracked writes are detected by `history verify-live`, by
-`history verify`, by `history checkpoint`, by any full-capture write, and by the
+`history verify`, by every checkpoint, by any full-capture write, and by the
 sampled audit: `MEMORY_JOURNAL_AUDIT=N` compares the streamed live graph with the
 journal head on every Nth write (`1` every write, `0` off). `verify-live` is the
 routine check. `verify` stays the full audit for a maintenance window.
@@ -110,9 +135,13 @@ knowledge properties directly in Cypher diverges from recorded history. The next
 `verify-live`, verify, checkpoint, full-capture write or sampled audit detects it, and journaled
 writes that detect it stop until the discrepancy is resolved.
 
-Journals written before the per-node state hash migrate on the first write by the
-current code. From then on an older engine fails its own state check and refuses
-to write to that namespace. Stop every old writer before the first new write, and
-treat the migration as irreversible without the backup. Keep the original backup and
+The first write by the current code fences the journal: the head's state field
+gets a `v3:` prefix, and a journal from before the per-node state hash migrates
+in the same step. An engine that predates references then fails its own state
+check and refuses to write to that namespace. Rolling back to an older image
+therefore gives a stack that can read current facts but cannot ingest, retract,
+confirm or merge, and whose historical reads fail on version 3 events. A real
+rollback is a restore of the backup taken before the deploy. Stop every old
+writer before the first new write. Keep the original backup and
 validated image identifiers with the deployment record. Retrying an existing
 source does not create a new journal entry unless its knowledge state changes.

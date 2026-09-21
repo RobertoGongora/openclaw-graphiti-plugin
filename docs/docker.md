@@ -19,8 +19,10 @@ or additional Python visualization library is required. The `eval` build target 
 
 1. Copy `.env.example` to `.env`. It documents every variable the Compose files
    read. Set `MEMORY_BANK_PATH` to an existing directory, and replace
-   `NEO4J_PASSWORD` and `MEMORY_HTTP_TOKEN` with random private values. Compose
-   refuses to start without them. Keep `.env` private.
+   `NEO4J_PASSWORD` and `MEMORY_HTTP_TOKEN` with random private values. Without
+   an `.env` both default to `graph-memory`, and the services then stop with
+   instructions until you change them, or until `MEMORY_ALLOW_DEFAULT_PASSWORD=1`
+   accepts the default for a throwaway graph. Keep `.env` private.
 2. Build: `docker compose build`.
 3. Authenticate the worker: `docker compose run --rm --no-deps --entrypoint codex worker login --device-auth`.
 4. Start: `docker compose up -d`.
@@ -71,7 +73,10 @@ read-only. For Claude's project memory bank, preserve a path ending in
 `.claude/projects`; the scanner selects only `*/memory/*.md`. A general bank root
 recursively includes `.md` files. Explicit files may also be `.txt` or `.jsonl`.
 Use `--transcripts /sessions` for ongoing append-only Claude/Codex JSONL sessions;
-this uses durable append cursors and skips an unfinished final line.
+this uses durable append cursors and skips an unfinished final line. With
+`--source-records` each root gets a label from its name, or from `LABEL=PATH`,
+and files are identified by `LABEL:relative/path`. Keep labels and roots stable;
+see [feed identity](operations.md#feed-identity).
 
 **When moving an existing installation, preserve the original absolute source
 paths inside the container.** Source identity includes its path. Mounting the

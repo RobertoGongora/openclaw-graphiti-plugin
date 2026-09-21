@@ -21,8 +21,10 @@ checkout, a branch switch or a `git clean` then cannot change or remove what a
 running stack depends on, and the two stacks cannot pick up each other's values.
 Variables prefixed `TRANSCRIPT_` belong to `compose.transcripts.yaml` only.
 
-Neo4j requires a password. Both stacks refuse to start without `NEO4J_PASSWORD`,
-and the transcripts stack also refuses to start without `GRAPH_MEMORY_TAG`.
+Neo4j requires a password. The transcripts stack refuses to start without
+`NEO4J_PASSWORD`, `TRANSCRIPT_MCP_TOKEN` and `GRAPH_MEMORY_TAG`. The personal stack
+falls back to the password and token `graph-memory`, and its services then stop
+with instructions until both are changed; see [Secrets](#secrets).
 
 | Stack | Bolt | MCP | Browser (profile `browser`) |
 | --- | --- | --- | --- |
@@ -93,16 +95,84 @@ would start refusing `memory_ingest`, `memory_retract` and `memory_merge`. The
 worker is the service that writes without being asked, which is why it starts
 last and by name.
 
+## Deploying the reference journal, name lookup and feed identity release
+
+This release changes the journal format, adds the indexed name lookup and
+changes how transcript files are identified. Follow the general steps above with
+this order. Do not skip or reorder steps.
+
+1. Stop every writer on older code: `gm stop worker mcp inventory`. An older
+   writer after step 2 would be refused by the journal, and an older writer after
+   step 4 would add entities that the name lookup cannot find.
+2. Deploy the new tag with the transcript mounts unchanged: the same host
+   directories at the same container paths (`/sessions/claude`,
+   `/sessions/codex`). Feeds staged before this release are stored under those
+   absolute paths, and the first scan names them from the paths. Change mounts
+   in a later deploy, never in this one.
+3. Bring up `neo4j`, then `mcp` and `inventory`, then the worker, by name. The
+   first transcript scan must log `feed_identity` with `unmatched: 0` and
+   `conflicts: 0`:
+
+   ```sh
+   gm logs worker | grep -E 'feed_identity|feed_identity_blocked'
+   ```
+
+   If it logs `feed_identity_blocked` instead, nothing is being staged. See
+   [Feed identity](#feed-identity). Extraction of the existing queue continues
+   meanwhile.
+4. Rebuild the name lookup. It takes seconds:
+
+   ```sh
+   gm exec worker graph-memory --namespace transcripts aliases rebuild
+   ```
+
+   Until it has run, lookups use the older list scans.
+   `memory_status.entity_names.indexed` is `true` afterwards, and `lookup_nodes`
+   matches `listed_names`.
+5. Take one checkpoint by hand. Expect 20 to 40 seconds on a large namespace,
+   during which writers wait:
+
+   ```sh
+   gm exec worker graph-memory --namespace transcripts history checkpoint
+   ```
+
+   Until a version 3 checkpoint exists, every historical read loads the old
+   checkpoint, which is one string of several hundred megabytes.
+6. Run the routine check:
+
+   ```sh
+   gm exec worker graph-memory --namespace transcripts history verify-live
+   ```
+
+Irreversible in this release:
+
+- Older engines can never write to the namespace again. The first write by the
+  new code puts a `v3:` prefix on the journal head, and an older engine refuses
+  to write when it sees it.
+- Feed keys, once stamped, are the identity of every transcript file. They were
+  derived from the labels and roots in force at the first scan.
+
 ## Rollback
 
 Set `GRAPH_MEMORY_TAG` back to the previous tag and bring the services up by
 name again. This is safe when the release changed only operational code.
 
+After a release that fenced the journal, switching the tag back gives a stack
+that answers current recall but cannot write. Ingest, retract, confirm and merge
+are refused, the worker reports a journal mismatch, and historical reads fail on
+version 3 events. Rollback then means restoring the backup taken before the
+deploy and losing the writes made since, or rolling forward with a fix.
+
 ## What is irreversible
 
-- **Journal format.** After the first write by a release that migrated the
-  journal, older images cannot write to that namespace. Roll forward, or restore
-  the backup taken before the deploy and lose the writes made since.
+- **Journal format.** After the first write by the current code, the journal head
+  is fenced and older images can never write to that namespace again. Roll
+  forward, or restore the backup taken before the deploy and lose the writes made
+  since.
+- **Feed keys.** Once a feed is stamped with its source key, that key names the
+  file for good. Renaming a label, or adding a root below an existing one,
+  changes the key that files would get and makes known files look new. See
+  [Feed identity](#feed-identity).
 - **Completed episodes.** A new engine identity releases quarantined episodes
   and ignores cached extractions made by the old one. Returning to the old tag
   restores the old identity, but episodes that the new engine already completed
@@ -153,10 +223,13 @@ Every line is one JSON event with a `ts` field in Unix seconds.
 | --- | --- |
 | `daemon_start` | `engine`, `workers`, `settings`, `reclaimed_leases` |
 | `bank_scan` | `files`, `changed_files`, `staged`, `existing`, `failures`, or `skipped: queue_paused` |
-| `transcript_scan` | `feeds` (files that staged work), `seconds` |
+| `transcript_scan` | `feeds` (files that staged work, or a `feed_identity_blocked` or `feed_identity_refused` entry), `seconds` |
 | `processed` | `status`, `timings`, `model_calls`, `cached`, `skipped`, `claim_seconds`, and on failure `diagnostic`, `failed_attempts`, `retry_after`, `quarantined`, `validation_failures` |
 | `provider_unavailable`, `provider_recovered` | `open`, `reason`, `retry_in` |
-| `namespace_fault`, `namespace_recovered` | Same fields. The reason is `journal_state_mismatch` or `engine_changed` |
+| `namespace_fault`, `namespace_recovered` | Same fields. The reason is `journal_state_mismatch`, `engine_changed` or `database_unavailable` |
+| `journal_checkpoint` | `seconds`, `sequence`, `records`, `accepted_untracked_state` |
+| `journal_checkpoint_error` | `error`, `diagnostic`. Reported once, then not retried for an hour |
+| `feed_identity` | `feeds`, `stamped`, `already_stamped`, `unmatched`, `conflicts` |
 | `worker_error`, `heartbeat_error` | `error`, and `diagnostic` for a worker |
 | `draining` | The daemon is finishing active jobs |
 | `daemon_exit` | `reason`, `max_rss` (kilobytes on Linux, bytes on macOS) |
@@ -230,9 +303,12 @@ It is charged to that episode as `infra_failures`, and three of them quarantine
 it with reason `model_timeout` or `model_invocation_failed`.
 
 A `namespace_fault` event is a different pause. Its reason is
-`journal_state_mismatch` (see [Journal maintenance](#journal-maintenance)) or
-`engine_changed`, after which the daemon exits and the supervisor restarts it
-on the new code. `namespace_recovered` marks the end of the pause.
+`journal_state_mismatch` (see [Journal maintenance](#journal-maintenance)),
+`database_unavailable`, or `engine_changed`, after which the daemon exits and the
+supervisor restarts it on the new code. `database_unavailable` covers a lock wait
+that ran out, a deadlock and a dropped connection. No episode is charged. It
+usually clears with the next probe. If it persists, look at Neo4j's memory and at
+long transactions such as a `history verify` in progress. `namespace_recovered` marks the end of the pause.
 
 ## Journal maintenance
 
@@ -251,10 +327,15 @@ whenever a mismatch is suspected. It refuses a journal that has not yet migrated
 to the per-node hash. One write or a checkpoint migrates it. The sampled audit
 (`MEMORY_JOURNAL_AUDIT`) runs the same comparison during normal writes.
 
-**Full audit in a window.** `history verify` also reads every journal event,
-checks the whole hash chain and captures the whole graph. On a large namespace it
-pauses all writers for a long time and needs memory in proportion to the graph.
-Stop the worker first and run it when nobody is waiting on ingestion.
+**Full audit in a window.** `history verify` also reads every journal event from
+change 0, checks the whole hash chain, rebuilds the state from the latest
+checkpoint and compares the live graph with it node by node, hashing every
+referenced text. It holds the reconstructed state in memory without the long
+texts, and reads events 25 at a time. On a journal that still contains snapshots
+embedded by older versions those batches are large. It holds the namespace lock
+for as long as the history takes to read. Stop the worker first and run it when nobody is waiting on
+ingestion. What each command proves is listed in
+[history](history.md#what-each-command-proves).
 
 **Audit cadence.** The transcripts stack defaults to `MEMORY_JOURNAL_AUDIT=503`.
 Every 503rd journal write streams the live graph and compares its hash with the
@@ -262,13 +343,20 @@ journal head. A lower number finds an untracked write sooner and costs more.
 `1` checks every write and is meant for tests. `0` turns the audit off.
 
 **Checkpoint cadence.** Historical reads replay from the latest checkpoint, so
-their cost grows with the number of changes since then. A checkpoint embeds the
-full state in one event. On the transcripts graph that event is hundreds of
-megabytes, which is why `TRANSCRIPT_NEO4J_TX_MEMORY_MAX` defaults to 2g and must
-not go below 1g.
-Take a checkpoint after a bulk import finishes and before an upgrade, with the
-worker stopped. Do not schedule it frequently. Each one adds its full size to
-the store for good.
+their cost grows with the number of changes since then. The daemon takes a
+checkpoint between scans when one is due: after 64 MB of changes, or the size of
+the last checkpoint if that is larger, or after 2,000 events. It logs
+`journal_checkpoint` with `seconds`, `sequence` and `records`. Workers wait on the
+namespace lock while it runs. A checkpoint is stored as compressed parts of about
+4 MB, with long write-once text left out, so it is far smaller than the single
+strings of several hundred megabytes that older versions wrote.
+
+A checkpoint compares the live graph with the journal before it writes. If they
+differ, the daemon logs `journal_checkpoint_error` once, with diagnostic code
+`journal_state_mismatch`, and does not try again for an hour. Treat that event
+like a `namespace_fault` and follow the recovery below. A checkpoint by hand is
+still useful after a bulk import and before an upgrade. Each one stays in the
+store for good.
 
 **Recovering from a journal mismatch.** The worker log shows `namespace_fault`
 with reason `journal_state_mismatch`. The message is "Graph differs from its
@@ -297,6 +385,60 @@ change is one you would undo if you could, or as a routine fix to make the
 error go away. It makes the journal vouch for a state it never recorded.
 History before that checkpoint stays readable, but the step from the previous
 event to the checkpoint is not explained by any recorded change.
+
+## Feed identity
+
+A transcript file is identified by `LABEL:relative/path`, where the label comes
+from the transcript root. The rules are in
+[ingestion pipeline](ingestion-pipeline.md#feed-identity). The worker logs three
+events about it inside `transcript_scan.feeds`, and `feed_identity` on its own
+line.
+
+| Event | Meaning | Action |
+| --- | --- | --- |
+| `feed_identity` | Older feeds were stamped with their keys on the first scan | Check `unmatched: 0` and `conflicts: 0` |
+| `feed_identity_blocked` | Some older feeds are stored under paths outside the current roots. Intake stages nothing | Stamp them, below |
+| `feed_identity_refused` | One file is new by key and by path but has the name of a known feed. It was not read | Find out why the file moved. Fix the mount or the label so it gets its old key |
+
+To unblock, stamp the feeds with the roots they were written under. The path in
+`LABEL=PATH` is the prefix of the stored paths. Matching is on the text of the
+path, so it need not exist where the command runs:
+
+```sh
+gm exec worker graph-memory --namespace transcripts feeds stamp \
+  --root claude=/sessions/claude --root codex=/sessions/codex
+```
+
+The output counts `feeds`, `stamped`, `already_stamped`, `unmatched` and
+`conflicts`. The command changes no feed id and can be repeated. The next scan
+looks again and continues when nothing is unmatched. A conflict means two feeds
+claim one file, and a person has to decide which one is kept.
+
+`MEMORY_FEED_ACCEPT_UNMATCHED=1` makes intake continue regardless. Every file it
+cannot match then gets a new feed, so sessions the graph already holds are staged
+and extracted again under new ids, with duplicate facts as the result. Use it
+only when the unmatched feeds belong to files that are gone for good. The Compose
+files do not pass this variable to the worker.
+
+Do not rename a label, and do not add a root below an existing root, without
+planning it as a migration. Both change the key that existing files would get.
+The daemon validates its roots at start and exits with a message when two
+different directories share a label. Give one of them as `LABEL=PATH`.
+
+## Name lookup
+
+```sh
+gm exec worker graph-memory --namespace transcripts aliases rebuild
+```
+
+The rebuild makes the `MemoryAlias` nodes equal to the entities' alias lists. It
+runs in batches under the namespace lock, takes seconds, can be repeated, and
+reports `entities`, `aliases`, `created` and `removed`. `repair` also runs it.
+Run it once for a namespace written before the lookup existed, after every
+writer is on the current code. Run it again when `memory_status.entity_names`
+shows fewer `lookup_nodes` than `listed_names`, which means an older process
+wrote entities. The alias nodes are outside the journal, so the rebuild creates
+no journal entries and `verify-live` is unaffected.
 
 ## Scaling workers and intake
 
@@ -339,9 +481,33 @@ size would cache data nobody reads.
 | Variable | Default | Reason |
 | --- | --- | --- |
 | `TRANSCRIPT_NEO4J_PAGECACHE` | 2g | Covers the hot set |
-| `TRANSCRIPT_NEO4J_HEAP_MAX` | 4g | Full-capture writes and checkpoints build large states in memory |
-| `TRANSCRIPT_NEO4J_TX_MEMORY_MAX` | 2g | A checkpoint event is one string of several hundred megabytes. Do not go below 1g |
+| `TRANSCRIPT_NEO4J_HEAP_MAX` | 4g | Dream writes capture the namespace, and reading a checkpoint written by an older version loads one very large string |
+| `TRANSCRIPT_NEO4J_TX_MEMORY_MAX` | 2g | The same old checkpoint events are one string of several hundred megabytes. Do not go below 1g while they are still read |
 | `TRANSCRIPT_NEO4J_MEM_LIMIT` | 8g | Heap max plus page cache plus about 2 GB of JVM overhead |
+
+**Relaxing heap and transaction memory.** The 4 GB heap and 2 GB transaction
+memory exist because of those old single-string checkpoints. From version 3 a
+checkpoint is written and read in parts of about 4 MB, and long text is not in
+it. Once a version 3 checkpoint exists, historical reads no longer load the old
+one, and the two values can come down. Decide from evidence, not from the
+release note:
+
+1. Confirm the checkpoint: a `journal_checkpoint` event in the worker log, or the
+   output of the manual `history checkpoint`.
+2. Run one historical read (`recall NAME --at-change N` with a recent `N`) and
+   `history verify-live`, and watch the Neo4j container's memory while they run.
+3. Lower one value at a time in the env file, for example transaction memory to
+   1g first, then heap to 2g. Recreate Neo4j with the long stop timeout.
+4. Watch for `MemoryPoolOutOfMemoryError` in the Neo4j log, for
+   `database_unavailable` faults and for failed `journal_checkpoint` events over
+   a day of normal ingestion, including one automatic checkpoint. Go back up if
+   any appear.
+
+A historical read of a change before the first version 3 checkpoint still loads
+an old checkpoint and needs the old values. So does `history verify`: it reads
+every event from change 0, in batches of 25, and that includes every old event
+with an embedded snapshot. Raise the values again for the window in which you
+run it. The Compose defaults are unchanged.
 
 Both stacks set a 60 s lock acquisition timeout and a 10 minute transaction
 timeout, so one stuck lock holder cannot block every writer indefinitely.

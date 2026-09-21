@@ -108,7 +108,7 @@ consumer can launch `serve --read-only`. This filters the catalog and rejects
 mutating calls at the server, independently of the model's tool permissions.
 
 The public catalog contains `memory_recall`, `memory_latest`, `memory_evidence`,
-`memory_search_entities`, `memory_status`, `memory_ingest`, `memory_retract`, `memory_merge`, and `memory_render`. Internal extraction and dream calls are
+`memory_search_entities`, `memory_status`, `memory_ingest`, `memory_retract`, `memory_confirm`, `memory_merge`, and `memory_render`. Internal extraction and dream calls are
 rejected by MCP and remain accessible through the Python engine and CLI.
 `memory_ingest` accepts original messages and always queues them; its public schema
 has no `extract` switch and its response never delegates processing back to the agent.
@@ -135,12 +135,22 @@ The scoped server supplies namespace automatically. Supply an entity name in `en
 facts. `detail:"full"` retains access to the legacy record format.
 
 
+`memory_confirm` records that the user vouches for an uncertain fact. It takes
+`fact_id`, a `note` in the user's words and an optional `valid_at`, which
+defaults to the time of the earliest dated message the fact cites. It refuses a
+fact that is not uncertain, a retracted fact and a future date. The fact keeps its
+status and evidence. Retracting it later also removes the confirmation. It is a
+mutating tool, so a read-only server does not offer it.
+
 `memory_status` is a read-only operational check. Call it with `{}` on a scoped
 server (or `{"namespace":"personal"}` on an unbound server). It returns:
 
 - `workers`: up to five worker heartbeats with worker count, heartbeat age,
   `alive` (a heartbeat younger than 180 seconds; the daemon beats every 30), `same_engine`, and `provider_unavailable` with its reason while the
   provider breaker is open.
+- `entity_names`: whether the indexed name lookup is in use (`indexed`), and the
+  counts `lookup_nodes` and `listed_names`. Fewer nodes than names means an older
+  process wrote entities without the lookup; run `graph-memory aliases rebuild`.
 - Episode totals and counts by persisted status (`pending`, `complete`, `failed`).
 - Active extraction leases, work eligible for a worker, retry-delayed work,
   quarantined episodes, cached extractions, and expired leases. Expired leases overlap the queued/retry-delayed counts. Active
