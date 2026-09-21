@@ -147,7 +147,10 @@ def test_legacy_full_digest_journal_migrates_and_replays(graph):
     store.stage(transcript)
     migrated = head(store, ns)
     assert migrated["journal_sequence"] == 0
-    assert migrated["journal_set_hash"] == migrated["journal_state_hash"] != legacy["hash"]
+    # The state field is fenced: an older engine compares it with its own hash of the
+    # state, never finds them equal, and refuses to write.
+    assert migrated["journal_state_hash"] == "v3:" + migrated["journal_set_hash"]
+    assert migrated["journal_set_hash"] != legacy["hash"]
     fact(store, ns, "two", target=PG, day=12)
     store.retract(ns, receipt["fact_ids"][0], "superseded")
     fact(store, ns, "three", day=14)  # scoped from here on

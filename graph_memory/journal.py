@@ -99,6 +99,24 @@ def holds_ref(label, node):
     return any(is_ref(dict.get(node, key)) for key in IMMUTABLE.get(label, ()))
 
 
+# Written in front of the head's state hash. An engine that predates references
+# compares that field with its own idea of the state, finds a mismatch and stops,
+# instead of appending changes this journal could not replay.
+MISMATCH = "Graph differs from its journal; investigate an untracked write before continuing"
+FENCE = "v3:"
+CHECKPOINT_EVENTS = 2000
+
+
+def migrated(head):
+    """The head carries the per-node state hash (with or without the fence)."""
+    current = head.get("journal_set_hash")
+    return (
+        "journal_sequence" in head
+        and current is not None
+        and head.get("journal_state_hash") in (current, FENCE + current)
+    )
+
+
 class Bodies:
     """Write-once bodies read back from the live graph and checked against their refs."""
 
@@ -141,11 +159,15 @@ class Bodies:
             yield props
 
     def one(self, label, node, key):
-        return self.store.transaction(
+        return self.store.read(
             lambda tx: next(
                 self.resolved(tx, label, [{"id": dict.get(node, "id"), key: dict.get(node, key)}])
             )
         )[key]
+
+    def plain(self, label, node):
+        """The node with its bodies, for the rare reader that must hash it again."""
+        return self.store.read(lambda tx: next(self.resolved(tx, label, [dict(node)])))
 
 
 class Node(dict):
@@ -153,15 +175,20 @@ class Node(dict):
     callers written for embedded bodies keep working; items() and equality see
     the reference."""
 
-    __slots__ = ("bodies", "label")
+    __slots__ = ("bodies", "label", "fetched")
 
     def __init__(self, label, bodies):
         super().__init__()
-        self.label, self.bodies = label, bodies
+        self.label, self.bodies, self.fetched = label, bodies, {}
 
     def __getitem__(self, key):
         value = super().__getitem__(key)
-        return self.bodies.one(self.label, self, key) if is_ref(value) else value
+        if not is_ref(value):
+            return value
+        # Write-once, so a body fetched and checked once stays right for this node.
+        if value[REF] not in self.fetched:
+            self.fetched[value[REF]] = self.bodies.one(self.label, self, key)
+        return self.fetched[value[REF]]
 
     def get(self, key, default=None):
         return self[key] if key in self else default
@@ -265,6 +292,11 @@ def difference(before, after):
             # hand: replay keeps the running state hash without reading them.
             if new is not None:
                 change["hash"] = hexhash(element_hash(label, new))
+                shape = referenced(label, new)
+                if shape != new:
+                    # The hash above cannot be recomputed without the bodies. This one
+                    # can, so replay still proves it rebuilt the node the writer saw.
+                    change["shape"] = digest([label, key, shape])
             changes.append(change)
     return changes
 
@@ -307,9 +339,16 @@ def advance(state, sealed, running, event, bodies=None):
             continue
         node = state[label][key]
         if holds_ref(label, node):
-            if "hash" not in change:
+            if "shape" in change and digest([label, key, dict(node)]) != change["shape"]:
                 raise ValueError(REPLAY)
-            new = sealed[(label, key)] = int(change["hash"], 16)
+            if "hash" in change:
+                new = int(change["hash"], 16)
+            elif bodies is not None:
+                # Written by an engine that knew no references: hash it the long way.
+                new = element_hash(label, bodies.plain(label, node))
+            else:
+                raise ValueError(REPLAY)
+            sealed[(label, key)] = new
         else:
             new = element_hash(label, node)
             if change.get("hash", hexhash(new)) != hexhash(new):
@@ -358,14 +397,17 @@ class Journal:
             "kind:$kind,recorded_at:$at,recorded_us:$us,payload:$payload,hash:$hash,"
             "checkpoint:$checkpoint}) "
             "WITH e MATCH (s:MemorySpace {id:$ns}) SET s.journal_sequence=$seq,"
-            "s.journal_hash=$hash,s.journal_us=$us,s.journal_state_hash=$state,"
-            "s.journal_set_hash=$state,s.journal_checkpoint_bytes="
+            "s.journal_hash=$hash,s.journal_us=$us,s.journal_state_hash=$fence+$state,"
+            "s.journal_set_hash=$state,s.journal_checkpoint_sequence="
+            "CASE WHEN $checkpoint THEN $seq ELSE s.journal_checkpoint_sequence END,"
+            "s.journal_checkpoint_bytes="
             "CASE WHEN $checkpoint THEN $size ELSE s.journal_checkpoint_bytes END,"
             "s.journal_delta_bytes="
             "CASE WHEN $checkpoint THEN 0 ELSE coalesce(s.journal_delta_bytes,0)+$size END",
             id=digest(["journal", namespace, sequence]),
             audit="audit:" + namespace,
             ns=namespace,
+            fence=FENCE,
             seq=sequence,
             kind=kind,
             at=event["recorded_at"],
@@ -482,7 +524,14 @@ class Journal:
                     if not row or hashlib.sha256(row["data"]).hexdigest() != part["sha256"]:
                         raise ValueError("Invalid snapshot part")
                     label = part["label"]
-                    for line in zlib.decompress(row["data"]).decode().split("\n"):
+                    inflater = zlib.decompressobj()
+                    raw = inflater.decompress(row["data"], part["bytes"] + 1)
+                    if len(raw) != part["bytes"] or inflater.unconsumed_tail:
+                        raise ValueError("Snapshot part size differs from its event")
+                    lines = raw.decode().split("\n") if raw else []
+                    if len(lines) != part["records"]:
+                        raise ValueError("Snapshot part count differs from its event")
+                    for line in lines:
                         record = json.loads(line)
                         node = Node(label, bodies) if "h" in record else {}
                         node.update(record["p"])
@@ -526,12 +575,8 @@ class Journal:
         mismatch = (
             "Graph differs from its journal; investigate an untracked write before continuing"
         )
-        migrated = (
-            "journal_sequence" in head
-            and "journal_set_hash" in head
-            and head["journal_state_hash"] == head["journal_set_hash"]
-        )
-        if scoped and migrated:
+        current = migrated(head)
+        if scoped and current:
             scope = Scope(tx, namespace)
             scopes = self.store.journal_scopes()
             scopes[(id(tx), namespace)] = scope
@@ -556,7 +601,7 @@ class Journal:
         before = capture(tx, namespace)
         if "journal_sequence" not in head:
             self._baseline(tx, namespace, {}, flatten(before))
-        elif not migrated:
+        elif not current:
             # Journals written before the set hash carry a digest of the whole state.
             # Both head hashes move together, so a process still running the older
             # code stops on its own state check and cannot append to this journal.
@@ -564,7 +609,8 @@ class Journal:
                 raise ValueError(mismatch)
             tx.run(
                 "MATCH (s:MemorySpace {id:$ns}) "
-                "SET s.journal_set_hash=$hash,s.journal_state_hash=$hash",
+                "SET s.journal_set_hash=$hash,s.journal_state_hash=$fence+$hash",
+                fence=FENCE,
                 ns=namespace,
                 hash=hexhash(set_hash(before)),
             ).consume()
@@ -721,11 +767,15 @@ class Journal:
         return run(transaction) if transaction is not None else self.store.transaction(run)
 
     def checkpoint_due(self, namespace, threshold=CHECKPOINT_BYTES):
-        """Whether the deltas since the last checkpoint outweigh it. For an idle
-        moment of a worker: a checkpoint reads the namespace under its lock, so the
-        write path never asks."""
-        head = self.store.transaction(lambda tx: self._head_or_none(tx, namespace)) or {}
-        return head.get("journal_delta_bytes", 0) >= max(
+        """Whether enough change has piled up since the last checkpoint: by size, or
+        by count so that a historical read never replays more than a few thousand
+        events. A checkpoint reads the namespace under its lock, so the write path
+        never asks; the daemon does, between scans."""
+        head = self.store.read(lambda tx: self._head_or_none(tx, namespace)) or {}
+        if "journal_sequence" not in head:
+            return False
+        events = head["journal_sequence"] - head.get("journal_checkpoint_sequence", 0)
+        return events >= CHECKPOINT_EVENTS or head.get("journal_delta_bytes", 0) >= max(
             threshold, head.get("journal_checkpoint_bytes") or 0
         )
 
@@ -736,9 +786,7 @@ class Journal:
         def run(tx):
             self.store.lock(tx, namespace)
             head = self._head(tx, namespace)
-            if "journal_set_hash" not in head or head["journal_set_hash"] != head.get(
-                "journal_state_hash"
-            ):
+            if not migrated(head):
                 raise ValueError(
                     "Journal predates the streamed state hash; write once or checkpoint"
                 )
@@ -760,9 +808,13 @@ class Journal:
             head = self._head(tx, namespace)
             if "journal_sequence" not in head:
                 raise ValueError("No journal exists for this namespace")
-            if head.get("journal_set_hash") == head["journal_state_hash"]:
+            if migrated(head):
+                # Compared before anything is written: a mismatch must cost one read of
+                # the namespace, not a full set of parts that is then rolled back.
+                matches = live_hash(tx, namespace) == head["journal_set_hash"]
+                if not matches and not accept_live:
+                    raise ValueError(MISMATCH)
                 parts, total, records = self._parts(tx, namespace, elements(tx, namespace))
-                matches = hexhash(total) == head["journal_set_hash"]
             else:
                 # A journal from before the per-node hash digests the state as a whole.
                 state = capture(tx, namespace)
@@ -770,9 +822,7 @@ class Journal:
                 parts, total, records = self._parts(tx, namespace, flatten(state))
             # Raising rolls the parts back with the transaction.
             if not matches and not accept_live:
-                raise ValueError(
-                    "Graph differs from its journal; investigate an untracked write before continuing"
-                )
+                raise ValueError(MISMATCH)
             event = self._append(
                 tx,
                 namespace,

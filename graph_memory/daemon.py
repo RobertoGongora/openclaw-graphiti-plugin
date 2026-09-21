@@ -122,17 +122,26 @@ def heartbeat(service, namespace, workers, interval, breaker):
     )
 
 
-def checkpoint_when_due(service, namespace):
+def checkpoint_when_due(service, namespace, state):
     """Historical reads replay from the latest checkpoint, so one is taken whenever
     enough change has piled up since. It reads the namespace under its lock for a
-    few seconds, which is why it lives here and not on the write path."""
+    few seconds, which is why it lives here and not on the write path. A failure is
+    reported once and not retried for an hour: a journal that differs from its graph
+    will differ on the next scan too, and every attempt stalls the workers."""
     from .journal import Journal
 
+    if time.monotonic() < state.get("not_before", 0):
+        return
     journal = Journal(service.store)
-    if journal.checkpoint_due(namespace):
+    try:
+        if not journal.checkpoint_due(namespace):
+            return
         began = time.monotonic()
         result = journal.checkpoint(namespace)
         emit("journal_checkpoint", seconds=round(time.monotonic() - began, 3), **result)
+    except Exception as exc:
+        state["not_before"] = time.monotonic() + 3600
+        emit("journal_checkpoint_error", error=type(exc).__name__, diagnostic=diagnostic(exc))
 
 
 def reclaim_leases(service, namespace):
@@ -165,7 +174,7 @@ def run_daemon(
         raise ValueError("daemon requires MEMORY_LLM=codex or compatible")
     if not 1 <= workers <= 16 or interval < 1:
         raise ValueError("workers must be 1..16 and interval at least 1 second")
-    seen, feed_seen = {}, {}
+    seen, feed_seen, checkpoints = {}, {}, {}
     stop = threading.Event()
     breaker = service.breaker = Breaker()
     announced: dict[str, Any] = {"open": False}
@@ -293,10 +302,7 @@ def run_daemon(
                             )
                         except Exception as exc:
                             emit("transcript_scan_error", error=type(exc).__name__)
-                    try:
-                        checkpoint_when_due(service, namespace)
-                    except Exception as exc:
-                        emit("journal_checkpoint_error", error=type(exc).__name__)
+                    checkpoint_when_due(service, namespace, checkpoints)
                     if not futures:
                         futures = [pool.submit(consume, i + 1) for i in range(workers)]
                     if once:

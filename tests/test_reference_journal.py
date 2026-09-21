@@ -19,7 +19,7 @@ from graph_memory.journal import (
 from graph_memory.models import Extraction, Transcript, now
 from graph_memory.store import digest
 
-from .helpers import MYSQL, PG, PROJECT
+from .helpers import MYSQL, PG, PROJECT, ingest
 
 BODY = " ".join(["The quick brown fox keeps a long and unmistakable body of source text."] * 100)
 
@@ -487,3 +487,89 @@ def test_journal_growth_is_a_small_constant_per_episode(graph):
     assert journal.checkpoint_due(ns, threshold=0) is False
     assert 0 < delta_bytes() < uncompressed
     assert journal.verify(ns)["verified"]
+
+
+FACT = {"subject": PROJECT["key"], "target": MYSQL["key"], "relation": "uses_database"}
+
+
+def test_an_engine_that_predates_references_refuses_to_write(graph, tmp_path):
+    """Its changes on nodes that hold references could not be replayed, so the head is
+    fenced: the older engine finds its state check failing and stops."""
+    import os
+    import subprocess
+    import sys
+
+    store, ns = graph
+    old = tmp_path / "v2"
+    old.mkdir()
+    archive = subprocess.run(
+        ["git", "archive", "0396446", "graph_memory"], capture_output=True, cwd=os.getcwd()
+    )
+    if archive.returncode:
+        pytest.skip("the older engine's commit is not in this checkout")
+    subprocess.run(["tar", "-x", "-C", str(old)], input=archive.stdout, check=True)
+    ingest(store, ns, "one", "Atlas uses MySQL.", [PROJECT, MYSQL], [FACT])
+    script = (
+        "import os,sys\n"
+        "from graph_memory.store import GraphStore\n"
+        "from graph_memory.models import Transcript\n"
+        "s=GraphStore(os.environ['URI'],password=os.environ.get('PW') or None)\n"
+        "t=Transcript.model_validate({'namespace':os.environ['NS'],'source_id':'old','session_id':'old',"
+        "'messages':[{'id':'m1','role':'user','content':'Written by the older engine.'}]})\n"
+        "try:\n    s.stage(t)\n    print('WROTE')\nexcept ValueError as e:\n    print('REFUSED', e)\n"
+        "s.close()\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        cwd=old,
+        env={
+            **os.environ,
+            "PYTHONPATH": str(old),
+            "URI": os.environ["MEMORY_TEST_NEO4J_URI"],
+            "PW": os.environ.get("MEMORY_TEST_NEO4J_PASSWORD", ""),
+            "NS": ns,
+        },
+    )
+    assert "REFUSED" in result.stdout and "differs from its journal" in result.stdout, result
+    assert Journal(store).verify(ns)["verified"]
+
+
+def test_a_failed_checkpoint_writes_nothing_and_the_daemon_stops_retrying(graph, capsys):
+    from graph_memory.daemon import checkpoint_when_due
+    from graph_memory.service import MemoryService
+
+    store, ns = graph
+    ingest(store, ns, "one", "Atlas uses MySQL.", [PROJECT, MYSQL], [FACT])
+    store.transaction(
+        lambda tx: tx.run(
+            'CREATE (:MemoryEntity {id:$id,namespace:$ns,key:"untracked",aliases:[]})',
+            id=ns + ":x",
+            ns=ns,
+        ).consume()
+    )
+    store.transaction(
+        lambda tx: tx.run(
+            "MATCH (s:MemorySpace {id:$ns}) SET s.journal_checkpoint_sequence=-5000", ns=ns
+        ).consume()
+    )
+    assert Journal(store).checkpoint_due(ns)
+    state = {}
+    checkpoint_when_due(MemoryService(store), ns, state)
+    checkpoint_when_due(MemoryService(store), ns, state)  # latched: no second attempt
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert [e["event"] for e in events] == ["journal_checkpoint_error"]
+    assert events[0]["diagnostic"]["code"] == "journal_state_mismatch"
+    parts = store.transaction(
+        lambda tx: tx.run(
+            "MATCH (p:MemorySnapshotPart {scope:$ns}) RETURN count(p) AS n", ns=ns
+        ).single()["n"]
+    )
+    baseline = store.transaction(
+        lambda tx: tx.run(
+            "MATCH (e:MemoryChange {scope:$ns,checkpoint:true})-[:PART]->(p) RETURN count(p) AS n",
+            ns=ns,
+        ).single()["n"]
+    )
+    assert parts == baseline  # nothing new was written before the mismatch was found
