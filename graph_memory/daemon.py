@@ -9,9 +9,11 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from . import settings
 from .diagnostics import diagnostic
 from .feeds import Breaker, worker_tick
 from .follow import follow_once
+from .health import worker_id
 from .importers import memory_files, transcripts
 from .store import digest
 
@@ -92,6 +94,27 @@ def scan_bank(service, namespace, roots: list[Path], seen: dict):
 
 def emit(event, **data):
     print(json.dumps({"event": event, "ts": round(time.time(), 3), **data}), flush=True)
+
+
+def heartbeat(service, namespace, workers, interval, breaker):
+    """What the health check and memory_status read to know a worker is alive."""
+    state = breaker.state()
+    service.store.transaction(
+        lambda tx: tx.run(
+            "MERGE (w:MemoryWorker {id:$id}) SET w.namespace=$ns,w.heartbeat_at=$at,"
+            "w.interval=$interval,w.workers=$workers,w.engine=$engine,w.pid=$pid,"
+            "w.provider_open=$open,w.provider_reason=$reason",
+            id=worker_id(namespace),
+            ns=namespace,
+            at=time.time(),
+            interval=interval,
+            workers=workers,
+            engine=service.store.engine,
+            pid=os.getpid(),
+            open=state["open"],
+            reason=state["reason"],
+        ).consume()
+    )
 
 
 def reclaim_leases(service, namespace):
@@ -195,6 +218,7 @@ def run_daemon(
         pid=os.getpid(),
         workers=workers,
         engine=service.store.engine,
+        settings=settings.summary(),
         # A one-shot run may share the namespace with a live daemon; leave its leases.
         reclaimed_leases=0 if once else reclaim_leases(service, namespace),
     )
@@ -205,6 +229,7 @@ def run_daemon(
             # pool never finishes and the process hangs instead of restarting.
             try:
                 while not stop.is_set():
+                    heartbeat(service, namespace, workers, interval, breaker)
                     result = scan_bank(service, namespace, roots, seen)
                     emit("bank_scan", **result)
                     # Staging during an outage only builds a queue nobody can work.

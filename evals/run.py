@@ -184,9 +184,9 @@ def evaluate(service, runs=1):
         "runs": runs,
         "passed": bool(results)
         and all(r["passed"] for r in results)
-        and engine == engine_fingerprint()
+        and engine == engine_fingerprint(fresh=True)
         and suite == suite_fingerprint(),
-        "inputs_unchanged_during_run": engine == engine_fingerprint()
+        "inputs_unchanged_during_run": engine == engine_fingerprint(fresh=True)
         and suite == suite_fingerprint(),
         "results": results,
     }

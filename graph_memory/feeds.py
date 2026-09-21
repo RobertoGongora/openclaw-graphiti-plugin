@@ -12,6 +12,7 @@ from pathlib import Path
 
 from .importers import read_messages
 from .models import EpisodeRequest, Transcript
+from .settings import lease_seconds
 from .store import digest
 
 AGENT_INSTRUCTIONS = """Use graph-memory as your memory system. Native memories are disabled.
@@ -173,9 +174,11 @@ def worker_tick(service, namespace, limit=10):
         return {"receipts": [], "breaker": breaker.state()}
     # Several candidates in a random order: idle workers would otherwise all
     # race for the single oldest episode and lose a write each.
-    due = service.store.transaction(
+    due = service.store.read(
         lambda tx: tx.run(
-            "MATCH (e:MemoryEpisode {namespace:$ns}) WHERE e.status <> 'complete' "
+            # Named statuses let the (namespace, status) index find the queue; "not
+            # complete" made every poll read all episodes.
+            "MATCH (e:MemoryEpisode {namespace:$ns}) WHERE e.status IN ['pending','failed'] "
             "AND coalesce(e.quarantine_engine,'') <> $engine "
             "AND coalesce(e.retry_after,0)<=$now AND coalesce(e.lease_until,0)<=$now "
             "RETURN e.id AS id ORDER BY e.ingested_at,e.id LIMIT $window",
@@ -190,7 +193,7 @@ def worker_tick(service, namespace, limit=10):
     for row in due:
         if len(receipts) >= limit:
             break
-        lease = time.time() + max(900, getattr(service.llm, "timeout", 600) * 4 + 60)
+        lease = time.time() + lease_seconds(service.llm)
         token = str(uuid.uuid4())
         claiming = time.monotonic()
         claimed = service.store.transaction(
@@ -327,8 +330,21 @@ def claude_config(namespace, python=None):
                 "graph-memory": {
                     "command": python,
                     "args": args[1:] + ["serve"],
+                    # Settings only. A secret is referenced, not copied: the client
+                    # expands ${VAR} from its own environment, and this file is on disk.
                     "env": {
-                        k: v for k, v in os.environ.items() if k.startswith(("NEO4J_", "MEMORY_"))
+                        **{
+                            k: os.environ[k]
+                            for k in ("NEO4J_URI", "NEO4J_USER", "NEO4J_DATABASE")
+                            if k in os.environ
+                        },
+                        **(
+                            {"NEO4J_PASSWORD": "${NEO4J_PASSWORD}"}
+                            if os.environ.get("NEO4J_PASSWORD")
+                            else {}
+                        ),
+                        "MEMORY_NAMESPACE": namespace,
+                        "MEMORY_LLM": "caller",
                     },
                 }
             }

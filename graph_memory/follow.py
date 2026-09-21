@@ -3,6 +3,7 @@
 import time
 from pathlib import Path
 
+from . import settings
 from .feeds import feed
 from .store import digest
 
@@ -11,7 +12,7 @@ CURSOR, SEEDED = "\0cursor", "\0seeded"
 
 def seed_seen(service, namespace, seen):
     """Restore which files were fully fed, so a restart does not reparse them all."""
-    rows = service.store.transaction(
+    rows = service.store.read(
         lambda tx: tx.run(
             "MATCH (f:MemoryFeed {namespace:$ns}) WHERE f.caught_up_size IS NOT NULL "
             "RETURN f.source_uri AS path,f.caught_up_mtime_ns AS mtime,f.caught_up_size AS size",
@@ -27,18 +28,18 @@ def follow_once(service, namespace, roots: list[Path], seen: dict, source_record
     outputs = []
     examined = queued = 0
     if source_records:
-        queued = service.store.transaction(
+        queued = service.store.read(
             lambda tx: tx.run(
                 # Work that is due now, whatever its last outcome: a failed episode
                 # whose retry time has come is queue depth too.
-                "MATCH (e:MemoryEpisode {namespace:$ns}) WHERE e.status <> 'complete' "
+                "MATCH (e:MemoryEpisode {namespace:$ns}) WHERE e.status IN ['pending','failed'] "
                 "AND e.quarantine_engine IS NULL AND coalesce(e.retry_after,0)<=$now "
                 "RETURN count(e) AS n",
                 ns=namespace,
                 now=time.time(),
             ).single()["n"]
         )
-        if queued >= 32:
+        if queued >= settings.intake_queue():
             return outputs  # Leave unread source on disk until the durable queue drains.
         if SEEDED not in seen:
             seed_seen(service, namespace, seen)
@@ -62,7 +63,11 @@ def follow_once(service, namespace, roots: list[Path], seen: dict, source_record
         version = (stat.st_mtime_ns, stat.st_size)
         if seen.get(name) == version:
             continue
-        if source_records and (examined >= 4 or queued >= 32 or time.monotonic() - started > 120):
+        if source_records and (
+            examined >= settings.intake_files()
+            or queued >= settings.intake_queue()
+            or time.monotonic() - started > 120
+        ):
             return outputs
         seen[CURSOR] = name
         try:

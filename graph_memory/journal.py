@@ -96,14 +96,15 @@ def live_hash(tx, namespace):
     return hexhash(sum(element_hash(label, props) for label, props in elements(tx, namespace)))
 
 
-def audited(sequence):
+def audited(sequence, changed):
     """MEMORY_JOURNAL_AUDIT=1 checks every scoped write against the whole graph;
-    N>1 checks the writes whose sequence is a multiple of N."""
+    N>1 checks the writes whose sequence is a multiple of N. A sampled audit skips
+    writes that changed nothing: a run of them would otherwise repeat the audit."""
     try:
         every = int(os.environ.get("MEMORY_JOURNAL_AUDIT", "0"))
     except ValueError:
         return False
-    return every > 0 and sequence % every == 0
+    return every == 1 or (every > 1 and changed and sequence % every == 0)
 
 
 class Scope:
@@ -265,7 +266,9 @@ class Journal:
                 self._append(tx, namespace, kind, details, state_hash, changes)
             # Untracked writes are found by verify() and sampled audits, not on
             # every scoped write.
-            if audited(head["journal_sequence"] + 1) and state_hash != live_hash(tx, namespace):
+            if audited(head["journal_sequence"] + 1, bool(changes)) and state_hash != live_hash(
+                tx, namespace
+            ):
                 raise ValueError(mismatch)
             return result
         before = capture(tx, namespace)
@@ -442,6 +445,23 @@ class Journal:
             "coverage_started_at": coverage,
             "hash": digest(events[-1]),
         }
+
+    def verify_live(self, namespace):
+        """The live graph against the journal head, streamed: seconds and constant
+        memory, where verify() reads the whole history. Finds untracked writes."""
+
+        def run(tx):
+            self.store.lock(tx, namespace)
+            head = self._head(tx, namespace)
+            if head.get("journal_set_hash") != head.get("journal_state_hash"):
+                raise ValueError(
+                    "Journal predates the streamed state hash; write once or checkpoint"
+                )
+            if live_hash(tx, namespace) != head["journal_set_hash"]:
+                raise ValueError("Live graph differs from journal reconstruction")
+            return {"namespace": namespace, "verified": True, "sequence": head["journal_sequence"]}
+
+        return self.store.transaction(run)
 
     def checkpoint(self, namespace, accept_live=False):
         """Embed the current state so historical reads replay from here.

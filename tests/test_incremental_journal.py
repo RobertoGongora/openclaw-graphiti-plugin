@@ -83,10 +83,10 @@ def test_undeclared_scoped_write_is_caught_by_the_audit_and_by_verify(graph, mon
     store.transaction(lambda tx: store.mutate(tx, ns, "test", {}, sneaky, scoped=True))
     with pytest.raises(ValueError, match="differs from journal"):
         Journal(store).verify(ns)
-    # A full-capture write still refuses to build on an untracked change.
-    with pytest.raises(ValueError, match="differs from its journal"):
-        store.retract(ns, "missing", "reason")
     journal = Journal(store)
+    with pytest.raises(ValueError, match="differs from journal"):
+        journal.verify_live(ns)
+    # A full-capture write still refuses to build on an untracked change.
     with pytest.raises(ValueError, match="differs from its journal"):
         journal.checkpoint(ns)
     # Accepting the live graph is the explicit way forward; history stays readable.
@@ -418,3 +418,46 @@ def test_staging_links_only_its_own_nodes_and_matches_a_full_repair(graph, tmp_p
     assert {t for _, t, _ in staged} >= {"HAS_EPISODE", "CONTAINS", "HAS_MESSAGE", "RESULT_OF"}
     store.repair(ns)
     assert edges(store, ns) == staged  # nothing was left for the full repair to add
+
+
+def test_retract_and_merge_journal_only_what_they_touch(graph, monkeypatch):
+    store, ns = graph
+    receipt, _, _ = fact(store, ns, "one")
+    other = {"key": "project:atlas-api", "name": "Atlas API", "kind": "project"}
+    ingest(
+        store,
+        ns,
+        "two",
+        "Atlas API uses MySQL.",
+        [other, MYSQL],
+        [{"subject": other["key"], "target": MYSQL["key"], "relation": "uses_database"}],
+    )
+    monkeypatch.delenv("MEMORY_JOURNAL_AUDIT")
+    full, real = [], journal_module.elements
+
+    def counting(tx, namespace, ids=None):
+        if ids is None:
+            full.append(namespace)
+        return real(tx, namespace, ids)
+
+    monkeypatch.setattr(journal_module, "elements", counting)
+    store.retract(ns, receipt["fact_ids"][0], "superseded")
+    store.merge(ns, other["key"], PROJECT["key"], "same project")
+    assert full == []
+    monkeypatch.undo()
+    assert Journal(store).verify(ns)["verified"] and Journal(store).verify_live(ns)["verified"]
+    # New facts about the merged-away key land on the entity it became.
+    ingest(
+        store,
+        ns,
+        "three",
+        "Atlas API uses Postgres.",
+        [other, PG],
+        [{"subject": other["key"], "target": PG["key"], "relation": "uses_database"}],
+    )
+    recalled = store.recall(ns, "Atlas")
+    assert [e["key"] for e in recalled["entities"]] == [PROJECT["key"]]
+    lanes = [v for v in recalled.values() if isinstance(v, list)]
+    targets = {f["target"] for lane in lanes for f in lane if isinstance(f, dict) and "target" in f}
+    assert PG["key"] in targets
+    assert Journal(store).verify_live(ns)["verified"]

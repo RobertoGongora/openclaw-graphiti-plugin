@@ -105,23 +105,41 @@ def status(store, request):
                 age_seconds=round(age, 1),
                 stale=age > max(600, 2 * inventory["refresh_interval_seconds"] + duration),
             )
+        workers = [
+            {
+                "workers": w["workers"],
+                "heartbeat_age_seconds": round(checked.timestamp() - w["heartbeat_at"]),
+                "alive": checked.timestamp() - w["heartbeat_at"] < max(180, w["interval"] * 6),
+                "same_engine": w["engine"] == store.engine,
+                "provider_unavailable": w["provider_reason"] if w["provider_open"] else None,
+            }
+            for w in (
+                row["w"]
+                for row in tx.run(
+                    "MATCH (w:MemoryWorker {namespace:$ns}) RETURN properties(w) AS w "
+                    "ORDER BY w.heartbeat_at DESC LIMIT 5",
+                    **params,
+                )
+            )
+        ]
         return {
             "namespace": request.namespace,
             "checked_at": checked.isoformat(),
+            "workers": workers,
             "episodes": {"total": sum(counts.values()), "by_status": counts},
             "processing": {
                 **processing,
                 "is_processing": processing["active"] > 0,
                 "active_episodes": active,
                 "active_episodes_truncated": processing["active"] > len(active),
-                "basis": "Unexpired episode leases; worker liveness is not monitored. Expired leases overlap queued/retry_delayed counts.",
+                "basis": "Unexpired episode leases; see workers for liveness. Expired leases overlap queued/retry_delayed counts.",
             },
             "graph": graph,
             "source_inventory": inventory,
             "latest_episode": first("true", "e.ingested_at DESC"),
             "latest_completed_episode": first("e.status='complete'", "e.completed_at DESC"),
             "oldest_incomplete_episode": first("e.status <> 'complete'", "e.ingested_at"),
-            "coverage": "Episode counts cover saved work. source_inventory separately estimates unstaged mounted transcripts at its scan time, when available; inspect its gaps and staleness. Scanner/worker liveness and unmounted sources are unknown. Counts may change during the read.",
+            "coverage": "Episode counts cover saved work. source_inventory separately estimates unstaged mounted transcripts at its scan time, when available; inspect its gaps and staleness. Worker liveness is its last heartbeat; unmounted sources are unknown. Counts may change during the read.",
         }
 
-    return store.transaction(read)
+    return store.read(read)

@@ -16,7 +16,8 @@ from .version import engine_fingerprint
 
 def digest(value) -> str:
     return hashlib.sha256(
-        json.dumps(value, sort_keys=True, ensure_ascii=False).encode()
+        # surrogatepass: a transcript with a broken escape must still be addressable.
+        json.dumps(value, sort_keys=True, ensure_ascii=False).encode("utf-8", "surrogatepass")
     ).hexdigest()
 
 
@@ -29,7 +30,11 @@ class GraphStore:
         self, uri: str, user: str = "neo4j", password: str | None = None, database: str = "neo4j"
     ):
         self.driver = GraphDatabase.driver(
-            uri, auth=(user, password) if password else None, notifications_min_severity="OFF"
+            uri,
+            auth=(user, password) if password else None,
+            notifications_min_severity="OFF",
+            connection_acquisition_timeout=30,
+            max_transaction_retry_time=30,
         )
         self.database = database
         self.engine = engine_fingerprint()
@@ -42,7 +47,7 @@ class GraphStore:
         self.driver.close()
 
     def assert_writable(self, namespace):
-        row = self.transaction(
+        row = self.read(
             lambda tx: tx.run(
                 "MATCH (s:MemorySpace {id:$ns}) RETURN s.replay_read_only AS readonly",
                 ns=namespace,
@@ -50,6 +55,14 @@ class GraphStore:
         )
         if row and row["readonly"]:
             raise ValueError("Historical replay is read-only")
+
+    def read(self, fn, *args):
+        """A pure read: it takes no part in the write ordering and waits for nobody.
+        Still routed as a write so another process never reads a lagging follower."""
+        with self.driver.session(
+            database=self.database, default_access_mode=WRITE_ACCESS
+        ) as session:
+            return session.execute_write(fn, *args)
 
     def transaction(self, fn, *args):
         # Leader routing matters: a different MCP process must not read a lagging follower.
@@ -202,12 +215,12 @@ class GraphStore:
                 raise ValueError("Episode not found in namespace")
             return row["e"]
 
-        return self.transaction(run)
+        return self.read(run)
 
     def pending(self, namespace, limit=20):
-        return self.transaction(
+        return self.read(
             lambda tx: tx.run(
-                "MATCH (e:MemoryEpisode {namespace:$ns}) WHERE e.status <> 'complete' "
+                "MATCH (e:MemoryEpisode {namespace:$ns}) WHERE e.status IN ['pending','failed'] "
                 "RETURN e.id AS episode_id,e.source_id AS source_id,e.status AS status,e.error AS error "
                 "ORDER BY e.ingested_at,e.id LIMIT $limit",
                 ns=namespace,
@@ -293,6 +306,18 @@ class GraphStore:
             )
         key = rows[0]["e"]["key"] if rows else entity.key
         eid = rows[0]["e"]["id"] if rows else digest([namespace, entity.kind.value, key])
+        if not rows:
+            # The key may name an entity that was merged away: new facts belong to
+            # the entity it became, not to a node recall never returns.
+            for _ in range(8):
+                merged = tx.run(
+                    "MATCH (e:MemoryEntity {id:$id}) WHERE e.merged_into IS NOT NULL "
+                    "MATCH (t:MemoryEntity {id:e.merged_into}) RETURN t.id AS id,t.key AS key",
+                    id=eid,
+                ).single()
+                if not merged:
+                    break
+                eid, key = merged["id"], merged["key"]
         if touch:
             touch("MemoryEntity", [eid])
         tx.run(
@@ -310,11 +335,17 @@ class GraphStore:
 
     def extraction_context(self, namespace, transcript):
         content = normalized("\n".join(m.content for m in transcript.messages))
-        return self.transaction(
+        return self.read(
             lambda tx: tx.run(
                 "MATCH (e:MemoryEntity {namespace:$ns}) WHERE e.merged_into IS NULL "
                 "AND any(a IN e.aliases WHERE size(a)>=3 AND $content CONTAINS a) "
-                "RETURN e.key AS key,e.kind AS kind,e.name AS name,e.aliases AS aliases ORDER BY e.key LIMIT 200",
+                # When more than 200 match, the longest matching names are the least likely
+                # to be accidental substrings; alphabetical order kept an arbitrary set.
+                "WITH e,reduce(best=0,a IN e.aliases | CASE WHEN size(a)>=3 AND size(a)>best "
+                "AND $content CONTAINS a THEN size(a) ELSE best END) AS specificity "
+                "ORDER BY specificity DESC,e.key LIMIT 200 "
+                "RETURN e.key AS key,e.kind AS kind,e.name AS name,e.aliases AS aliases "
+                "ORDER BY key",
                 ns=namespace,
                 content=content,
             ).data()
@@ -322,10 +353,12 @@ class GraphStore:
 
     def relationship_context(self, namespace, entities):
         keys = [e["key"] for e in entities]
-        return self.transaction(
+        return self.read(
             lambda tx: tx.run(
-                "MATCH (f:MemoryFact {namespace:$ns}) WHERE f.subject IN $keys "
-                "AND coalesce(f.retracted,false)=false AND f.slot IS NOT NULL "
+                # Through the entity so the (namespace, subject_id) index serves the facts.
+                "MATCH (e:MemoryEntity {namespace:$ns}) WHERE e.key IN $keys "
+                "MATCH (f:MemoryFact {namespace:$ns,subject_id:e.id}) "
+                "WHERE coalesce(f.retracted,false)=false AND f.slot IS NOT NULL "
                 "RETURN DISTINCT f.subject AS subject,f.relation AS relation,f.slot AS slot,f.target AS target "
                 "ORDER BY subject,relation,slot,target LIMIT 200",
                 ns=namespace,
@@ -342,7 +375,7 @@ class GraphStore:
         transaction=None,
         model_info=None,
     ):
-        if engine_fingerprint() != self.engine:
+        if engine_fingerprint(fresh=True) != self.engine:
             raise ValueError("Engine files changed during this process; restart before committing")
         # Validation is repeated against the durable episode inside the transaction.
         extraction_hash = digest(extraction.model_dump(mode="json"))
@@ -472,7 +505,7 @@ class GraphStore:
                 engine=self.engine,
                 model_info=json.dumps(model_info or {"provider": "caller"}),
                 at=committed_at,
-                count=len(fact_ids),
+                count=len(set(fact_ids)),
                 ns=namespace,
             ).consume()
             return {
@@ -497,8 +530,9 @@ class GraphStore:
 
     @staticmethod
     def grounded_facts(tx, namespace, ids, relation=None):
-        # Restore missing links only when all durable endpoint/evidence nodes exist.
-        # Missing evidence is excluded, never silently represented as established fact.
+        # A fact counts only when its endpoints and its evidence exist; one missing
+        # either is excluded, never shown as established. Reading repairs nothing:
+        # restoring edges is the repair command's job, and a recall must not write.
         return tx.run(
             "MATCH (f:MemoryFact {namespace:$ns}) "
             "WHERE (f.subject_id IN $ids OR ($relation IS NULL AND f.target_id IN $ids)) "
@@ -506,8 +540,7 @@ class GraphStore:
             "MATCH (s:MemoryEntity {namespace:$ns}),(t:MemoryEntity {namespace:$ns}),"
             "(e:MemoryEpisode {namespace:$ns,status:'complete'}) "
             "WHERE s.id=f.subject_id AND t.id=f.target_id AND e.id=f.episode_id "
-            "MERGE (s)-[:HAS_FACT]->(f) MERGE (f)-[:TARGET]->(t) "
-            "MERGE (f)-[:SUPPORTED_BY]->(e) RETURN f {.*,subject_name:s.name,subject_kind:s.kind,target_name:t.name,target_kind:t.kind} AS fact",
+            "RETURN f {.*,subject_name:s.name,subject_kind:s.kind,target_name:t.name,target_kind:t.kind} AS fact",
             ns=namespace,
             ids=ids,
             relation=relation,
@@ -540,7 +573,8 @@ class GraphStore:
         needle = normalized(query)
 
         def run(tx):
-            revision = self.lock(tx, namespace)
+            space = tx.run("MATCH (s:MemorySpace {id:$ns}) RETURN s.revision AS r", ns=namespace)
+            revision = (space.single() or {"r": 0})["r"]
             candidates = tx.run(
                 "MATCH (e:MemoryEntity {namespace:$ns}) WHERE e.merged_into IS NULL "
                 "AND (any(a IN e.aliases WHERE a CONTAINS $q) OR e.key=$q) "
@@ -623,7 +657,7 @@ class GraphStore:
                 },
             }
 
-        return self.transaction(run)
+        return self.read(run)
 
     def latest(
         self, namespace, entity, as_of=None, relation=None, *, known_at=None, at_change=None
@@ -725,6 +759,7 @@ class GraphStore:
     def retract(self, namespace, fact_id, reason):
         def run(tx):
             self.lock(tx, namespace)
+            self.touch(tx, namespace, "MemoryFact", [fact_id])
             row = tx.run(
                 "MATCH (f:MemoryFact {id:$id,namespace:$ns}) SET f.retracted=true,"
                 "f.retraction_reason=$reason,f.retracted_at=$at RETURN f.id AS id",
@@ -742,7 +777,12 @@ class GraphStore:
 
         return self.transaction(
             lambda tx: self.mutate(
-                tx, namespace, "fact_retracted", {"fact_id": fact_id, "reason": reason}, run
+                tx,
+                namespace,
+                "fact_retracted",
+                {"fact_id": fact_id, "reason": reason},
+                run,
+                scoped=True,
             )
         )
 
@@ -762,6 +802,30 @@ class GraphStore:
             if len(rows) != 1 or rows[0]["s"]["kind"] != rows[0]["t"]["kind"]:
                 raise ValueError("Merge requires two unambiguous entities of the same kind")
             s, t = rows[0]["s"], rows[0]["t"]
+            moved = tx.run(
+                "MATCH (f:MemoryFact {namespace:$ns}) WHERE f.subject_id=$s OR f.target_id=$s "
+                "RETURN collect(DISTINCT f.id) AS facts",
+                ns=namespace,
+                s=s["id"],
+            ).single()["facts"]
+            insights = tx.run(
+                "MATCH (i:MemoryInsight {namespace:$ns}) WHERE $s IN i.entity_ids "
+                "RETURN collect(i.id) AS ids",
+                ns=namespace,
+                s=s["id"],
+            ).single()["ids"]
+            self.touch(tx, namespace, "MemoryEntity", [s["id"], t["id"]])
+            self.touch(tx, namespace, "MemoryFact", moved)
+            self.touch(tx, namespace, "MemoryInsight", insights)
+            # An insight about the merged entity is about the entity it became.
+            tx.run(
+                "MATCH (i:MemoryInsight) WHERE i.id IN $ids SET i.entity_ids="
+                "reduce(acc=[],k IN i.entity_ids | CASE WHEN (CASE WHEN k=$s THEN $t ELSE k END) "
+                "IN acc THEN acc ELSE acc+(CASE WHEN k=$s THEN $t ELSE k END) END)",
+                ids=insights,
+                s=s["id"],
+                t=t["id"],
+            ).consume()
             tx.run(
                 "MATCH (s:MemoryEntity {id:$s}),(t:MemoryEntity {id:$t}) "
                 "SET s.merged_into=t.id,s.merge_reason=$reason "
@@ -794,6 +858,7 @@ class GraphStore:
                 "entities_merged",
                 {"source_key": source_key, "target_key": target_key, "reason": reason},
                 run,
+                scoped=True,
             )
         )
 

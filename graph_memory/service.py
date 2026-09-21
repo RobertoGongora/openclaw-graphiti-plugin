@@ -10,6 +10,7 @@ from .diagnostics import diagnostic
 from .extraction_policy import extraction_payload
 from .llm import DREAM_INSTRUCTIONS, ModelUnavailable, extraction_instructions
 from .retry import feedback, restored_feedback
+from .settings import lease_seconds
 from .version import engine_fingerprint
 
 
@@ -268,7 +269,7 @@ class MemoryService:
                 ns=request.namespace,
                 token=token,
                 now=m.now().timestamp(),
-                lease=m.now().timestamp() + max(900, getattr(self.llm, "timeout", 600) * 4 + 60),
+                lease=m.now().timestamp() + lease_seconds(self.llm),
             ).single()
             if not row:
                 raise ValueError("Dream is already running or finished")
