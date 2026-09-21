@@ -14,7 +14,12 @@ BATCH = 5000
 WIDTH = 6
 FLOOR = 3
 SWEEP = 50_000
-WORD = re.compile(r"\w+")
+# An underscore separates words: a name inside a snake_case identifier
+# ("atlas_api_key") is a mention, and losing it makes the extractor coin a new key
+# for an entity that already exists.
+WORD = re.compile(r"[^\W_]+")
+# Neo4j refuses to index a property value over about 8 kB and fails the whole write.
+INDEXABLE = 2000
 
 
 def alias_id(namespace, kind, text, entity_id):
@@ -39,6 +44,8 @@ def rows(namespace, kind, entity_id, texts):
             "loose": True if loose(text) else None,
         }
         for text in dict.fromkeys(texts)
+        # A name too long to index is left to the alias list; nothing resolves by it.
+        if len(text.encode()) <= INDEXABLE
     ]
 
 
@@ -187,7 +194,12 @@ def grams(content):
     for i, (start, _) in enumerate(spans):
         for _, end in spans[i : i + WIDTH]:
             if FLOOR <= end - start <= 500:
-                counts[content[start:end]] += 1
+                gram = content[start:end]
+                counts[gram] += 1
+                # "atlas_api_key" mentions "atlas api": an identifier spells a name
+                # with underscores where prose uses spaces.
+                if "_" in gram:
+                    counts[gram.replace("_", " ")] += 1
     return counts
 
 

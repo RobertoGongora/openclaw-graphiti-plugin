@@ -366,3 +366,44 @@ def test_lookups_are_index_seeks(graph, query, seek):
     found = set(operators(plan))
     assert seek in found, found
     assert not found & {"NodeByLabelScan", "AllNodesScan", "PartitionedNodeByLabelScan"}, found
+
+
+def test_a_name_inside_a_snake_case_identifier_is_a_mention(graph):
+    store, ns = graph
+    ingest(
+        store,
+        ns,
+        "one",
+        "Atlas API uses MySQL.",
+        [{"key": "project:atlas-api", "name": "Atlas API", "kind": "project"}, MYSQL],
+        [{"subject": "project:atlas-api", "target": MYSQL["key"], "relation": "uses_database"}],
+    )
+    from graph_memory.models import Transcript
+
+    def keys(text):
+        transcript = Transcript.model_validate(
+            {
+                "namespace": ns,
+                "source_id": "probe",
+                "session_id": "probe",
+                "messages": [{"id": "m1", "role": "user", "content": text}],
+            }
+        )
+        return {row["key"] for row in store.extraction_context(ns, transcript)}
+
+    assert "project:atlas-api" in keys("export ATLAS_API_KEY=... then call atlas_api_client")
+    assert "database:mysql" not in keys("the mysqldump binary is missing")
+
+
+def test_a_name_too_long_to_index_does_not_fail_the_commit(graph):
+    store, ns = graph
+    long_name = "ﷺ" * 400  # expands far past the index key limit once normalized
+    ingest(
+        store,
+        ns,
+        "one",
+        "Atlas uses MySQL.",
+        [{**PROJECT, "aliases": [long_name]}, MYSQL],
+        [{"subject": PROJECT["key"], "target": MYSQL["key"], "relation": "uses_database"}],
+    )
+    assert store.recall(ns, "Atlas")["entities"]
