@@ -7,7 +7,14 @@ from neo4j import ManagedTransaction
 
 from graph_memory import journal
 from graph_memory.journal import Journal
-from graph_memory.models import Evidence, Extraction, Transcript
+from graph_memory.models import (
+    DreamCreate,
+    DreamOutput,
+    DreamRequest,
+    Evidence,
+    Extraction,
+    Transcript,
+)
 from graph_memory.revisions import Revisions
 from graph_memory.service import MemoryService
 
@@ -106,7 +113,8 @@ def test_build_writes_nothing_live_and_promotion_is_one_scoped_change(graph):
     assert Journal(store).snapshot(ns)["sequence"] == sequence
     assert model.calls == 1
     assert [f["target"] for f in diff["added"]] == [PG["key"]]
-    assert [f["target"] for f in diff["unchanged"]] == [MYSQL["key"]]
+    # Unchanged claims are counted and named, never stored again with their evidence.
+    assert diff["unchanged"] == receipt["fact_ids"] and diff["unchanged_count"] == 1
     assert diff["removed"] == diff["changed"] == diff["dropped_decisions"] == []
     stored = revisions.get(ns, rid)
     assert stored["status"] == "built" and stored["reason"] == "planned facts"
@@ -317,7 +325,7 @@ def test_a_failed_episode_leaves_the_revision_rebuildable(graph):
     diff = revisions.build(ns, rid)["diff"]
     # The episode that had succeeded is not paid for twice.
     assert model.calls == 3
-    assert len(diff["unchanged"]) == 2 and not diff["added"] and not diff["removed"]
+    assert diff["unchanged_count"] == 2 and not diff["added"] and not diff["removed"]
     rebuilt = revisions.get(ns, rid)
     assert rebuilt["status"] == "built" and "build_error" not in rebuilt
     assert revisions.validate(ns, rid, report(), CHECKS)["passed"]
@@ -418,3 +426,320 @@ def test_promoted_facts_cite_the_live_messages(graph):
     }
     assert all(x["namespace"] == ns for x in rows)
     assert Journal(store).verify(ns)["verified"]
+
+
+def dreaming(extraction):
+    """A model that extracts `extraction` and reflects on the first current fact."""
+
+    def answer(payload):
+        if "eligible_fact_ids" not in payload:
+            return extraction
+        return DreamOutput(
+            insights=[
+                {
+                    "summary": "Atlas runs MySQL.",
+                    "entity_keys": [PROJECT["key"]],
+                    "supporting_fact_ids": [payload["graph"]["current"][0]["id"]],
+                    "confidence": 0.9,
+                }
+            ],
+            observations=[],
+        )
+
+    return answer
+
+
+def applied_dream(service, ns, episode_id):
+    created = service.dream_create(
+        DreamCreate(namespace=ns, query="Atlas", episode_ids=[episode_id])
+    )
+    request = DreamRequest(namespace=ns, dream_id=created["dream_id"])
+    service.dream_run(request)
+    service.dream_apply(request)
+    return created["dream_id"]
+
+
+def dream(store, ns, dream_id):
+    return store.read(
+        lambda tx: tx.run(
+            "MATCH (d:MemoryDream {id:$id,namespace:$ns}) RETURN properties(d) AS d",
+            id=dream_id,
+            ns=ns,
+        ).single()
+    )["d"]
+
+
+def test_promotion_runs_the_validated_checks_again(graph):
+    store, ns = graph
+    receipt, _, original = ingest(
+        store, ns, "source", TEXT, [PROJECT, MYSQL, PG], [fact(MYSQL, slot="primary")]
+    )
+    revisions = Revisions(MemoryService(store, Model(lambda payload: original)))
+    rid = revisions.create(ns, [receipt["episode_id"]])["revision_id"]
+    revisions.build(ns, rid)
+    checks = [
+        {
+            "tool": "memory_recall",
+            "arguments": {"query": "Atlas"},
+            "path": "conflicts",
+            "equals": [],
+        }
+    ]
+    assert revisions.validate(ns, rid, report(), checks)["passed"]
+    assert revisions.get(ns, rid)["checks"] == checks
+    # Another episode now claims a different holder of the same slot at the same time.
+    ingest(store, ns, "other", "Atlas uses PostgreSQL.", [PROJECT, PG], [fact(PG, slot="primary")])
+    assert store.recall(ns, "Atlas")["conflicts"]
+    with pytest.raises(ValueError, match="no longer passes"):
+        revisions.promote(ns, rid)
+    assert revisions.get(ns, rid)["status"] == "validated"
+
+
+def test_a_dream_that_appears_after_the_build_blocks_promotion_until_rebuilt(graph):
+    store, ns = graph
+    receipt, _, original = ingest(store, ns, "source", TEXT, [PROJECT, MYSQL, PG], [fact(MYSQL)])
+    service = MemoryService(store, Model(dreaming(original)))
+    revisions = Revisions(service)
+    created = revisions.create(ns, [receipt["episode_id"]])
+    rid = created["revision_id"]
+    assert created["affected_dreams"] == []
+    revisions.build(ns, rid)
+    assert revisions.validate(ns, rid, report(), CHECKS)["passed"]
+    old = applied_dream(service, ns, receipt["episode_id"])
+    with pytest.raises(ValueError, match="build the revision again"):
+        revisions.promote(ns, rid)
+    assert "superseded_by" not in dream(store, ns, old)
+    diff = revisions.build(ns, rid)["diff"]
+    assert diff["affected_dreams"] == [old]
+    rebuilt = revisions.get(ns, rid)
+    assert rebuilt["status"] == "built" and "validation" not in rebuilt
+    assert revisions.validate(ns, rid, report(), CHECKS)["passed"]
+    assert revisions.promote(ns, rid, diff["digest"])["revalidated_dreams"] == 1
+    assert dream(store, ns, old)["superseded_by"] == diff["revalidated_dreams"][old]
+    assert Journal(store).verify(ns)["verified"]
+
+
+def test_two_revisions_never_replace_the_same_dream_twice(graph):
+    store, ns = graph
+    receipt, _, original = ingest(store, ns, "source", TEXT, [PROJECT, MYSQL, PG], [fact(MYSQL)])
+    service = MemoryService(store, Model(dreaming(original)))
+    old = applied_dream(service, ns, receipt["episode_id"])
+    revisions = Revisions(service)
+    first = revisions.create(ns, [receipt["episode_id"]])["revision_id"]
+    second = revisions.create(ns, [receipt["episode_id"]])["revision_id"]
+    first_diff = revisions.build(ns, first)["diff"]
+    assert revisions.build(ns, second)["diff"]["affected_dreams"] == [old]
+    assert revisions.validate(ns, first, report(), CHECKS)["passed"]
+    assert revisions.validate(ns, second, report(), CHECKS)["passed"]
+    revisions.promote(ns, first, first_diff["digest"])
+    replacement = first_diff["revalidated_dreams"][old]
+    with pytest.raises(ValueError, match="build the revision again"):
+        revisions.promote(ns, second, revisions.get(ns, second)["diff"]["digest"])
+    # Rebuilt, the second revision replaces the first one's replacement, not the original.
+    second_diff = revisions.build(ns, second)["diff"]
+    assert second_diff["affected_dreams"] == [replacement]
+    assert revisions.validate(ns, second, report(), CHECKS)["passed"]
+    revisions.promote(ns, second, second_diff["digest"])
+    assert dream(store, ns, old)["superseded_by"] == replacement
+    assert (
+        dream(store, ns, replacement)["superseded_by"]
+        == (second_diff["revalidated_dreams"][replacement])
+    )
+    live = store.read(
+        lambda tx: tx.run(
+            "MATCH (i:MemoryInsight {namespace:$ns}) WHERE coalesce(i.retired,false)=false "
+            "RETURN count(i) AS count",
+            ns=ns,
+        ).single()
+    )["count"]
+    assert live == 1
+    assert Journal(store).verify(ns)["verified"]
+
+
+def test_every_step_refuses_another_engine_or_model(graph, monkeypatch):
+    store, ns = graph
+    receipt, _, original = ingest(store, ns, "source", TEXT, [PROJECT, MYSQL, PG], [fact(MYSQL)])
+    model = Model(lambda payload: original)
+    revisions = Revisions(MemoryService(store, model))
+    rid = revisions.create(ns, [receipt["episode_id"]])["revision_id"]
+    revisions.build(ns, rid)
+    steps = (
+        lambda: revisions.diff(ns, rid),
+        lambda: revisions.validate(ns, rid, report(), CHECKS),
+        lambda: revisions.promote(ns, rid),
+    )
+    for step in steps[:2]:
+        model.model = "another"
+        with pytest.raises(ValueError, match="Model settings changed"):
+            step()
+        model.model = "test"
+    assert revisions.validate(ns, rid, report(), CHECKS)["passed"]
+    model.effort = "low"
+    with pytest.raises(ValueError, match="Model settings changed"):
+        revisions.promote(ns, rid)
+    model.effort = "xhigh"
+    monkeypatch.setattr("graph_memory.revisions.engine_fingerprint", lambda: "another engine")
+    for step in steps:
+        with pytest.raises(ValueError, match="Engine changed"):
+            step()
+    assert revisions.get(ns, rid)["status"] == "validated"
+    monkeypatch.undo()
+    assert revisions.promote(ns, rid)["status"] == "promoted"
+    # What is already promoted stays readable under any engine.
+    monkeypatch.setattr("graph_memory.revisions.engine_fingerprint", lambda: "another engine")
+    assert revisions.promote(ns, rid)["replayed"]
+    assert revisions.diff(ns, rid)["diff"]["unchanged_count"] == 1
+
+
+def test_checks_may_only_use_tools_that_read_the_preview(graph):
+    store, ns = graph
+    receipt, _, original = ingest(store, ns, "source", TEXT, [PROJECT, MYSQL, PG], [fact(MYSQL)])
+    revisions = Revisions(MemoryService(store, Model(lambda payload: original)))
+    rid = revisions.create(ns, [receipt["episode_id"]])["revision_id"]
+    revisions.build(ns, rid)
+    for tool, arguments in (
+        ("memory_render", {}),
+        ("memory_retract", {"fact_id": receipt["fact_ids"][0], "reason": "no"}),
+    ):
+        check = {"tool": tool, "arguments": arguments, "path": "nodes", "equals": []}
+        with pytest.raises(ValueError, match=f"{tool} cannot be used in a revision check"):
+            revisions.validate(ns, rid, report(), [*CHECKS, check])
+    assert revisions.get(ns, rid)["status"] == "built"
+    assert facts(store, ns)[receipt["fact_ids"][0]]["retracted"] is False
+
+
+def test_a_confirmation_lands_only_on_an_uncertain_claim_and_losers_are_listed(graph):
+    store, ns = graph
+    twice = [
+        fact(MYSQL, status="uncertain"),
+        fact(MYSQL, status="uncertain", confidence=0.9),
+        fact(PG, status="uncertain"),
+    ]
+    receipt, _, original = ingest(store, ns, "source", TEXT, [PROJECT, MYSQL, PG], twice)
+    older, newer, pg = receipt["fact_ids"]
+    store.confirm(ns, older, "First look", datetime(2026, 9, 15, tzinfo=UTC))
+    store.confirm(ns, newer, "Second look", datetime(2026, 9, 15, tzinfo=UTC))
+    store.confirm(ns, pg, "Roadmap", datetime(2026, 9, 15, tzinfo=UTC))
+
+    def answer(payload):
+        # One reworded MySQL claim for two confirmed ones; PostgreSQL comes back as
+        # established, which a person's confirmation of a doubt says nothing about.
+        result = original.model_copy(deep=True)
+        result.facts = [
+            result.facts[0].model_copy(update={"confidence": 0.8}),
+            result.facts[2].model_copy(update={"status": "active"}),
+        ]
+        return result
+
+    revisions = Revisions(MemoryService(store, Model(answer)))
+    rid = revisions.create(ns, [receipt["episode_id"]])["revision_id"]
+    diff = revisions.build(ns, rid)["diff"]
+    dropped = {d["fact_id"]: d for d in diff["dropped_decisions"]}
+    assert set(dropped) == {older, pg}
+    assert dropped[older]["detail"]["confirmation_note"] == "First look"
+    assert "another confirmation" in dropped[older]["reason"]
+    assert "not uncertain" in dropped[pg]["reason"]
+    assert revisions.validate(ns, rid, report(), CHECKS)["passed"]
+    revisions.promote(ns, rid, diff["digest"])
+    after = {f["id"]: f for f in facts(store, ns).values() if not f["retracted"]}
+    assert len(after) == 2
+    for live in after.values():
+        if live["target"] == MYSQL["key"]:
+            assert live["confirmation_carried_from"] == newer
+            assert live["confirmation_note"] == "Second look"
+        else:
+            assert live["status"] == "active" and "confirmed_at" not in live
+    assert Journal(store).verify(ns)["verified"]
+
+
+def test_a_revived_fact_is_reported_with_whatever_it_brings_back(graph):
+    store, ns = graph
+    uncertain = [fact(MYSQL, status="uncertain"), fact(PG, status="uncertain")]
+    receipt, _, original = ingest(store, ns, "source", TEXT, [PROJECT, MYSQL, PG], uncertain)
+    mysql, pg = receipt["fact_ids"]
+    store.confirm(ns, mysql, "Checked", datetime(2026, 9, 15, tzinfo=UTC))
+    store.retract(ns, pg, "Never planned")
+    without = original.model_copy(deep=True)
+    del without.facts[0]
+    answers = [without, original]
+    revisions = Revisions(MemoryService(store, Model(lambda payload: answers.pop(0))))
+    _, diff = promoted(revisions, ns, [receipt["episode_id"]])
+    # The person's retraction is undone; the confirmed claim is superseded.
+    assert [(r["fact_id"], r["retracted_by"]) for r in diff["revived"]] == [(pg, "person")]
+    assert diff["revived"][0]["retraction_reason"] == "Never planned"
+    _, diff = promoted(revisions, ns, [receipt["episode_id"]])
+    # An earlier revision's retraction is undone, and the confirmation returns with it.
+    assert [(r["fact_id"], r["retracted_by"]) for r in diff["revived"]] == [(mysql, "revision")]
+    assert diff["revived"][0]["confirmation"]["confirmation_note"] == "Checked"
+    assert facts(store, ns)[mysql]["confirmation_note"] == "Checked"
+    assert Journal(store).verify(ns)["verified"]
+
+
+def test_a_failed_dream_is_recorded_and_a_hopeless_one_ends_the_revision(graph, monkeypatch):
+    store, ns = graph
+    receipt, _, original = ingest(store, ns, "source", TEXT, [PROJECT, MYSQL, PG], [fact(MYSQL)])
+    reflect, broken = dreaming(original), [False]
+
+    def answer(payload):
+        if broken[0] and "eligible_fact_ids" in payload:
+            raise RuntimeError("model fell over")
+        return reflect(payload)
+
+    service = MemoryService(store, Model(answer))
+    old = applied_dream(service, ns, receipt["episode_id"])
+    revisions = Revisions(service)
+    rid = revisions.create(ns, [receipt["episode_id"]])["revision_id"]
+    broken[0] = True
+    with pytest.raises(ValueError, match=f"dream {old}: RuntimeError"):
+        revisions.build(ns, rid)
+    failed = revisions.get(ns, rid)
+    assert failed["status"] == "building"
+    assert failed["build_error"] == {
+        "dream_id": old,
+        "error": "RuntimeError",
+        "message": "model fell over",
+        "permanent": False,
+    }
+    broken[0] = False
+    recall = store.recall.__func__
+
+    def too_broad(self, *args, **kwargs):
+        return {**recall(self, *args, **kwargs), "entity_matches_truncated": True}
+
+    monkeypatch.setattr("graph_memory.revisions._Pinned.recall", too_broad)
+    for _ in range(2):
+        with pytest.raises(ValueError, match="too broad.*create a new revision"):
+            revisions.build(ns, rid)
+    monkeypatch.undo()
+    hopeless = revisions.get(ns, rid)
+    assert hopeless["status"] == "failed" and hopeless["build_error"]["permanent"]
+    with pytest.raises(ValueError, match="too broad.*create a new revision"):
+        revisions.build(ns, rid)
+
+
+def test_a_resumed_build_keeps_the_candidates_it_already_has(graph):
+    store, ns = graph
+    first, _, original = ingest(store, ns, "source", TEXT, [PROJECT, MYSQL, PG], [fact(MYSQL)])
+    second, _, other = ingest(
+        store, ns, "other", "Atlas uses SQLite.", [PROJECT, SQLITE], [fact(SQLITE)]
+    )
+    broken = [True]
+
+    def answer(payload):
+        if "Atlas uses SQLite." not in json.dumps(payload["transcript"]):
+            return original
+        if broken[0]:
+            raise RuntimeError("model fell over")
+        return other
+
+    revisions = Revisions(MemoryService(store, Model(answer)))
+    rid = revisions.create(ns, [first["episode_id"], second["episode_id"]])["revision_id"]
+    with pytest.raises(ValueError, match="RuntimeError"):
+        revisions.build(ns, rid)
+    moved = store.recall(ns, "Atlas")["revision"]
+    ingest(store, ns, "later", "Atlas uses PostgreSQL.", [PROJECT, PG], [fact(PG)])
+    broken[0] = False
+    revisions.build(ns, rid)
+    built = revisions.get(ns, rid)["candidates"]
+    assert built[first["episode_id"]]["live_revision"] == moved
+    assert built[second["episode_id"]]["live_revision"] == moved + 1
