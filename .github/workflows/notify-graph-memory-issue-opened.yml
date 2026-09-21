@@ -2,10 +2,15 @@ name: Notify graph-memory on issue opened
 
 on:
   issues:
-    types: [opened]
+    types: [opened, labeled]
 
 jobs:
   forward:
+    # Always forward "opened". Forward "labeled" only for agent:pickup
+    # so late labeling still wakes auto-dispatch without spamming other labels.
+    if: >
+      github.event.action == 'opened' ||
+      (github.event.action == 'labeled' && github.event.label.name == 'agent:pickup')
     runs-on: ubuntu-latest
     steps:
       - name: Forward to Cursor webhook
