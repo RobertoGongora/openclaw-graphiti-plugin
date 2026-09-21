@@ -11,6 +11,7 @@ from graph_memory.feed_identity import (
     session_uid,
     source_files,
     stamp_existing,
+    validate_roots,
 )
 from graph_memory.follow import follow_once
 from graph_memory.inventory import census
@@ -241,23 +242,189 @@ def test_stamp_existing_then_follow_from_a_moved_root(graph, tmp_path, parsed):
     assert parsed == []
 
 
-def test_same_relative_path_under_two_roots_does_not_collide(graph, tmp_path):
+def test_same_relative_path_under_two_roots_does_not_collide(graph, tmp_path, monkeypatch):
     store, ns = graph
     service = MemoryService(store)
     roots = [tmp_path / "sessions" / "claude", tmp_path / "sessions" / "codex"]
-    for root in roots:
-        tree(root)
+    tree(roots[0])
+    (roots[1] / "-Users-rob").mkdir(parents=True)
+    (roots[1] / "-Users-rob" / "two.jsonl").write_text(claude("user", "A Codex note."))
     drain(service, ns, roots)
     found = feeds(store, ns)
-    assert len(found) == 4 and len({f["session_id"] for f in found.values()}) == 4
+    assert len(found) == 3 and len({f["session_id"] for f in found.values()}) == 3
     assert {f["source_key"].split(":")[0] for f in found.values()} == {"claude", "codex"}
-    # Two roots that would share a label are refused rather than merged.
-    clash = tmp_path / "backup" / "claude"
-    tree(clash)
-    with pytest.raises(ValueError, match="share the label"):
-        follow_once(service, ns, [roots[0], clash], {}, source_records=True)
-    drain(service, ns, [roots[0], Path(f"backup={clash}")])
-    assert len(feeds(store, ns)) == 6
+    # The same relative path under the other root is another key, never the same feed.
+    # Its name is one a known feed carries, so it is reported instead of fed.
+    twin = roots[1] / "-Users-rob" / "one.jsonl"
+    twin.write_text(claude("user", "Codex has its own one."))
+    seen = {}
+    fed = follow_once(service, ns, roots, seen, source_records=True)
+    claude_one = next(f for f in found.values() if f["source_key"] == "claude:-Users-rob/one.jsonl")
+    assert fed == [
+        {
+            "source": str(twin.resolve()),
+            "status": "feed_identity_refused",
+            "source_key": "codex:-Users-rob/one.jsonl",
+            "known_feed_id": claude_one["id"],
+            "known_source_key": "claude:-Users-rob/one.jsonl",
+        }
+    ]
+    assert follow_once(service, ns, roots, seen, source_records=True) == []  # said once
+    assert feeds(store, ns) == found
+    assert census(store, ns, roots)["gaps"]["identity_refused"] == 1
+    # An operator who knows the files differ accepts them: two feeds, two sessions.
+    monkeypatch.setenv("MEMORY_FEED_ACCEPT_UNMATCHED", "1")
+    drain(service, ns, roots)
+    after = feeds(store, ns)
+    assert len(after) == 4 and claude_one == after[claude_one["id"]]
+    assert "codex:-Users-rob/one.jsonl" in {f["source_key"] for f in after.values()}
+
+
+def test_a_unique_name_is_known_wherever_it_reappears(graph, tmp_path):
+    store, ns = graph
+    service = MemoryService(store)
+    name = "0138dd13-1c43-4517-84bc-416fc7aac737.jsonl"
+    first = tmp_path / "sessions" / "claude" / "-Users-rob" / name
+    first.parent.mkdir(parents=True)
+    first.write_text(claude("user", "Atlas uses MySQL."))
+    journal = tmp_path / "sessions" / "claude" / "wf_1" / "journal.jsonl"
+    journal.parent.mkdir()
+    journal.write_text(claude("user", "Workflow one."))
+    drain(service, ns, [tmp_path / "sessions" / "claude"])
+    before, staged = feeds(store, ns), episodes(store, ns)
+    # Relabelled and moved to another directory at once: neither key nor path finds it.
+    copy = tmp_path / "backup" / "renamed-project" / name
+    copy.parent.mkdir(parents=True)
+    shutil.copy(first, copy)
+    # Every workflow has a journal.jsonl: only the same directory makes it the same file.
+    other = tmp_path / "backup" / "wf_2" / "journal.jsonl"
+    other.parent.mkdir()
+    other.write_text(claude("user", "Workflow two."))
+    fed = follow_once(service, ns, [tmp_path / "backup"], {}, source_records=True)
+    assert [(Path(f["source"]).name, f.get("status")) for f in fed] == [
+        (name, "feed_identity_refused"),
+        ("journal.jsonl", None),
+    ]
+    assert len(feeds(store, ns)) == len(before) + 1 and episodes(store, ns) == staged + 1
+
+
+def test_roots_that_cannot_name_older_feeds_block_all_intake(graph, tmp_path, monkeypatch):
+    store, ns = graph
+    service = MemoryService(store)
+    container = tmp_path / "sessions" / "claude"
+    ids = legacy(service, ns, tree(container))
+    before, staged = feeds(store, ns), episodes(store, ns)
+    # The daemon now runs where the same files are mounted elsewhere.
+    host = tmp_path / "home" / ".claude" / "projects"
+    host.parent.mkdir(parents=True)
+    container.rename(host)
+    (host / "-Users-rob" / "new.jsonl").write_text(claude("user", "A genuinely new session."))
+    seen = {}
+    for _ in range(2):
+        fed = follow_once(service, ns, [host], seen, source_records=True)
+        assert [f["status"] for f in fed] == ["feed_identity_blocked"]
+        assert (fed[0]["feeds"], fed[0]["stamped"], fed[0]["unmatched"]) == (2, 0, 2)
+    assert feeds(store, ns) == before and episodes(store, ns) == staged
+    blocked = census(store, ns, [host])
+    assert blocked["state"] == "identity_blocked" and blocked["identity"]["unmatched"] == 2
+    assert "unstaged_episodes" not in blocked
+    # Stamped from anywhere with the prefix the paths were stored under, which is gone.
+    assert not container.exists()
+    result = stamp_existing(store, ns, [f"claude={container}"])
+    assert result == dict(feeds=2, stamped=2, already_stamped=0, unmatched=0, conflicts=0)
+    # The running watcher unblocks, finds its feeds, and stages only the new file.
+    fed = follow_once(service, ns, [host], seen, source_records=True)
+    assert [Path(f["source"]).name for f in fed] == ["new.jsonl"]
+    assert ids < set(feeds(store, ns)) and len(feeds(store, ns)) == 3
+    assert episodes(store, ns) == staged + 1
+    assert census(store, ns, [host])["unstaged_episodes"] == 0
+
+
+def test_accepting_unmatched_feeds_is_an_explicit_choice(graph, tmp_path, monkeypatch):
+    store, ns = graph
+    service = MemoryService(store)
+    elsewhere = tmp_path / "gone" / "claude"
+    legacy(service, ns, tree(elsewhere))
+    root = tmp_path / "sessions" / "codex"
+    root.mkdir(parents=True)
+    (root / "fresh.jsonl").write_text(claude("user", "Unrelated to the unmatched feeds."))
+    assert follow_once(service, ns, [root], {}, source_records=True)[0]["status"] == (
+        "feed_identity_blocked"
+    )
+    monkeypatch.setenv("MEMORY_FEED_ACCEPT_UNMATCHED", "1")
+    fed = follow_once(service, ns, [root], {}, source_records=True)
+    assert [Path(f["source"]).name for f in fed] == ["fresh.jsonl"]
+    assert census(store, ns, [root])["state"] == "available"
+
+
+def test_a_change_of_roots_never_mints_a_feed_for_a_known_path(graph, tmp_path, parsed):
+    store, ns = graph
+    service = MemoryService(store)
+    root = tmp_path / "sessions" / "claude"
+    tree(root)
+    drain(service, ns, [root])
+    before, staged = feeds(store, ns), episodes(store, ns)
+    link = tmp_path / "linked-under-another-name"
+    link.symlink_to(root)
+    for roots, keys in (
+        (
+            [Path(f"work={root}")],
+            ["work:-Users-rob/one.jsonl", "work:-Users-rob/one/subagents/a.jsonl"],
+        ),
+        ([root, root / "-Users-rob"], ["-Users-rob:one.jsonl", "-Users-rob:one/subagents/a.jsonl"]),
+        (
+            [link],
+            [
+                "linked-under-another-name:-Users-rob/one.jsonl",
+                "linked-under-another-name:-Users-rob/one/subagents/a.jsonl",
+            ],
+        ),
+    ):
+        parsed.clear()
+        assert follow_once(service, ns, roots, {}, source_records=True) == []
+        assert census(store, ns, roots)["unstaged_episodes"] == 0
+        after = feeds(store, ns)
+        # Same feeds, never reopened, and named by today's roots for the next move.
+        assert parsed == [] and set(after) == set(before) and episodes(store, ns) == staged
+        assert sorted(f["source_key"] for f in after.values()) == keys
+        for fid, feed in after.items():
+            assert {**feed, "source_key": ""} == {**before[fid], "source_key": ""}
+    # The re-keyed feeds still survive a move under the roots that re-keyed them.
+    link.unlink()
+    moved = tmp_path / "volume" / "linked-under-another-name"
+    moved.parent.mkdir()
+    root.rename(moved)
+    assert follow_once(service, ns, [moved], {}, source_records=True) == []
+    assert parsed == [] and set(feeds(store, ns)) == set(before)
+
+
+def test_label_clash_names_both_roots(tmp_path):
+    first, second = tmp_path / "a" / "claude", tmp_path / "b" / "claude"
+    with pytest.raises(ValueError) as raised:
+        validate_roots([first, second])
+    assert str(first) in str(raised.value) and str(second) in str(raised.value)
+    assert "'claude'" in str(raised.value) and "LABEL=PATH" in str(raised.value)
+    assert [r.label for r in validate_roots([first, f"backup={second}", first])] == [
+        "claude",
+        "backup",
+        "claude",
+    ]
+
+
+def test_label_fallbacks_and_bounded_uid(tmp_path):
+    labels = {
+        "/": "root",
+        "/sessions": "root",
+        "/data/sessions/sessions": "data",
+        "/srv/sesiones-año": "sesiones-año",
+        "/srv/日本": "日本",
+        "/srv/my sessions!": "my_sessions",
+        "/srv/.../sessions": "srv",
+    }
+    assert {path: parse_root(path).label for path in labels} == labels
+    huge = tmp_path / "huge.jsonl"
+    huge.write_text(json.dumps({"pad": "x" * 400_000, "sessionId": "beyond-the-bound"}) + "\n")
+    assert session_uid(huge) is None
 
 
 def test_a_different_file_at_a_known_key_is_reported_not_merged(graph, tmp_path):

@@ -5,33 +5,48 @@ import time
 from pathlib import Path
 
 from . import settings
-from .feed_identity import session_uid, source_files
+from .feed_identity import KnownElsewhere, session_uid, source_files
 from .feeds import feed
 from .store import digest
 
 CURSOR, SEEDED, FEEDS = "\0cursor", "\0seeded", "\0feeds"
 
 
-def seed_seen(service, namespace, roots, seen):
-    """Restore which files were fully fed, so a restart does not reparse them all."""
+def seed_seen(service, namespace, roots, files, seen):
+    """Restore which files were fully fed, so a restart does not reparse them all.
+    Returns why nothing may be fed, if older feeds cannot be told from new files."""
     from .feed_identity import Feeds, stamp_existing
 
     # A fully fed file is never opened again, so it would never be adopted one at a
     # time: name every older feed now, while its stored path still says where it is.
     stamped = stamp_existing(service.store, namespace, roots)
-    if stamped["stamped"] or stamped["unmatched"] or stamped["conflicts"]:
+    if stamped["stamped"]:
         print(json.dumps({"event": "feed_identity", **stamped}), flush=True)
+    feeds = Feeds(service.store, namespace, roots)
+    if feeds.blocked:
+        # Not seeded: the next scan looks again, so stamping from outside unblocks it.
+        return {
+            "status": "feed_identity_blocked",
+            **feeds.blocked,
+            "action": "Older feeds are stored under paths outside these roots, so their "
+            "files would be fed again as new. Stamp them with the roots they were written "
+            "under (feed_identity.stamp_existing, LABEL=STORED_PREFIX), or set "
+            "MEMORY_FEED_ACCEPT_UNMATCHED=1 to feed regardless.",
+        }
+    feeds.rekey(service.store, files)
     rows = service.store.read(
         lambda tx: tx.run(
             "MATCH (f:MemoryFeed {namespace:$ns}) WHERE f.caught_up_size IS NOT NULL "
-            "RETURN coalesce(f.source_key,f.source_uri) AS mark,"
+            "RETURN f.source_key AS key,f.source_uri AS uri,"
             "f.caught_up_mtime_ns AS mtime,f.caught_up_size AS size",
             ns=namespace,
         ).data()
     )
     for row in rows:
-        seen.setdefault(row["mark"], (row["mtime"], row["size"]))
-    seen[FEEDS] = Feeds(service.store, namespace)
+        for mark in (row["key"], row["uri"]):
+            if mark:
+                seen.setdefault(mark, (row["mtime"], row["size"]))
+    seen[FEEDS] = feeds
     seen[SEEDED] = True
 
 
@@ -53,14 +68,15 @@ def follow_once(service, namespace, roots: list[Path], seen: dict, source_record
         )
         if queued >= settings.intake_queue():
             return outputs  # Leave unread source on disk until the durable queue drains.
-        if SEEDED not in seen:
-            seed_seen(service, namespace, roots, seen)
+    files = source_files(roots)
+    if source_records and SEEDED not in seen:
+        blocked = seed_seen(service, namespace, roots, files, seen)
+        if blocked:
+            return [blocked]
     # What is remembered about a file is kept under its source key, not its path:
     # a remount must not make every fed file look unread. The legacy text feed
     # still names its feeds by path, so there a moved file is a new one.
-    paths = sorted(
-        (key if source_records else name, name) for name, key in source_files(roots).items()
-    )
+    paths = sorted((key if source_records else name, name) for name, key in files.items())
     # Resume after the last file examined: files that keep changing must not
     # spend every scan's budget ahead of the files behind them.
     cursor = seen.get(CURSOR)
@@ -101,6 +117,18 @@ def follow_once(service, namespace, roots: list[Path], seen: dict, source_record
                 seen[FEEDS].record(identity, name)
             else:
                 result = feed(service, namespace, path, "host:" + digest(name))
+        except KnownElsewhere as exc:
+            # Nothing was read or staged. Said once per version of the file, not per scan.
+            seen[mark] = version
+            outputs.append(
+                {
+                    "source": name,
+                    "status": "feed_identity_refused",
+                    "source_key": mark,
+                    "known_feed_id": exc.feed_id,
+                    "known_source_key": exc.source_key,
+                }
+            )
         except Exception as exc:
             # Keep unseen so a transient database/partial source failure is retried.
             examined += 1

@@ -172,6 +172,11 @@ def run_daemon(
 ):
     if service.llm is None:
         raise ValueError("daemon requires MEMORY_LLM=codex or compatible")
+    if transcript_roots:
+        from .feed_identity import validate_roots
+
+        # Once, loudly: on every scan it would only surface as an unnamed scan error.
+        validate_roots(transcript_roots)
     if not 1 <= workers <= 16 or interval < 1:
         raise ValueError("workers must be 1..16 and interval at least 1 second")
     seen, feed_seen, checkpoints = {}, {}, {}

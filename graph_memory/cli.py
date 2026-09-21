@@ -204,6 +204,15 @@ def run():
     call.add_argument("tool")
     call.add_argument("arguments", help="JSON object, or @path to a JSON file")
     commands.add_parser("repair")
+    feeds = commands.add_parser("feeds", help="Maintain transcript feed identity")
+    feeds.add_argument("action", choices=("stamp",))
+    feeds.add_argument(
+        "--root",
+        action="append",
+        required=True,
+        help="A transcript root, or LABEL=PATH where PATH is the prefix the feeds were "
+        "stored under (it need not exist here), e.g. claude=/sessions/claude",
+    )
     names = commands.add_parser("aliases", help="Maintain the indexed entity-name lookup")
     names.add_argument("action", choices=("rebuild",))
     revision = commands.add_parser("revision")
@@ -306,6 +315,10 @@ def run():
                 except Exception as exc:
                     failures.append({"path": str(path), "error": type(exc).__name__})
             result = {"receipts": outputs, "failures": failures}
+        elif args.command == "feeds":
+            from .feed_identity import stamp_existing
+
+            result = stamp_existing(service.store, args.namespace, args.root)
         elif args.command == "aliases":
             from . import aliases
 

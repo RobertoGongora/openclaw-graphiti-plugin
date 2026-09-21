@@ -7,7 +7,7 @@ import threading
 from pathlib import Path
 
 from .diagnostics import diagnostic
-from .feed_identity import Feeds, parse_roots
+from .feed_identity import Feeds, KnownElsewhere, validate_roots
 from .models import now
 from .session_sources import FORMAT, MAX_BATCH_CHARS, records
 from .store import digest
@@ -62,6 +62,7 @@ def census(store, namespace, roots, stop=None):
         prefix_mismatches=0,
         changed_files=0,
         partial_files=0,
+        identity_refused=0,
     )
     errors = []
 
@@ -74,9 +75,19 @@ def census(store, namespace, roots, stop=None):
         failure(exc)
 
     # The watcher's resolution, so a remounted root is not counted as a new backlog.
-    feeds = Feeds(store, namespace)
+    feeds = Feeds(store, namespace, roots)
+    if feeds.blocked:
+        # Every file would read as unstaged; the watcher refuses to feed in this state.
+        return {
+            "state": "identity_blocked",
+            "started_at": started,
+            "finished_at": now().isoformat(),
+            "source_format": FORMAT,
+            "identity": feeds.blocked,
+            "basis": "Older feeds are stored under paths outside the mounted roots, so files cannot be matched to their cursors and no backlog is estimated. Stamp the feeds with the roots they were written under.",
+        }
     files = {}
-    for root in parse_roots(roots):
+    for root in validate_roots(roots):
         if root.is_file():
             files.setdefault(*root.key(root.given))
         elif root.given.is_dir():
@@ -94,7 +105,11 @@ def census(store, namespace, roots, stop=None):
         try:
             before = path.stat()
             messages = list(records(path))
-            cursor = cursors.get(feeds.resolve(key, name).feed_id, {})
+            try:
+                cursor = cursors.get(feeds.resolve(key, name).feed_id, {})
+            except KnownElsewhere:
+                gaps["identity_refused"] += 1
+                continue
             count = cursor.get("message_count", 0)
             if count > len(messages) or (
                 count
