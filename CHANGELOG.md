@@ -1,4 +1,12 @@
 # Changelog
+
+## Unreleased
+
+### Internal
+
+- **Pipeline smoke**: Verified `agent:pickup` label-forward filter (#179) routes
+  correctly to cloud agents via issue #182.
+
 ## [0.7.0-beta.5] — 2026-04-01
 
 ### Fixed
