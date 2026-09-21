@@ -9,6 +9,8 @@ from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
+from .diagnostics import annotate
+
 Text = Annotated[str, Field(min_length=1, max_length=500, pattern=r"\S")]
 Key = Annotated[str, Field(min_length=1, max_length=200, pattern=r"^[\w./:@ -]+$")]
 
@@ -278,9 +280,7 @@ class Extraction(Model):
 
     def validate_evidence(self, transcript: Transcript):
         def reject(message, location):
-            error = ValueError(message)
-            error.memory_location = location
-            raise error
+            raise annotate(ValueError(message), location=location)
 
         messages = {m.id: m for m in transcript.messages}
         mismatched = []
@@ -305,9 +305,11 @@ class Extraction(Model):
         if mismatched:
             # Every bad quote at once: a correction pass that learns of one per
             # attempt cannot finish within the retry budget.
-            error = ValueError("Evidence must quote an exact substring of its source message")
-            error.memory_location, error.memory_locations = mismatched[0], mismatched[:10]
-            raise error
+            raise annotate(
+                ValueError("Evidence must quote an exact substring of its source message"),
+                location=mismatched[0],
+                locations=mismatched[:10],
+            )
         # The rules below judge the evidence as repaired: a quote moved to another
         # message is held to that message's role and focus.
         focus = set(transcript.focus_message_ids)

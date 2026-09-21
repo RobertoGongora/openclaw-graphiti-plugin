@@ -7,6 +7,7 @@ import signal
 import sys
 import threading
 from pathlib import Path
+from typing import Any
 
 from .importers import memory_files, transcripts
 from .llm import configured_llm
@@ -17,6 +18,9 @@ from .store import GraphStore
 
 
 def build_service():
+    from .credentials import refuse_default_password
+
+    refuse_default_password()
     store = GraphStore(
         os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687"),
         os.environ.get("NEO4J_USER", "neo4j"),
@@ -257,6 +261,7 @@ def run():
     if args.command in ("work", "daemon") and os.environ.get("MEMORY_LLM", "caller") == "caller":
         parser.error(f"{args.command} requires MEMORY_LLM=codex or compatible")
     service = build_service()
+    result: dict[str, Any]
     try:
         if args.command == "serve":
             protocol = Protocol(service, namespace=args.namespace, read_only=args.read_only)
@@ -376,7 +381,7 @@ def run():
         elif args.command == "daemon":
             from .daemon import run_daemon
 
-            result = run_daemon(
+            ran = run_daemon(
                 service,
                 args.namespace,
                 args.paths,
@@ -386,8 +391,9 @@ def run():
                 args.once,
                 args.source_records,
             )
-            if result is None:
+            if ran is None:
                 return
+            result = ran
         elif args.command == "retry-quarantined":
             result = service.store.retry_quarantined(args.namespace, args.episode_id)
         elif args.command == "work":

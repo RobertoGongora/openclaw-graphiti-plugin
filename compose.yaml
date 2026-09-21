@@ -34,7 +34,10 @@ x-graph-memory: &graph-memory
 
 x-neo4j-client: &neo4j-client
   NEO4J_URI: bolt://neo4j:7687
-  NEO4J_PASSWORD: ${NEO4J_PASSWORD:?Set a Neo4j password}
+  # An easy default so the stack starts with no setup. The services refuse to touch
+  # the database while it is unchanged, unless MEMORY_ALLOW_DEFAULT_PASSWORD=1.
+  NEO4J_PASSWORD: ${NEO4J_PASSWORD:-graph-memory}
+  MEMORY_ALLOW_DEFAULT_PASSWORD: ${MEMORY_ALLOW_DEFAULT_PASSWORD:-}
   MEMORY_NAMESPACE: ${MEMORY_NAMESPACE:-personal}
 
 services:
@@ -50,7 +53,7 @@ services:
       # A volume created with NEO4J_AUTH=none takes this password on its first
       # authenticated start, but only if the default password was never changed;
       # afterwards the stored password wins and this value must match it.
-      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:?Set a Neo4j password}
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-graph-memory}
       # `*` lets any page open in a local browser query the HTTP API.
       NEO4J_dbms_security_http__access__control__allow__origin: ${MEMORY_NEO4J_BROWSER_ORIGIN:-http://127.0.0.1:17474}
       NEO4J_server_memory_heap_initial__size: 256m
@@ -129,7 +132,7 @@ services:
     environment:
       <<: *neo4j-client
       MEMORY_LLM: caller
-      MEMORY_HTTP_TOKEN: ${MEMORY_HTTP_TOKEN:?Set a private MCP bearer token in .env}
+      MEMORY_HTTP_TOKEN: ${MEMORY_HTTP_TOKEN:-graph-memory}
       # Extra Host names and browser Origins accepted besides loopback (comma lists).
       MEMORY_HTTP_HOSTS: ${MEMORY_HTTP_HOSTS:-}
       MEMORY_HTTP_ORIGINS: ${MEMORY_HTTP_ORIGINS:-}

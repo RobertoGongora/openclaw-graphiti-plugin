@@ -8,6 +8,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
 
 from . import settings
 from .diagnostics import SYSTEMIC, diagnostic
@@ -154,7 +155,8 @@ def run_daemon(
     seen, feed_seen = {}, {}
     stop = threading.Event()
     breaker = service.breaker = Breaker()
-    announced, announcing = {"open": False}, threading.Lock()
+    announced: dict[str, Any] = {"open": False}
+    announcing = threading.Lock()
 
     def report(state):
         # One line when the provider goes away, per failed probe, and when it returns.

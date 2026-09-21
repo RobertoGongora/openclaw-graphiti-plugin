@@ -315,6 +315,10 @@ def host_allowed(value, extra=()):
     return match[1] in LOOPBACK or match[1] in extra or value in extra
 
 
+class Server(ThreadingHTTPServer):
+    request_slots: threading.BoundedSemaphore
+
+
 def http_server(protocol, host="127.0.0.1", port=8765, token=None, origins=(), hosts=()):
     if host not in ("127.0.0.1", "::1", "localhost") and not token:
         raise ValueError("Non-loopback HTTP requires MEMORY_HTTP_TOKEN")
@@ -328,6 +332,8 @@ def http_server(protocol, host="127.0.0.1", port=8765, token=None, origins=(), h
     slots = threading.BoundedSemaphore(16)
 
     class Handler(BaseHTTPRequestHandler):
+        server: Server
+
         def setup(self):
             super().setup()
             self.connection.settimeout(30)
@@ -392,6 +398,6 @@ def http_server(protocol, host="127.0.0.1", port=8765, token=None, origins=(), h
             )
             self.respond(status, response)
 
-    server = ThreadingHTTPServer((host, port), Handler)
+    server = Server((host, port), Handler)
     server.request_slots = slots
     return server

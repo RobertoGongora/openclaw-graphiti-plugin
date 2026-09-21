@@ -1,6 +1,7 @@
 """Bounded error metadata for logs; never emit source text or raw exceptions."""
 
 import re
+from typing import Any
 
 from pydantic import ValidationError
 
@@ -79,8 +80,16 @@ def reason(message):
     return None
 
 
-def diagnostic(exc, stage="worker"):
-    result = {"stage": stage, "code": "unclassified_error"}
+def annotate(exc: BaseException, **metadata):
+    # Pydantic's and the driver's exceptions carry engine metadata too, and the stored
+    # error type is the raised class name, so a typed exception base cannot hold it.
+    for name, value in metadata.items():
+        setattr(exc, f"memory_{name}", value)
+    return exc
+
+
+def diagnostic(exc, stage="worker") -> dict[str, Any]:
+    result: dict[str, Any] = {"stage": stage, "code": "unclassified_error"}
     if isinstance(exc, ValidationError):
         result["code"] = "schema_validation"
         result["issue_count"] = exc.error_count()

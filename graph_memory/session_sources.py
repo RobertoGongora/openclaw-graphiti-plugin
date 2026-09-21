@@ -9,6 +9,7 @@ import json
 import posixpath
 import re
 from pathlib import Path
+from typing import Literal
 
 from .importers import redact, text_content
 from .models import ArtifactTouch, Message, Transcript
@@ -17,6 +18,13 @@ from .store import digest
 FORMAT = "session-records-v1"
 CHUNK = 24_000
 MAX_BATCH_CHARS = 90_000
+# path, operation, submitted body, capture: the ArtifactTouch vocabulary.
+Touch = tuple[
+    str,
+    Literal["read", "write", "patch"],
+    str,
+    Literal["excerpt", "submitted_content", "patch", "unavailable"],
+]
 
 
 def memory_path(path):
@@ -29,7 +37,7 @@ def memory_path(path):
     )
 
 
-def tool_touch(name, arguments):
+def tool_touch(name, arguments) -> list[Touch]:
     """Conservative artifact recognition; unrecognized shell/JS stays an explicit gap."""
     short = name.rsplit("__", 1)[-1].lower()
     args = arguments if isinstance(arguments, dict) else {}
@@ -192,7 +200,7 @@ def records(path: Path):
                         args = json.loads(args)
                     except json.JSONDecodeError:
                         pass
-                recognized = tool_touch(tool, args)
+                recognized: list[Touch] = tool_touch(tool, args)
                 call_cwd = (
                     args.get("workdir", args.get("cwd", cwd)) if isinstance(args, dict) else cwd
                 )

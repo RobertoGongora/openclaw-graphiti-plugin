@@ -426,6 +426,12 @@ because an older image cannot write to a migrated journal.
 
 ## Secrets
 
+The personal stack starts with no `.env`: `NEO4J_PASSWORD` and `MEMORY_HTTP_TOKEN` both
+default to `graph-memory`. While either still has that value the services stop
+before touching the database, exit with code 2, and print the steps to change it.
+`MEMORY_ALLOW_DEFAULT_PASSWORD=1` accepts the default for a throwaway graph. The
+transcripts stack has no default and requires both values.
+
 - The env file holds `NEO4J_PASSWORD` and the MCP bearer tokens. Keep one per
   stack outside the repository, readable only by you. A `.env` in the checkout is
   git-ignored.

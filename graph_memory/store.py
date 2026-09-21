@@ -428,6 +428,7 @@ class GraphStore:
                 [digest([episode_id, f.model_dump(mode="json")]) for f in extraction.facts],
             )
             fact_ids = []
+            documented = transcript.source_updated_at or transcript.source_created_at
             for fact in extraction.facts:
                 raw = fact.model_dump(mode="json")
                 fid = digest([episode_id, raw])
@@ -461,16 +462,8 @@ class GraphStore:
                         if transcript.source_created_at
                         else "unknown"
                     ),
-                    "documented_at": (
-                        transcript.source_updated_at or transcript.source_created_at
-                    ).isoformat()
-                    if (transcript.source_updated_at or transcript.source_created_at)
-                    else None,
-                    "documented_ts": (
-                        transcript.source_updated_at or transcript.source_created_at
-                    ).timestamp()
-                    if (transcript.source_updated_at or transcript.source_created_at)
-                    else None,
+                    "documented_at": documented.isoformat() if documented else None,
+                    "documented_ts": documented.timestamp() if documented else None,
                     "confidence": fact.confidence,
                     "evidence": json.dumps(raw["evidence"]),
                     "validation_evidence": json.dumps(raw["validation_evidence"]),

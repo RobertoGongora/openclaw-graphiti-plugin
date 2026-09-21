@@ -6,7 +6,7 @@ import uuid
 
 from . import models as m
 from . import retrieval, status
-from .diagnostics import SYSTEMIC, diagnostic
+from .diagnostics import SYSTEMIC, annotate, diagnostic
 from .extraction_policy import extraction_payload
 from .llm import DREAM_INSTRUCTIONS, ModelUnavailable, extraction_instructions
 from .retry import feedback, restored_feedback
@@ -167,16 +167,17 @@ class MemoryService:
             lap("commit")
             return {**receipt, "timings": timings, "model_calls": attempt + 1, "cached": False}
         except Exception as exc:
-            exc.memory_diagnostic = {
+            issue = {
                 **diagnostic(exc, stage),
                 "timings": timings,
                 "extraction_attempt": attempt + 1,
                 "duration_seconds": round(time.monotonic() - started, 3),
                 "engine": self.store.engine,
             }
+            annotate(exc, diagnostic=issue)
             # A provider outage or a namespace fault leaves the episode as it was:
             # nothing about it failed.
-            if isinstance(exc, ModelUnavailable) or exc.memory_diagnostic["code"] in SYSTEMIC:
+            if isinstance(exc, ModelUnavailable) or issue["code"] in SYSTEMIC:
                 raise
             self.store.failed(
                 request.namespace,

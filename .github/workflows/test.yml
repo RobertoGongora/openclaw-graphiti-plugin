@@ -22,9 +22,7 @@ jobs:
       - run: uv sync --locked
       - run: uv run ruff check graph_memory tests evals
       - run: uv run ruff format --check graph_memory tests evals
-      # Advisory until the existing pyright errors are cleared.
       - run: uv run pyright
-        continue-on-error: true
 
   test:
     runs-on: ubuntu-latest
