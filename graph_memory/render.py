@@ -58,6 +58,12 @@ def read_query(cypher):
         raise ValueError(
             "Rendering permits one read-only query; writes, procedures, and imports are disabled."
         )
+    # Bookkeeping nodes hold megabytes of journal data each and are never drawn;
+    # returning them would stream those blobs through the server for nothing.
+    if {"MEMORYCHANGE", "MEMORYSNAPSHOTPART", "MEMORYREVISION", "MEMORYREVISIONCANDIDATE"} & set(
+        tokens
+    ):
+        raise ValueError("Journal and revision records cannot be rendered.")
     if re.search(r"\b\w+\s*\.\s*\w+\s*\(", " ".join(tokens)):
         raise ValueError("Namespaced functions are disabled for graph rendering.")
     return query

@@ -222,7 +222,8 @@ def test_bootstrap_coverage_and_checkpoint_reconstruction(graph):
     final = journal.snapshot(ns)
     assert final["sequence"] == 100
     live = store.transaction(lambda tx: capture(tx, ns))
-    assert final["state"] == live
+    # Source text is journaled by reference; resolving reads it back and checks it.
+    assert journal.resolve(ns, final["state"]) == live
     assert (
         journal.snapshot(ns, sequence=99)["state"]["MemoryFact"][receipt["fact_ids"][0]][
             "retraction_reason"

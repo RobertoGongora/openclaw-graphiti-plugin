@@ -96,6 +96,7 @@ class GraphStore:
                 "MemoryAlias",
                 "MemoryRevisionCandidate",
                 "MemoryRevisionDream",
+                "MemorySnapshotPart",
             ):
                 tx.run(
                     f"CREATE CONSTRAINT {label.lower()}_id IF NOT EXISTS FOR (n:{label}) REQUIRE n.id IS UNIQUE"

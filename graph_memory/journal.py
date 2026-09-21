@@ -1,7 +1,9 @@
 """Append-only knowledge changes, historical reconstruction, and isolated replay."""
 
+import hashlib
 import json
 import os
+import zlib
 from collections import Counter
 from datetime import UTC, datetime
 
@@ -35,8 +37,31 @@ VOLATILE = {
     "quarantine_reason",
 }
 
+# Written once and never changed: source_graph.save() and store.stage() set them
+# ON CREATE only, and save() refuses a message whose content differs. From event
+# version 3 the journal stores their sha256 and reads the text back from the live
+# node. MemoryEpisode.extraction_payload is not here: promoting a revision commits
+# the same episode again with a new extraction, and history must keep the old one.
+#
+# A reference is only as good as the check made when it is resolved. Replaying
+# events proves the chain and the state hashes, not that a live body is still the
+# text that was journaled: an edit made outside the journal is found when the body
+# is read through Bodies, and by verify() and verify_live(), which hash every
+# live body.
+IMMUTABLE = {
+    "MemoryEpisode": ("payload",),
+    "MemoryMessage": ("content",),
+    "MemoryArtifactObservation": ("content",),
+}
+REF = "$ref"
+INLINE = 128  # a shorter body costs less inline than its reference
+PART_BYTES = 4 << 20  # uncompressed; bounds what a checkpoint read or write holds
+CHECKPOINT_BYTES = 64 << 20
 
 MODULUS = 1 << 256
+INTEGRITY = "Journal integrity check failed"
+CHECKPOINT = "Journal checkpoint integrity check failed"
+REPLAY = "Journal replay integrity check failed"
 
 
 def element_hash(label, props):
@@ -50,6 +75,102 @@ def set_hash(state):
 
 def hexhash(value):
     return f"{value % MODULUS:064x}"
+
+
+def body_hash(value):
+    return hashlib.sha256(value.encode("utf-8", "surrogatepass")).hexdigest()
+
+
+def is_ref(value):
+    return isinstance(value, dict) and REF in value
+
+
+def referenced(label, props):
+    """props with each write-once body replaced by {"$ref": sha256}; the same
+    object when there is nothing to replace."""
+    for key in IMMUTABLE.get(label, ()):
+        value = props.get(key)
+        if isinstance(value, str) and len(value) >= INLINE:
+            props = {**props, key: {REF: body_hash(value)}}
+    return props
+
+
+def holds_ref(label, node):
+    return any(is_ref(dict.get(node, key)) for key in IMMUTABLE.get(label, ()))
+
+
+class Bodies:
+    """Write-once bodies read back from the live graph and checked against their refs."""
+
+    def __init__(self, store, namespace):
+        self.store, self.namespace = store, namespace
+
+    def resolved(self, tx, label, nodes, size=100):
+        """Plain copies of reconstructed nodes with their bodies, a batch at a time."""
+        keys = IMMUTABLE.get(label, ())
+        batch = []
+        for node in nodes:
+            batch.append(node)
+            if len(batch) == size:
+                yield from self._batch(tx, label, keys, batch)
+                batch = []
+        yield from self._batch(tx, label, keys, batch)
+
+    def _batch(self, tx, label, keys, batch):
+        wanted = [dict.get(n, "id") for n in batch if holds_ref(label, n)]
+        live = {}
+        if wanted:
+            fields = ",".join(f"n.{key} AS {key}" for key in keys)
+            live = {
+                row["id"]: row
+                for row in tx.run(
+                    f"MATCH (n:{label}) WHERE n.id IN $ids AND n.namespace=$ns "
+                    f"RETURN n.id AS id,{fields}",
+                    ids=wanted,
+                    ns=self.namespace,
+                )
+            }
+        for node in batch:
+            props = dict(node)
+            for key in keys:
+                if is_ref(props.get(key)):
+                    body = live.get(props["id"], {}).get(key)
+                    if not isinstance(body, str) or body_hash(body) != props[key][REF]:
+                        raise ValueError(INTEGRITY)
+                    props[key] = body
+            yield props
+
+    def one(self, label, node, key):
+        return self.store.transaction(
+            lambda tx: next(
+                self.resolved(tx, label, [{"id": dict.get(node, "id"), key: dict.get(node, key)}])
+            )
+        )[key]
+
+
+class Node(dict):
+    """A reconstructed node. Reading a referenced body fetches and checks it, so
+    callers written for embedded bodies keep working; items() and equality see
+    the reference."""
+
+    __slots__ = ("bodies", "label")
+
+    def __init__(self, label, bodies):
+        super().__init__()
+        self.label, self.bodies = label, bodies
+
+    def __getitem__(self, key):
+        value = super().__getitem__(key)
+        return self.bodies.one(self.label, self, key) if is_ref(value) else value
+
+    def get(self, key, default=None):
+        return self[key] if key in self else default
+
+
+def flatten(state):
+    for label in LABELS:
+        for props in state[label].values():
+            yield label, props
 
 
 def elements(tx, namespace, ids=None):
@@ -130,28 +251,73 @@ def difference(before, after):
             old, new = before[label].get(key), after[label].get(key)
             if old == new:
                 continue
-            changes.append(
-                {
-                    "label": label,
-                    "id": key,
-                    "deleted": new is None,
-                    "set": {k: v for k, v in (new or {}).items() if old is None or old.get(k) != v},
-                    "unset": sorted((old or {}).keys() - (new or {}).keys()),
-                }
-            )
+            change = {
+                "label": label,
+                "id": key,
+                "deleted": new is None,
+                "set": referenced(
+                    label,
+                    {k: v for k, v in (new or {}).items() if old is None or old.get(k) != v},
+                ),
+                "unset": sorted((old or {}).keys() - (new or {}).keys()),
+            }
+            # The node's hash after the change, taken here where its bodies are in
+            # hand: replay keeps the running state hash without reading them.
+            if new is not None:
+                change["hash"] = hexhash(element_hash(label, new))
+            changes.append(change)
     return changes
 
 
-def apply(state, changes):
+def apply(state, changes, bodies=None):
     for change in changes:
-        bucket = state[change["label"]]
+        label = change["label"]
+        bucket = state[label]
         if change["deleted"]:
             bucket.pop(change["id"], None)
         else:
-            node = bucket.setdefault(change["id"], {})
+            node = bucket.get(change["id"])
+            if node is None:
+                node = bucket[change["id"]] = Node(label, bodies) if label in IMMUTABLE else {}
             node.update(change["set"])
             for key in change["unset"]:
                 node.pop(key, None)
+
+
+def advance(state, sealed, running, event, bodies=None):
+    """Apply one delta and check its state hash; returns the running hash sum.
+    sealed holds the hash of every node that carries a reference, which cannot be
+    hashed again without its body."""
+    if event.get("version", 1) < 2:
+        apply(state, event["changes"], bodies)
+        if digest(state) != event["state_hash"]:
+            raise ValueError(REPLAY)
+        return None
+    if running is None:
+        running = set_hash(state)
+    for change in event["changes"]:
+        label, key = change["label"], change["id"]
+        if key in state[label]:
+            old = sealed.pop((label, key), None)
+            running -= element_hash(label, state[label][key]) if old is None else old
+    apply(state, event["changes"], bodies)
+    for change in event["changes"]:
+        label, key = change["label"], change["id"]
+        if change["deleted"]:
+            continue
+        node = state[label][key]
+        if holds_ref(label, node):
+            if "hash" not in change:
+                raise ValueError(REPLAY)
+            new = sealed[(label, key)] = int(change["hash"], 16)
+        else:
+            new = element_hash(label, node)
+            if change.get("hash", hexhash(new)) != hexhash(new):
+                raise ValueError(REPLAY)
+        running += new
+    if hexhash(running) != event["state_hash"]:
+        raise ValueError(REPLAY)
+    return running
 
 
 class Journal:
@@ -163,12 +329,12 @@ class Journal:
             "MATCH (s:MemorySpace {id:$ns}) RETURN properties(s) AS s", ns=namespace
         ).single()["s"]
 
-    def _append(self, tx, namespace, kind, details, state_hash, changes=None, snapshot=None):
+    def _append(self, tx, namespace, kind, details, state_hash, changes=None, parts=None):
         head = self._head(tx, namespace)
         sequence = head.get("journal_sequence", -1) + 1
         recorded_us = max(int(now().timestamp() * 1_000_000), head.get("journal_us", 0) + 1)
         event = {
-            "version": 2,
+            "version": 3,
             "sequence": sequence,
             "scope": namespace,
             "kind": kind,
@@ -181,18 +347,22 @@ class Journal:
             "details": details,
             "changes": changes or [],
         }
-        # Only a baseline embeds state: a periodic full snapshot grows with the
-        # graph. Historical reads replay deltas from the latest checkpoint.
-        if snapshot is not None:
-            event["snapshot"] = snapshot
+        # Only a baseline or a checkpoint carries state, as separate part nodes. Their
+        # hashes are listed here, so the chain hash covers them.
+        if parts is not None:
+            event["parts"] = parts
         event_hash = digest(event)
+        payload = json.dumps(event, sort_keys=True)
         tx.run(
             "CREATE (e:MemoryChange {id:$id,namespace:$audit,scope:$ns,sequence:$seq,"
             "kind:$kind,recorded_at:$at,recorded_us:$us,payload:$payload,hash:$hash,"
             "checkpoint:$checkpoint}) "
             "WITH e MATCH (s:MemorySpace {id:$ns}) SET s.journal_sequence=$seq,"
             "s.journal_hash=$hash,s.journal_us=$us,s.journal_state_hash=$state,"
-            "s.journal_set_hash=$state",
+            "s.journal_set_hash=$state,s.journal_checkpoint_bytes="
+            "CASE WHEN $checkpoint THEN $size ELSE s.journal_checkpoint_bytes END,"
+            "s.journal_delta_bytes="
+            "CASE WHEN $checkpoint THEN 0 ELSE coalesce(s.journal_delta_bytes,0)+$size END",
             id=digest(["journal", namespace, sequence]),
             audit="audit:" + namespace,
             ns=namespace,
@@ -200,29 +370,140 @@ class Journal:
             kind=kind,
             at=event["recorded_at"],
             us=recorded_us,
-            payload=json.dumps(event, sort_keys=True),
+            payload=payload,
             hash=event_hash,
             state=event["state_hash"],
-            checkpoint=snapshot is not None,
+            checkpoint=parts is not None,
+            size=sum(p["bytes"] for p in parts) if parts is not None else len(payload),
         ).consume()
+        if parts:
+            tx.run(
+                "MATCH (e:MemoryChange {id:$id}),(p:MemorySnapshotPart {scope:$ns,sequence:$seq}) "
+                "CREATE (e)-[:PART {i:p.i}]->(p)",
+                id=digest(["journal", namespace, sequence]),
+                ns=namespace,
+                seq=sequence,
+            ).consume()
         return event
 
-    def _baseline(self, tx, namespace, details, state):
+    def _parts(self, tx, namespace, nodes):
+        """Write (label, props) pairs as the parts of the next event, one part in
+        memory at a time. Returns the part list, the state hash sum and the count."""
+        sequence = self._head(tx, namespace).get("journal_sequence", -1) + 1
+        # Parts past the head belong to no event: a journal that was removed by hand
+        # leaves them behind, and they would be linked to the new event.
+        tx.run(
+            "MATCH (p:MemorySnapshotPart {scope:$ns}) WHERE p.sequence>=$seq DETACH DELETE p",
+            ns=namespace,
+            seq=sequence,
+        ).consume()
+        parts, lines = [], []
+        total = records = size = 0
+        current = None
+
+        def flush():
+            raw = "\n".join(lines).encode()
+            data = zlib.compress(raw)
+            tx.run(
+                # namespace lets a namespace-wide delete take the parts with it. No
+                # journaled label is involved, so capture never sees them.
+                "CREATE (:MemorySnapshotPart {id:$id,namespace:$ns,scope:$ns,sequence:$seq,"
+                "i:$i,label:$label,data:$data})",
+                id=digest(["journal-part", namespace, sequence, len(parts)]),
+                ns=namespace,
+                seq=sequence,
+                i=len(parts),
+                label=current,
+                data=data,
+            ).consume()
+            parts.append(
+                {
+                    "label": current,
+                    "sha256": hashlib.sha256(data).hexdigest(),
+                    "bytes": len(raw),
+                    "records": len(lines),
+                }
+            )
+
+        for label, props in nodes:
+            value = element_hash(label, props)
+            slim = referenced(label, props)
+            line = json.dumps(
+                {"p": slim, "h": hexhash(value)} if slim is not props else {"p": slim},
+                sort_keys=True,
+            )
+            if lines and (label != current or size + len(line) > PART_BYTES):
+                flush()
+                lines, size = [], 0
+            current = label
+            lines.append(line)
+            size += len(line) + 1
+            total += value
+            records += 1
+        if lines:
+            flush()
+        return parts, total, records
+
+    def _baseline(self, tx, namespace, details, nodes):
+        parts, total, records = self._parts(tx, namespace, nodes)
         return self._append(
             tx,
             namespace,
             "baseline",
-            {**details, "preexisting_records": sum(map(len, state.values()))},
-            hexhash(set_hash(state)),
-            snapshot=state,
+            {**details, "preexisting_records": records},
+            hexhash(total),
+            parts=parts,
         )
+
+    def _restore(self, tx, namespace, event, bodies):
+        """The state a checkpoint event carries, the hashes of its nodes that hold
+        references, and its hash sum (None for the whole-state digest of version 1)."""
+        state = {label: {} for label in LABELS}
+        sealed = {}
+        if "parts" not in event:
+            if "snapshot" not in event:
+                raise ValueError(CHECKPOINT)
+            state.update(event["snapshot"])
+            if event.get("version", 1) < 2:
+                if digest(state) != event["state_hash"]:
+                    raise ValueError(CHECKPOINT)
+                return state, sealed, None
+            total = set_hash(state)
+        else:
+            total = 0
+            for i, part in enumerate(event["parts"]):
+                row = tx.run(
+                    "MATCH (:MemoryChange {id:$id})-[:PART {i:$i}]->(p:MemorySnapshotPart) "
+                    "RETURN p.data AS data",
+                    id=digest(["journal", namespace, event["sequence"]]),
+                    i=i,
+                ).single()
+                try:
+                    if not row or hashlib.sha256(row["data"]).hexdigest() != part["sha256"]:
+                        raise ValueError("Invalid snapshot part")
+                    label = part["label"]
+                    for line in zlib.decompress(row["data"]).decode().split("\n"):
+                        record = json.loads(line)
+                        node = Node(label, bodies) if "h" in record else {}
+                        node.update(record["p"])
+                        state[label][node["id"]] = node
+                        if "h" in record:
+                            total += int(record["h"], 16)
+                            sealed[(label, node["id"])] = int(record["h"], 16)
+                        else:
+                            total += element_hash(label, node)
+                except (ValueError, TypeError, KeyError, zlib.error) as exc:
+                    raise ValueError(CHECKPOINT) from exc
+        if hexhash(total) != event["state_hash"]:
+            raise ValueError(CHECKPOINT)
+        return state, sealed, total
 
     def initialize(self, namespace):
         def run(tx):
             self.store.lock(tx, namespace)
             head = self._head(tx, namespace)
             if "journal_sequence" not in head:
-                self._baseline(tx, namespace, {}, capture(tx, namespace))
+                self._baseline(tx, namespace, {}, elements(tx, namespace))
             return self._head(tx, namespace)
 
         head = self.store.transaction(run)
@@ -274,7 +555,7 @@ class Journal:
             return result
         before = capture(tx, namespace)
         if "journal_sequence" not in head:
-            self._baseline(tx, namespace, {}, before)
+            self._baseline(tx, namespace, {}, flatten(before))
         elif not migrated:
             # Journals written before the set hash carry a digest of the whole state.
             # Both head hashes move together, so a process still running the older
@@ -322,7 +603,8 @@ class Journal:
     }
 
     def _events(self, tx, namespace, first, last, previous):
-        """Hash-checked events first..last; previous is the hash before first."""
+        """Hash-checked (event, hash) pairs first..last, a batch in memory at a time;
+        previous is the hash before first."""
         count = 0
         for low in range(first, last + 1, 25):
             rows = tx.run(
@@ -338,19 +620,19 @@ class Journal:
                     if not isinstance(event, dict) or not self.REQUIRED <= event.keys():
                         raise ValueError("Invalid journal event")
                 except (ValueError, TypeError) as exc:
-                    raise ValueError("Journal integrity check failed") from exc
+                    raise ValueError(INTEGRITY) from exc
                 if (
                     event["sequence"] != first + count
                     or event["scope"] != namespace
                     or event["previous_hash"] != previous
                     or digest(event) != row["hash"]
                 ):
-                    raise ValueError("Journal integrity check failed")
+                    raise ValueError(INTEGRITY)
                 previous = row["hash"]
                 count += 1
-                yield event
+                yield event, previous
         if count != last - first + 1:
-            raise ValueError("Journal integrity check failed")
+            raise ValueError(INTEGRITY)
 
     def snapshot(self, namespace, *, known_at=None, sequence=None, transaction=None):
         if known_at is not None and sequence is not None:
@@ -401,51 +683,51 @@ class Journal:
                 ).data()
             }
             if start is None or 0 not in edges or (start and start - 1 not in edges):
-                raise ValueError("Journal integrity check failed")
+                raise ValueError(INTEGRITY)
             previous = edges[start - 1]["hash"] if start else None
-            events = list(self._events(tx, namespace, start, target, previous))
-            if target == head["journal_sequence"] and digest(events[-1]) != head["journal_hash"]:
+            # One event at a time: a long run of deltas never sits in memory, and
+            # the checkpoint's state is changed in place.
+            bodies = Bodies(self.store, namespace)
+            events = self._events(tx, namespace, start, target, previous)
+            event, tip = next(events)
+            state, sealed, running = self._restore(tx, namespace, event, bodies)
+            for following in events:
+                event, tip = following
+                running = advance(state, sealed, running, event, bodies)
+            if target == head["journal_sequence"] and tip != head["journal_hash"]:
                 raise ValueError("Journal head does not match its history")
-            return events, edges[0]["recorded_at"]
+            return {
+                "state": state,
+                "sequence": event["sequence"],
+                "revision": event["revision"],
+                "known_at": event["recorded_at"],
+                "coverage_started_at": edges[0]["recorded_at"],
+                "hash": tip,
+            }
 
-        events, coverage = (
-            read(transaction) if transaction is not None else self.store.transaction(read)
+        return read(transaction) if transaction is not None else self.store.transaction(read)
+
+    def resolve(self, namespace, state, transaction=None):
+        """A reconstructed state with every referenced body read back and checked.
+        Holds all of them at once: for a bounded state, not a large namespace."""
+
+        def run(tx):
+            bodies = Bodies(self.store, namespace)
+            return {
+                label: {n["id"]: n for n in bodies.resolved(tx, label, state[label].values())}
+                for label in LABELS
+            }
+
+        return run(transaction) if transaction is not None else self.store.transaction(run)
+
+    def checkpoint_due(self, namespace, threshold=CHECKPOINT_BYTES):
+        """Whether the deltas since the last checkpoint outweigh it. For an idle
+        moment of a worker: a checkpoint reads the namespace under its lock, so the
+        write path never asks."""
+        head = self.store.transaction(lambda tx: self._head_or_none(tx, namespace)) or {}
+        return head.get("journal_delta_bytes", 0) >= max(
+            threshold, head.get("journal_checkpoint_bytes") or 0
         )
-        if "snapshot" not in events[0]:
-            raise ValueError("Journal checkpoint integrity check failed")
-        state = events[0]["snapshot"]
-        for label in LABELS:
-            state.setdefault(label, {})
-        expected = digest(state) if events[0].get("version", 1) < 2 else hexhash(set_hash(state))
-        if expected != events[0]["state_hash"]:
-            raise ValueError("Journal checkpoint integrity check failed")
-        running = None
-        for event in events[1:]:
-            if event.get("version", 1) < 2:
-                apply(state, event["changes"])
-                actual = digest(state)
-            else:
-                if running is None:
-                    running = set_hash(state)
-                touched = [(c["label"], c["id"]) for c in event["changes"]]
-                for label, key in touched:
-                    if key in state[label]:
-                        running -= element_hash(label, state[label][key])
-                apply(state, event["changes"])
-                for label, key in touched:
-                    if key in state[label]:
-                        running += element_hash(label, state[label][key])
-                actual = hexhash(running)
-            if actual != event["state_hash"]:
-                raise ValueError("Journal replay integrity check failed")
-        return {
-            "state": state,
-            "sequence": events[-1]["sequence"],
-            "revision": events[-1]["revision"],
-            "known_at": events[-1]["recorded_at"],
-            "coverage_started_at": coverage,
-            "hash": digest(events[-1]),
-        }
 
     def verify_live(self, namespace):
         """The live graph against the journal head, streamed: seconds and constant
@@ -467,9 +749,9 @@ class Journal:
         return self.store.transaction(run)
 
     def checkpoint(self, namespace, accept_live=False):
-        """Embed the current state so historical reads replay from here.
+        """Record the current state as parts so historical reads replay from here.
 
-        Reads the whole namespace under its lock: a maintenance action. With
+        Streams the whole namespace under its lock: a maintenance action. With
         accept_live, a graph that no longer matches its journal is recorded as the
         new truth, which is the only way forward after an untracked write."""
 
@@ -478,13 +760,15 @@ class Journal:
             head = self._head(tx, namespace)
             if "journal_sequence" not in head:
                 raise ValueError("No journal exists for this namespace")
-            state = capture(tx, namespace)
-            expected = head.get("journal_set_hash")
-            matches = (
-                hexhash(set_hash(state)) == expected
-                if expected == head["journal_state_hash"]
-                else digest(state) == head["journal_state_hash"]
-            )
+            if head.get("journal_set_hash") == head["journal_state_hash"]:
+                parts, total, records = self._parts(tx, namespace, elements(tx, namespace))
+                matches = hexhash(total) == head["journal_set_hash"]
+            else:
+                # A journal from before the per-node hash digests the state as a whole.
+                state = capture(tx, namespace)
+                matches = digest(state) == head["journal_state_hash"]
+                parts, total, records = self._parts(tx, namespace, flatten(state))
+            # Raising rolls the parts back with the transaction.
             if not matches and not accept_live:
                 raise ValueError(
                     "Graph differs from its journal; investigate an untracked write before continuing"
@@ -494,13 +778,13 @@ class Journal:
                 namespace,
                 "checkpoint",
                 {"accepted_untracked_state": not matches},
-                hexhash(set_hash(state)),
-                snapshot=state,
+                hexhash(total),
+                parts=parts,
             )
             return {
                 "namespace": namespace,
                 "sequence": event["sequence"],
-                "records": sum(map(len, state.values())),
+                "records": records,
                 "accepted_untracked_state": not matches,
             }
 
@@ -524,22 +808,39 @@ class Journal:
             if "journal_sequence" not in head:
                 raise ValueError("No journal exists for this namespace")
             final = None
-            for event in self._events(tx, namespace, 0, head["journal_sequence"], None):
-                final = digest(event)
+            for pair in self._events(tx, namespace, 0, head["journal_sequence"], None):
+                final = pair[1]
             if final != head["journal_hash"]:
                 raise ValueError("Journal head does not match its history")
             snapshot = self.snapshot(namespace, transaction=tx)
-            state = capture(tx, namespace)
-            if snapshot["state"] != state or head.get(
-                "journal_set_hash", hexhash(set_hash(state))
-            ) != hexhash(set_hash(state)):
+            state = snapshot["state"]
+            # The live graph a node at a time against the reconstruction. A
+            # referenced body is hashed here, which is where an edit to one shows.
+            total = records = 0
+            for label, props in elements(tx, namespace):
+                expected = state[label].get(props["id"])
+                if expected is None or expected.keys() != props.keys():
+                    raise ValueError("Live graph differs from journal reconstruction")
+                for key, value in dict.items(expected):
+                    live = props[key]
+                    if (
+                        body_hash(live) != value[REF]
+                        if is_ref(value) and isinstance(live, str)
+                        else live != value
+                    ):
+                        raise ValueError("Live graph differs from journal reconstruction")
+                total += element_hash(label, props)
+                records += 1
+            if records != sum(map(len, state.values())) or head.get(
+                "journal_set_hash", hexhash(total)
+            ) != hexhash(total):
                 raise ValueError("Live graph differs from journal reconstruction")
             return {
                 "namespace": namespace,
                 "verified": True,
                 "sequence": snapshot["sequence"],
                 "hash": snapshot["hash"],
-                "records": sum(map(len, state.values())),
+                "records": records,
             }
 
         return self.store.transaction(run)
@@ -662,8 +963,10 @@ class Journal:
             ).single()["count"]
             if occupied or head.get("replay_origin") or head.get("journal_sequence") is not None:
                 raise ValueError("Replay target already exists; it will not be overwritten")
+            bodies = Bodies(self.store, namespace)
             for label, nodes in state.items():
-                for original in nodes.values():
+                # A replay is a graph of its own, so it gets the real bodies.
+                for original in bodies.resolved(tx, label, nodes.values()):
                     props = {**original, "id": mapping[original["id"]], "namespace": target}
                     for key in (
                         "subject_id",
@@ -700,7 +1003,7 @@ class Journal:
                 tx,
                 target,
                 {"replay_origin": namespace, "replay_sequence": snapshot["sequence"]},
-                capture(tx, target),
+                elements(tx, target),
             )
             self.store.repair(target, transaction=tx)
             return {

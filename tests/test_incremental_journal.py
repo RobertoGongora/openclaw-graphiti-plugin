@@ -64,7 +64,8 @@ def test_scoped_writes_never_capture_the_namespace(graph, monkeypatch):
     monkeypatch.undo()
     live = store.transaction(lambda tx: capture(tx, ns))
     assert head(store, ns)["journal_set_hash"] == hexhash(set_hash(live))
-    assert Journal(store).snapshot(ns)["state"] == live
+    # Source text is journaled by reference; resolving reads it back and checks it.
+    assert Journal(store).resolve(ns, Journal(store).snapshot(ns)["state"]) == live
     assert Journal(store).verify(ns)["verified"]
 
 
@@ -152,7 +153,7 @@ def test_legacy_full_digest_journal_migrates_and_replays(graph):
     fact(store, ns, "three", day=14)  # scoped from here on
     assert [e["kind"] for e in journal.events(ns)][0] == "baseline"
     live = store.transaction(lambda tx: capture(tx, ns))
-    assert journal.snapshot(ns)["state"] == live
+    assert journal.resolve(ns, journal.snapshot(ns)["state"]) == live
     assert journal.verify(ns)["verified"]
     assert len(journal.snapshot(ns, sequence=0)["state"]["MemoryFact"]) == 1
     # An untracked edit made before the migration is refused, as before.
@@ -186,7 +187,7 @@ def test_no_periodic_snapshot_and_replay_past_one_hundred_events(graph):
     assert sorted(flagged) == [0, marked["sequence"]]  # never periodic
     final = journal.snapshot(ns)
     assert final["sequence"] > 100
-    assert final["state"] == store.transaction(lambda tx: capture(tx, ns))
+    assert journal.resolve(ns, final["state"]) == store.transaction(lambda tx: capture(tx, ns))
     past = journal.snapshot(ns, sequence=100)["state"]["MemoryFact"][receipt["fact_ids"][0]]
     assert past["retraction_reason"] == "note 97"
 
