@@ -1,80 +1,174 @@
-# Independent database/volume: does not alter the markdown benchmark stack.
+# Transcripts graph. Independent database and volume: does not alter the personal stack.
+# Configuration comes from .env (see .env.example); this file is the deployment.
 name: graph-memory-transcripts
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: '3'
+
+# The image writes only to /tmp and to the mounted codex home.
+x-hardening: &hardening
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+
+x-graph-memory: &graph-memory
+  image: graph-memory:${GRAPH_MEMORY_TAG:?Set the image tag}
+  build:
+    context: .
+    target: production
+    args:
+      GIT_SHA: ${GIT_SHA:-unknown}
+  restart: unless-stopped
+  logging: *logging
+  depends_on:
+    neo4j:
+      condition: service_healthy
+      # A recreated database gets a new address; clients must reconnect to it.
+      restart: true
+
+x-neo4j-client: &neo4j-client
+  NEO4J_URI: bolt://neo4j:7687
+  NEO4J_PASSWORD: ${NEO4J_PASSWORD:?Set a Neo4j password}
+  MEMORY_NAMESPACE: transcripts
+
 services:
   neo4j:
-    image: neo4j:5.26-community
+    image: ${NEO4J_IMAGE:-neo4j:5.26-community}
     restart: unless-stopped
+    # The default 10 s ends in SIGKILL mid-checkpoint, then recovery on the next start.
+    stop_grace_period: 2m
+    logging: *logging
+    # heap max + pagecache + ~2g of JVM native and transaction-state overhead.
+    mem_limit: ${TRANSCRIPT_NEO4J_MEM_LIMIT:-8g}
     environment:
-      NEO4J_AUTH: none
+      # A volume created with NEO4J_AUTH=none takes this password on its first
+      # authenticated start, but only if the default password was never changed;
+      # afterwards the stored password wins and this value must match it.
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:?Set a Neo4j password}
       NEO4J_server_bolt_advertised__address: 127.0.0.1:27687
       NEO4J_server_http_advertised__address: 127.0.0.1:27474
+      # `*` lets any page open in a local browser query the HTTP API.
+      NEO4J_dbms_security_http__access__control__allow__origin: ${TRANSCRIPT_NEO4J_BROWSER_ORIGIN:-http://127.0.0.1:27474}
       # Journal transactions capture source records; 512m stalls larger imports.
-      NEO4J_server_memory_heap_initial__size: '${TRANSCRIPT_NEO4J_HEAP_INITIAL:-1g}'
-      NEO4J_server_memory_heap_max__size: '${TRANSCRIPT_NEO4J_HEAP_MAX:-4g}'
-      NEO4J_server_memory_pagecache_size: 256m
+      NEO4J_server_memory_heap_initial__size: ${TRANSCRIPT_NEO4J_HEAP_INITIAL:-1g}
+      NEO4J_server_memory_heap_max__size: ${TRANSCRIPT_NEO4J_HEAP_MAX:-4g}
+      # The store is ~27 GB with a hot set of a few GB; 256m thrashed.
+      NEO4J_server_memory_pagecache_size: ${TRANSCRIPT_NEO4J_PAGECACHE:-2g}
+      # 0 waits forever, so one stuck lock holder wedges every writer.
+      NEO4J_db_lock_acquisition_timeout: 60s
+      NEO4J_db_transaction_timeout: 10m
+      # Checkpoint events carry ~360 MB strings; do not go below 1g.
+      NEO4J_db_memory_transaction_max: ${TRANSCRIPT_NEO4J_TX_MEMORY_MAX:-1g}
+      NEO4J_db_tx__log_rotation_retention__policy: 1 days 1G
       NEO4J_dbms_usage__report_enabled: 'false'
     ports:
       - '127.0.0.1:27687:7687'
-      - '127.0.0.1:27474:7474'
     volumes:
       - transcript_graph:/data
     healthcheck:
-      test: ['CMD', 'cypher-shell', '-a', 'bolt://localhost:7687', 'RETURN 1']
+      # NEO4J_PASSWORD would be read by the image as a server setting, so the
+      # password is derived from NEO4J_AUTH inside the container.
+      test: ['CMD-SHELL', 'cypher-shell -a bolt://localhost:7687 -u neo4j -p "$${NEO4J_AUTH#neo4j/}" "RETURN 1"']
       interval: 5s
       timeout: 5s
       retries: 30
-  worker:
-    image: graph-memory:transcripts
-    build: .
-    init: true
+
+  # Neo4j Browser/HTTP is published only on request:
+  #   docker compose -f compose.transcripts.yaml --profile browser up -d neo4j-browser
+  neo4j-browser:
+    profiles: [browser]
+    image: alpine/socat@sha256:24220ef2c80a2a421ea08e4624488e985330c421b6aa3329bae14b0933a1d403
+    <<: *hardening
     restart: unless-stopped
-    stop_grace_period: 45m
+    logging: *logging
+    mem_limit: 64m
+    pids_limit: 64
+    command: ['TCP-LISTEN:7474,fork,reuseaddr', 'TCP:neo4j:7474']
     depends_on:
       neo4j:
         condition: service_healthy
+    ports:
+      - '127.0.0.1:27474:7474'
+
+  worker:
+    <<: [*graph-memory, *hardening]
+    # The bind-mounted codex home and session directories belong to the host user.
+    user: '${HOST_UID:-501}:${HOST_GID:-20}'
+    # Must exceed 2 extraction attempts x 2 model attempts x MEMORY_LLM_TIMEOUT.
+    stop_grace_period: 45m
+    mem_limit: ${TRANSCRIPT_WORKER_MEM_LIMIT:-6g}
+    pids_limit: 1024
     environment:
-      NEO4J_URI: bolt://neo4j:7687
-      MEMORY_NAMESPACE: transcripts
-      MEMORY_LLM: codex
-      MEMORY_MODEL: gpt-5.6-terra
-      MEMORY_REASONING_EFFORT: low
+      <<: *neo4j-client
       HOME: /home/memory
-    command: [daemon, --source-records, --transcripts, /sessions/claude, --transcripts, /sessions/codex, --workers, '${TRANSCRIPT_WORKERS:-2}']
+      MEMORY_LLM: ${TRANSCRIPT_LLM:-codex}
+      MEMORY_MODEL: ${TRANSCRIPT_MODEL:-gpt-5.6-terra}
+      MEMORY_REASONING_EFFORT: ${TRANSCRIPT_REASONING_EFFORT:-low}
+      MEMORY_LLM_URL: ${MEMORY_LLM_URL:-}
+      MEMORY_LLM_API_KEY: ${MEMORY_LLM_API_KEY:-}
+      MEMORY_LLM_TIMEOUT: ${MEMORY_LLM_TIMEOUT:-420}
+      MEMORY_INTAKE_QUEUE: ${MEMORY_INTAKE_QUEUE:-32}
+      MEMORY_JOURNAL_AUDIT: ${MEMORY_JOURNAL_AUDIT:-503}
+    command: [daemon, --source-records, --transcripts, /sessions/claude, --transcripts, /sessions/codex, --workers, '${TRANSCRIPT_WORKERS:-8}']
     volumes:
       - '${CLAUDE_SESSIONS_PATH:?Set Claude session directory}:/sessions/claude:ro'
       - '${CODEX_SESSIONS_PATH:?Set Codex session directory}:/sessions/codex:ro'
       - '${TRANSCRIPT_AUTH_PATH:?Set Codex authentication directory}:/home/memory/.codex'
+    healthcheck:
+      test: ['CMD', 'graph-memory', 'health', '--role', 'worker']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
   inventory:
-    image: graph-memory:transcripts
-    build: .
-    init: true
-    restart: unless-stopped
+    <<: [*graph-memory, *hardening]
     stop_grace_period: 2m
-    depends_on:
-      neo4j:
-        condition: service_healthy
+    mem_limit: 512m
+    pids_limit: 128
     environment:
-      NEO4J_URI: bolt://neo4j:7687
-      MEMORY_NAMESPACE: transcripts
+      <<: *neo4j-client
       MEMORY_LLM: caller
     command: [inventory, --transcripts, /sessions/claude, --transcripts, /sessions/codex, --interval, '300']
     volumes:
       - '${CLAUDE_SESSIONS_PATH:?Set Claude session directory}:/sessions/claude:ro'
       - '${CODEX_SESSIONS_PATH:?Set Codex session directory}:/sessions/codex:ro'
+    healthcheck:
+      test: ['CMD', 'graph-memory', 'health', '--role', 'inventory']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
   mcp:
-    image: graph-memory:transcripts
-    init: true
-    restart: unless-stopped
-    depends_on:
-      neo4j:
-        condition: service_healthy
+    <<: [*graph-memory, *hardening]
+    mem_limit: 1g
+    pids_limit: 256
     environment:
-      NEO4J_URI: bolt://neo4j:7687
-      MEMORY_NAMESPACE: transcripts
+      <<: *neo4j-client
       MEMORY_LLM: caller
-      MEMORY_HTTP_TOKEN: '${TRANSCRIPT_MCP_TOKEN:?Set a private MCP token}'
+      MEMORY_HTTP_TOKEN: ${TRANSCRIPT_MCP_TOKEN:?Set a private MCP token}
+      # Extra Host names and browser Origins accepted besides loopback (comma lists).
+      MEMORY_HTTP_HOSTS: ${TRANSCRIPT_MCP_HOSTS:-}
+      MEMORY_HTTP_ORIGINS: ${TRANSCRIPT_MCP_ORIGINS:-}
     command: [serve, --transport, http, --host, 0.0.0.0]
     ports:
-      - '127.0.0.1:8766:8765'
+      - '127.0.0.1:${TRANSCRIPT_MCP_PORT:-8766}:8765'
+    healthcheck:
+      test: ['CMD', 'graph-memory', 'health', '--role', 'mcp']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
 volumes:
   transcript_graph:
+    # Explicit so a project rename or a fresh checkout reattaches the same data.
+    name: ${TRANSCRIPT_VOLUME:-graph-memory-transcripts_source-v1}

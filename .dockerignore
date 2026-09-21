@@ -1,6 +1,8 @@
 **
-!Dockerfile
 !pyproject.toml
+!uv.lock
+!README.md
+!LICENSE
 !graph_memory/
 !graph_memory/*.py
 !evals/

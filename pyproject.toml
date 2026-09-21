@@ -6,14 +6,35 @@ build-backend = "hatchling.build"
 name = "graph-memory"
 version = "0.1.0"
 description = "Evidence-backed temporal memory over stateless MCP and direct Neo4j"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Roberto Gongora" }]
 requires-python = ">=3.11"
+keywords = ["memory", "knowledge-graph", "neo4j", "mcp", "temporal"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+]
 dependencies = ["neo4j>=6,<7", "pydantic>=2.12,<3"]
+
+[project.urls]
+Repository = "https://github.com/RobertoGongora/openclaw-graphiti-plugin"
+Issues = "https://github.com/RobertoGongora/openclaw-graphiti-plugin/issues"
+Changelog = "https://github.com/RobertoGongora/openclaw-graphiti-plugin/blob/master/CHANGELOG.md"
 
 [project.scripts]
 graph-memory = "graph_memory.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8,<10", "ruff>=0.12,<1"]
+dev = ["pyright>=1.1.400,<2", "pytest>=8,<10", "pytest-cov>=6,<8", "ruff>=0.12,<1"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["graph_memory", "evals"]
@@ -21,6 +42,21 @@ packages = ["graph_memory", "evals"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["integration: requires an isolated Neo4j instance"]
+
+[tool.coverage.run]
+source = ["graph_memory"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
+[tool.pyright]
+include = ["graph_memory"]
+typeCheckingMode = "basic"
+pythonVersion = "3.11"
+venvPath = "."
+venv = ".venv"
 
 [tool.ruff]
 line-length = 100

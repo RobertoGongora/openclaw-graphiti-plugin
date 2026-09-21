@@ -3,42 +3,60 @@ name: Publish to npm
 on:
   release:
     types: [published]
-  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   publish:
+    # A manual run could publish whatever commit it was pointed at.
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     permissions:
-      id-token: write   # required for npm Trusted Publishing (OIDC)
+      id-token: write   # npm Trusted Publishing (OIDC)
       contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '22'   # Trusted Publishing requires Node 22.14+ / npm 11.5.1+
+          node-version: '22'   # Trusted Publishing requires Node 22.14+
           cache: npm
           registry-url: https://registry.npmjs.org
 
-      - name: Upgrade npm (Trusted Publishing requires npm 11.5.1+)
-        run: npm install -g npm@latest
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Run tests
-        run: npm test
-
-      - name: Publish to npm
+      - name: Release tag must match package.json
+        env:
+          TAG: ${{ github.event.release.tag_name }}
         run: |
-          VERSION=$(node -e "console.log(require('./package.json').version)")
+          VERSION=$(node -p "require('./package.json').version")
+          if [ "${TAG#v}" != "$VERSION" ]; then
+            echo "::error::release tag $TAG does not match package version $VERSION"
+            exit 1
+          fi
+
+      # Trusted Publishing requires npm 11.5.1+; the major is pinned so a new npm
+      # major cannot change publish behaviour unreviewed.
+      - run: npm install -g npm@11
+
+      - run: npm ci --ignore-scripts
+
+      - if: hashFiles('tsconfig.json') != ''
+        run: npm run typecheck
+
+      - run: npm test
+
+      - name: Publish
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
           if [[ "$VERSION" =~ -(beta|alpha|rc|next) ]]; then
-            # Prerelease versions need an explicit tag
-            TAG=$(echo "$VERSION" | sed -E 's/.*-([a-z]+).*/\1/')
-            npm publish --access public --tag "$TAG"
+            # A prerelease must not take the `latest` dist-tag.
+            npm publish --access public --tag "${BASH_REMATCH[1]}"
           else
             npm publish --access public
           fi
-        # --provenance is automatic with Trusted Publishing from GHA
-        # No NODE_AUTH_TOKEN needed — OIDC handles auth
+        # Provenance is automatic with Trusted Publishing; no NODE_AUTH_TOKEN.

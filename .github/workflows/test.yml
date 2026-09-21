@@ -2,17 +2,41 @@ name: Tests
 
 on:
   push:
-    branches: [master]
   pull_request:
-    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  graph-memory:
+  lint:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          version: '0.11.11'
+      - run: uv sync --locked
+      - run: uv run ruff check graph_memory tests evals
+      - run: uv run ruff format --check graph_memory tests evals
+      # Advisory until the existing pyright errors are cleared.
+      - run: uv run pyright
+        continue-on-error: true
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.12', '3.13']
     services:
       neo4j:
         image: neo4j:5.26-community
         env:
+          # Disposable, reachable only from this job.
           NEO4J_AUTH: none
         ports:
           - 7687:7687
@@ -22,27 +46,51 @@ jobs:
     env:
       MEMORY_TEST_NEO4J_URI: bolt://127.0.0.1:7687
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
           version: '0.11.11'
+          python-version: ${{ matrix.python }}
+      # The render tests lay out graphs with Graphviz.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends graphviz
       - run: uv sync --locked
-      - run: uv run ruff check graph_memory tests evals
-      - run: uv run ruff format --check graph_memory tests evals
-      - run: uv run pytest -q
+      # Measured 87% with the database tests running; the floor leaves room for noise.
+      - run: uv run pytest -q --cov --cov-report=term --cov-fail-under=80
       - run: uv build
-      - run: docker build -t graph-memory:ci .
-      - run: docker run --rm graph-memory:ci --help
-      - run: docker compose config --quiet
-        env:
-          MEMORY_HTTP_TOKEN: ci-validation-only
-  test:
+
+  image:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Validate compose files
+        env:
+          NEO4J_PASSWORD: ci-validation-only
+          MEMORY_HTTP_TOKEN: ci-validation-only
+          GRAPH_MEMORY_TAG: ci
+          CLAUDE_SESSIONS_PATH: /tmp/claude
+          CODEX_SESSIONS_PATH: /tmp/codex
+          TRANSCRIPT_AUTH_PATH: /tmp/auth
+          TRANSCRIPT_MCP_TOKEN: ci-validation-only
+        run: |
+          docker compose -f compose.yaml config -q
+          docker compose -f compose.transcripts.yaml config -q
+          docker compose -f compose.test.yaml config -q
+          docker compose -f compose.yaml --env-file .env.example config -q
+          docker compose -f compose.transcripts.yaml --env-file .env.example config -q
+      - run: docker build --target production --build-arg GIT_SHA=${{ github.sha }} -t graph-memory:ci .
+      - run: docker run --rm graph-memory:ci
+      - run: docker run --rm --entrypoint codex graph-memory:ci --version
+      - run: docker run --rm --entrypoint codex graph-memory:ci exec --help
+
+  plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
-      - run: npm install
+      - run: npm ci --ignore-scripts
+      - if: hashFiles('tsconfig.json') != ''
+        run: npm run typecheck
       - run: npm test
