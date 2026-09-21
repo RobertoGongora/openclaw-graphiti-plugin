@@ -33,10 +33,11 @@ def follow_once(service, namespace, roots: list[Path], seen: dict, source_record
                 # Work that is due now, whatever its last outcome: a failed episode
                 # whose retry time has come is queue depth too.
                 "MATCH (e:MemoryEpisode {namespace:$ns}) WHERE e.status IN ['pending','failed'] "
-                "AND e.quarantine_engine IS NULL AND coalesce(e.retry_after,0)<=$now "
+                "AND coalesce(e.quarantine_engine,'') <> $engine AND coalesce(e.retry_after,0)<=$now "
                 "RETURN count(e) AS n",
                 ns=namespace,
                 now=time.time(),
+                engine=service.store.engine,
             ).single()["n"]
         )
         if queued >= settings.intake_queue():

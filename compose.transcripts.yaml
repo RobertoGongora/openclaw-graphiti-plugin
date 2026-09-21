@@ -65,7 +65,8 @@ services:
       NEO4J_db_lock_acquisition_timeout: 60s
       NEO4J_db_transaction_timeout: 10m
       # Checkpoint events carry ~360 MB strings; do not go below 1g.
-      NEO4J_db_memory_transaction_max: ${TRANSCRIPT_NEO4J_TX_MEMORY_MAX:-1g}
+      # A journal checkpoint is one string of several hundred MB.
+      NEO4J_db_memory_transaction_max: ${TRANSCRIPT_NEO4J_TX_MEMORY_MAX:-2g}
       NEO4J_db_tx__log_rotation_retention__policy: 1 days 1G
       NEO4J_dbms_usage__report_enabled: 'false'
     ports:
@@ -115,6 +116,7 @@ services:
       MEMORY_LLM_API_KEY: ${MEMORY_LLM_API_KEY:-}
       MEMORY_LLM_TIMEOUT: ${MEMORY_LLM_TIMEOUT:-420}
       MEMORY_INTAKE_QUEUE: ${MEMORY_INTAKE_QUEUE:-32}
+      MEMORY_INTAKE_FILES: ${MEMORY_INTAKE_FILES:-4}
       MEMORY_JOURNAL_AUDIT: ${MEMORY_JOURNAL_AUDIT:-503}
     command: [daemon, --source-records, --transcripts, /sessions/claude, --transcripts, /sessions/codex, --workers, '${TRANSCRIPT_WORKERS:-8}']
     volumes:
@@ -149,7 +151,8 @@ services:
 
   mcp:
     <<: [*graph-memory, *hardening]
-    mem_limit: 1g
+    # Each client session attached through docker exec is charged here (~56 MiB).
+    mem_limit: 2g
     pids_limit: 256
     environment:
       <<: *neo4j-client

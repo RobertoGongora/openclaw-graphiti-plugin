@@ -137,7 +137,8 @@ def run():
         cutoffs.add_argument("--at-change", type=int)
     history = commands.add_parser("history", help="Inspect and replay the knowledge journal")
     history.add_argument(
-        "action", choices=("init", "list", "snapshot", "replay", "verify", "checkpoint")
+        "action",
+        choices=("init", "list", "snapshot", "replay", "verify", "verify-live", "checkpoint"),
     )
     history.add_argument(
         "--accept-live",
@@ -352,6 +353,8 @@ def run():
                 result = journal.initialize(args.namespace)
             elif args.action == "verify":
                 result = journal.verify(args.namespace)
+            elif args.action == "verify-live":
+                result = journal.verify_live(args.namespace)
             elif args.action == "checkpoint":
                 result = journal.checkpoint(args.namespace, args.accept_live)
             elif args.action == "list":

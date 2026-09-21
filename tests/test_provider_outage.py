@@ -43,19 +43,79 @@ def episodes(store, ns):
 def test_breaker_opens_probes_backs_off_and_recovers():
     now = [0.0]
     breaker = Breaker(threshold=3, cooldown=60, ceiling=200, clock=lambda: now[0])
-    assert breaker.failure("network") is None and breaker.failure("network") is None
-    assert breaker.admit()  # transient failures below the threshold keep work flowing
-    assert breaker.failure("network") == 60
-    assert not breaker.admit() and breaker.state()["retry_in"] == 60
+    first = breaker.admit()
+    assert breaker.failure(first, "network") is None and breaker.failure(first, "network") is None
+    assert breaker.admit() == first  # transient failures below the threshold keep work flowing
+    assert breaker.failure(first, "network") == 60
+    # Calls already in flight when it opened neither extend the wait nor close it.
+    assert breaker.failure(first, "network") is None and breaker.success(first) is False
+    assert breaker.admit() is None and breaker.state()["retry_in"] == 60
     now[0] = 61
-    assert breaker.admit() and not breaker.admit()  # exactly one probe
-    assert breaker.failure("network") == 120
+    probe = breaker.admit()
+    assert probe is not None and breaker.admit() is None  # exactly one probe
+    assert breaker.failure(probe, "network") == 120  # only a failed probe doubles the wait
     now[0] = 61 + 121
-    assert breaker.admit() and breaker.failure("network") == 200  # capped
+    assert breaker.failure(breaker.admit(), "network") == 200  # capped
     now[0] += 201
-    assert breaker.admit() and breaker.success() is True
-    assert breaker.admit() and breaker.state() == {"open": False, "reason": None, "retry_in": 0}
-    assert Breaker().failure("usage_limit", persistent=True) == 60  # no point in three tries
+    assert breaker.success(breaker.admit()) is True
+    assert breaker.admit() is not None
+    assert breaker.state() == {"open": False, "reason": None, "retry_in": 0}
+    fresh = Breaker()
+    assert fresh.failure(fresh.admit(), "usage_limit", persistent=True) == 60
+
+
+def test_a_probe_that_makes_no_model_call_frees_the_probe(graph, tmp_path):
+    store, ns = graph
+    clock = [0.0]
+    service = MemoryService(store, Flaky())
+    service.breaker = Breaker(clock=lambda: clock[0])
+    service.breaker.failure(service.breaker.admit(), "usage_limit", persistent=True)
+    clock[0] = 61
+    # Nothing is due: the probe finds no episode, and must not stay taken forever.
+    assert worker_tick(service, ns)["receipts"] == []
+    clock[0] += 6
+    (tmp_path / "note.md").write_text("Note: Atlas uses MySQL.")
+    scan_bank(service, ns, [tmp_path], {})
+    service.llm.down = False
+    assert worker_tick(service, ns)["receipts"][0]["status"] == "complete"
+    assert not service.breaker.open
+
+
+def test_an_episode_that_needs_no_model_cannot_close_the_break(graph, tmp_path):
+    store, ns = graph
+    from graph_memory.session_sources import feed_records
+
+    from .test_session_sources import claude
+
+    call = {"type": "tool_use", "id": "r1", "name": "Bash", "input": {"command": "ls"}}
+    path = tmp_path / "s.jsonl"
+    path.write_text(claude("assistant", [call]))
+    clock = [0.0]
+    service = MemoryService(store, Flaky())
+    service.breaker = Breaker(clock=lambda: clock[0])
+    feed_records(service, ns, path, "s")
+    service.breaker.failure(service.breaker.admit(), "usage_limit", persistent=True)
+    clock[0] = 61
+    receipt = worker_tick(service, ns)["receipts"][0]
+    assert receipt["skipped"] and "breaker" not in receipt
+    assert service.breaker.open and service.llm.calls == 0
+
+
+def test_a_failure_that_follows_one_episode_is_set_aside(graph, tmp_path):
+    store, ns = graph
+    (tmp_path / "note.md").write_text("Note: Atlas uses MySQL.")
+    service = MemoryService(store, Flaky("timeout"))
+    service.breaker = Breaker(threshold=99)  # the provider serves everyone else
+    scan_bank(service, ns, [tmp_path], {})
+    for _ in range(3):
+        receipt = worker_tick(service, ns)["receipts"][0]
+        store.transaction(
+            lambda tx: tx.run(
+                "MATCH (e:MemoryEpisode {namespace:$ns}) SET e.retry_after=0", ns=ns
+            ).consume()
+        )
+    assert receipt["quarantined"] and receipt["failed_attempts"] == 0
+    assert worker_tick(service, ns)["receipts"] == []
 
 
 def test_outage_pauses_work_without_spending_retry_budget(graph, tmp_path):

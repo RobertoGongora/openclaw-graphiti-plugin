@@ -10,6 +10,7 @@ import time
 import uuid
 from pathlib import Path
 
+from .diagnostics import SYSTEMIC
 from .importers import read_messages
 from .models import EpisodeRequest, Transcript
 from .settings import lease_seconds
@@ -104,9 +105,6 @@ def hook(service, namespace, payload):
 
 
 INFRASTRUCTURE = {"model_timeout", "model_invocation_failed"}
-# Faults of the namespace or the process, not of the episode that met them: the
-# next episode would fail the same way, so none of them is charged or quarantined.
-SYSTEMIC = {"journal_state_mismatch", "engine_changed"}
 
 
 class Breaker:
@@ -119,37 +117,53 @@ class Breaker:
         self.threshold, self.base, self.ceiling, self.clock = threshold, cooldown, ceiling, clock
         self.lock = threading.Lock()
         self.failures, self.cooldown, self.retry_at, self.reason = 0, cooldown, 0.0, None
-        self.probing = False
+        self.probing, self.generation = False, 0
 
     @property
     def open(self):
         return self.reason is not None
 
     def admit(self):
-        """True when a model call may start; while open, one probe per cooldown."""
+        """A ticket when a model call may start, else None. While open, one probe
+        per cooldown. The ticket dates the call: an outcome that arrives after the
+        state changed belongs to the past and is ignored."""
         with self.lock:
-            if self.reason is None:
-                return True
-            if self.probing or self.clock() < self.retry_at:
-                return False
-            self.probing = True
-            return True
+            if self.reason is not None:
+                if self.probing or self.clock() < self.retry_at:
+                    return None
+                self.probing = True
+            return self.generation
 
-    def success(self):
+    def release(self, ticket):
+        """The tick ended without a model call (nothing due, a skipped episode, a
+        database error): free the probe, or no one could ever probe again."""
         with self.lock:
+            if self.probing and ticket == self.generation:
+                self.probing, self.retry_at = False, self.clock() + 5
+
+    def success(self, ticket):
+        """True when this call closed an open break."""
+        with self.lock:
+            if ticket != self.generation:
+                return False
             reopened = self.reason is not None
             self.failures, self.cooldown, self.reason, self.probing = 0, self.base, None, False
+            self.generation += reopened
             return reopened
 
-    def failure(self, reason, persistent=False):
-        """Returns the wait in seconds when this failure opens or extends the break."""
+    def failure(self, ticket, reason, persistent=False):
+        """The wait in seconds when this failure opens or extends the break."""
         with self.lock:
+            if ticket != self.generation:
+                return None  # A straggler from before the break; it changes nothing.
             self.failures += 1
-            was_probe, self.probing = self.probing, False
-            if self.reason is None and not persistent and self.failures < self.threshold:
-                return None
-            if was_probe or self.reason is not None:
+            if self.reason is None:
+                if not persistent and self.failures < self.threshold:
+                    return None
+                self.generation += 1
+            elif self.probing:
                 self.cooldown = min(self.cooldown * 2, self.ceiling)
+            self.probing = False
             self.reason, self.retry_at = reason, self.clock() + self.cooldown
             return self.cooldown
 
@@ -163,15 +177,24 @@ class Breaker:
 
 
 def worker_tick(service, namespace, limit=10):
-    from .diagnostics import diagnostic
-    from .llm import PERSISTENT_REASONS
-
     service.store.assert_writable(namespace)
     if service.llm is None:
         raise ValueError("Worker requires MEMORY_LLM=codex or compatible")
     breaker = getattr(service, "breaker", None)
-    if breaker and not breaker.admit():
+    ticket = breaker.admit() if breaker else None
+    if breaker and ticket is None:
         return {"receipts": [], "breaker": breaker.state()}
+    try:
+        return _tick(service, namespace, limit, breaker, ticket)
+    finally:
+        if breaker:
+            breaker.release(ticket)
+
+
+def _tick(service, namespace, limit, breaker, ticket):
+    from .diagnostics import diagnostic
+    from .llm import PERSISTENT_REASONS
+
     # Several candidates in a random order: idle workers would otherwise all
     # race for the single oldest episode and lose a write each.
     due = service.store.read(
@@ -219,6 +242,7 @@ def worker_tick(service, namespace, limit=10):
         if not claimed:
             continue
         claim_seconds = round(time.monotonic() - claiming, 3)
+        recovered = False
         try:
             receipts.append(
                 {
@@ -226,7 +250,9 @@ def worker_tick(service, namespace, limit=10):
                     "claim_seconds": claim_seconds,
                 }
             )
-            if breaker and breaker.success():
+            # Only a model call says anything about the provider: a skipped, cached
+            # or replayed episode would close the break while it is still down.
+            if breaker and receipts[-1].get("model_calls", 0) > 0 and breaker.success(ticket):
                 receipts[-1]["breaker"] = breaker.state()
         except Exception as exc:
             issue = getattr(exc, "memory_diagnostic", None) or diagnostic(exc)
@@ -242,7 +268,7 @@ def worker_tick(service, namespace, limit=10):
                     }
                 )
                 if breaker:
-                    breaker.failure(issue["code"], persistent=True)
+                    breaker.failure(ticket, issue["code"], persistent=True)
                     receipts[-1]["breaker"] = breaker.state()
                 break
             validation_failure = issue["stage"] == "evidence_validation" or (
@@ -256,17 +282,33 @@ def worker_tick(service, namespace, limit=10):
                 "ambiguous_identity",
                 "extraction_conflict",
             }
+            outage = False
+            if breaker and infrastructure:
+                reason = issue.get("provider_reason") or issue["code"]
+                outage = breaker.failure(ticket, reason, reason in PERSISTENT_REASONS) is not None
+                outage = outage or breaker.open
+            elif breaker and breaker.success(ticket):
+                # The provider answered; it is the episode that was rejected.
+                recovered = True
+            # A timeout or crash that follows one episode around, while the provider
+            # serves the others, is that episode's problem: three and it is set aside.
+            stubborn = infrastructure and not outage
             retry = service.store.transaction(
-                lambda tx, eid=row["id"], token=token, validation_failure=validation_failure, review=review, issue=issue, infrastructure=infrastructure: (
+                lambda tx, eid=row["id"], token=token, validation_failure=validation_failure, review=review, issue=issue, infrastructure=infrastructure, stubborn=stubborn: (
                     tx.run(
                         "MATCH (e:MemoryEpisode {namespace:$ns,id:$id,worker:$token}) "
                         "WHERE e.status <> 'complete' "
                         "WITH e, CASE WHEN e.validation_engine=$engine THEN coalesce(e.validation_failures,0) ELSE 0 END AS prior,"
                         # Retries under an older engine or a past outage do not slow this one down.
-                        "CASE WHEN e.validation_engine=$engine THEN coalesce(e.attempts,0) ELSE 0 END AS tried "
-                        "SET e.validation_engine=$engine,e.validation_failures=prior+$validation "
-                        "SET e.quarantine_engine=CASE WHEN $review OR e.validation_failures>=3 THEN $engine ELSE null END,"
-                        "e.quarantine_reason=CASE WHEN $review OR e.validation_failures>=3 THEN $reason ELSE null END "
+                        "CASE WHEN e.validation_engine=$engine THEN coalesce(e.attempts,0) ELSE 0 END AS tried,"
+                        "CASE WHEN e.validation_engine=$engine THEN coalesce(e.infra_failures,0) ELSE 0 END AS crashed "
+                        "SET e.validation_engine=$engine,e.validation_failures=prior+$validation,"
+                        "e.infra_failures=crashed+$stubborn "
+                        # Eight charged failures of any kind: an hourly retry forever helps nobody.
+                        "SET e.quarantine_engine=CASE WHEN $review OR e.validation_failures>=3 "
+                        "OR e.infra_failures>=3 OR tried+$counted>=8 THEN $engine ELSE null END,"
+                        "e.quarantine_reason=CASE WHEN $review OR e.validation_failures>=3 "
+                        "OR e.infra_failures>=3 OR tried+$counted>=8 THEN $reason ELSE null END "
                         # A provider outage is not this episode's failure: a short
                         # fixed wait, and its retry budget is left alone.
                         "SET e.attempts=tried+$counted,e.retry_after=$now+"
@@ -280,6 +322,7 @@ def worker_tick(service, namespace, limit=10):
                         engine=service.store.engine,
                         validation=int(validation_failure),
                         counted=int(not infrastructure),
+                        stubborn=int(stubborn),
                         review=review,
                         reason=issue["code"],
                     ).single()
@@ -294,13 +337,10 @@ def worker_tick(service, namespace, limit=10):
                     **(dict(retry) if retry else {}),
                 }
             )
-            if breaker and infrastructure:
-                reason = issue.get("provider_reason") or issue["code"]
-                if breaker.failure(reason, reason in PERSISTENT_REASONS) is not None:
-                    receipts[-1]["breaker"] = breaker.state()
-                    break
-            elif breaker:
-                breaker.success()  # The provider answered; the episode itself was rejected.
+            if outage or recovered:
+                receipts[-1]["breaker"] = breaker.state()
+            if outage:
+                break
         finally:
             service.store.transaction(
                 lambda tx, eid=row["id"], token=token: tx.run(

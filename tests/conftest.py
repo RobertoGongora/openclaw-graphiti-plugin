@@ -14,6 +14,11 @@ def graph():
     uri = os.environ.get("MEMORY_TEST_NEO4J_URI")
     if not uri:
         pytest.skip("Set MEMORY_TEST_NEO4J_URI to an isolated test Neo4j")
+    # The published ports of the live graphs; a test run creates and deletes data.
+    if uri.rsplit(":", 1)[-1] in {"17687", "27687"} and not os.environ.get(
+        "MEMORY_TEST_ALLOW_LIVE"
+    ):
+        pytest.exit("MEMORY_TEST_NEO4J_URI points at a live graph port; use make test-db-up", 2)
     store = GraphStore(uri, password=os.environ.get("MEMORY_TEST_NEO4J_PASSWORD"))
     store.setup()
     namespace = "eval:" + str(uuid.uuid4())

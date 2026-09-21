@@ -1,4 +1,5 @@
-"""Operational limits, read once from the environment with bounds."""
+"""Operational limits from the environment, with bounds. A bad value stops the
+process at start rather than running with a limit nobody chose."""
 
 import os
 
@@ -25,7 +26,8 @@ def intake_files():
 
 def llm_timeout():
     """Seconds for one model call. The longest seen in production was 356."""
-    return _number("MEMORY_LLM_TIMEOUT", 420, 10, 3_600)
+    # Four calls must fit the 45-minute stop grace period of the worker container.
+    return _number("MEMORY_LLM_TIMEOUT", 420, 10, 600)
 
 
 def lease_seconds(llm):

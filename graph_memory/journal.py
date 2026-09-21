@@ -23,6 +23,7 @@ VOLATILE = {
     "lease_until",
     "retry_after",
     "attempts",
+    "infra_failures",
     "error",
     "retry_feedback",
     "cached_extraction",
@@ -453,7 +454,9 @@ class Journal:
         def run(tx):
             self.store.lock(tx, namespace)
             head = self._head(tx, namespace)
-            if head.get("journal_set_hash") != head.get("journal_state_hash"):
+            if "journal_set_hash" not in head or head["journal_set_hash"] != head.get(
+                "journal_state_hash"
+            ):
                 raise ValueError(
                     "Journal predates the streamed state hash; write once or checkpoint"
                 )

@@ -39,8 +39,9 @@ COPY evals ./evals
 RUN uv sync --locked --no-dev --no-editable
 
 FROM python-base AS runtime
-# bubblewrap: codex sandboxes with the system bwrap and warns when it must fall back
-# to its bundled copy. tini: PID 1 must forward SIGTERM under plain `docker run`,
+# bubblewrap: present only so codex does not warn on every call. It cannot create
+# namespaces inside a container; the protection here is that every codex tool is
+# disabled and the container is read-only without capabilities. tini: PID 1 must forward SIGTERM under plain `docker run`,
 # otherwise the daemon never drains and is killed after the grace period.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends graphviz fonts-dejavu-core bubblewrap tini \

@@ -136,9 +136,7 @@ class Transcript(Model):
             return True
         focus = set(self.focus_message_ids)
         return any(
-            m.source_type in CLAIMS | {"tool_result"}
-            for m in self.messages
-            if not focus or m.id in focus
+            m.source_type in NEW_EVIDENCE for m in self.messages if not focus or m.id in focus
         )
 
 
@@ -150,15 +148,18 @@ class Entity(Model):
 
 
 CLAIMS = {"user_assertion", "assistant_report"}
+NEW_EVIDENCE = CLAIMS | {"tool_result"}
 LINE_NUMBER = re.compile(r"(?m)^[ \t]*\d+(?:\t|→|: ?)")
 MARKUP = set("*_`~\\")
 
 
-def projection(text):
-    """The text as a model tends to reproduce it (markup, line numbers and spacing
-    dropped), with the source offset of every character kept."""
+def projection(text, numbered=False):
+    """The text as a model tends to reproduce it (markup and spacing dropped, and
+    for a numbered source its line-number prefixes), with the source offset of
+    every character kept. A quote keeps its own leading digits: they are content,
+    and dropping them would let "2023: grew" pass for a source that says 2024."""
     skipped = set()
-    for match in LINE_NUMBER.finditer(text):
+    for match in LINE_NUMBER.finditer(text) if numbered else ():
         skipped.update(range(*match.span()))
     out, offsets, gap = [], [], False
     for index, char in enumerate(text):
@@ -186,11 +187,18 @@ def source_span(quote, content):
     if quote in content:
         return quote
     needle, _ = projection(quote)
-    haystack, offsets = projection(content)
-    if len(needle) < 12 or haystack.count(needle) != 1:
-        return None  # Too short or ambiguous to stand as evidence.
-    start = haystack.index(needle)
-    return content[offsets[start] : offsets[start + len(needle) - 1] + 1]
+    if len(needle) < 12:
+        return None  # Too short to repair without guessing.
+    for numbered in (False, True):
+        haystack, offsets = projection(content, numbered)
+        if haystack.count(needle) == 1:
+            start = haystack.index(needle)
+            end = offsets[start + len(needle) - 1] + 1
+            # Keep the accents and marks that belong to the last character.
+            while end < len(content) and unicodedata.combining(content[end]):
+                end += 1
+            return content[offsets[start] : end]
+    return None  # Absent or ambiguous: not evidence.
 
 
 class Evidence(Model):
@@ -277,14 +285,6 @@ class Extraction(Model):
         messages = {m.id: m for m in transcript.messages}
         mismatched = []
         for fact_index, fact in enumerate(self.facts):
-            if transcript.focus_message_ids and not any(
-                e.message_id in transcript.focus_message_ids
-                for e in [*fact.evidence, *fact.validation_evidence]
-            ):
-                reject(
-                    "A feed fact must cite at least one new focus message",
-                    ["facts", fact_index, "evidence"],
-                )
             for field in ("evidence", "validation_evidence"):
                 for evidence_index, evidence in enumerate(getattr(fact, field)):
                     message = messages.get(evidence.message_id)
@@ -298,14 +298,30 @@ class Extraction(Model):
                         ]
                         if len(found) == 1:
                             evidence.message_id, span = found[0]
-                    if span is None:
+                    if span is None or len(span) > 4000:
                         mismatched.append(["facts", fact_index, field, evidence_index, "quote"])
-                    elif len(span) <= 4000:
-                        evidence.quote = span
                     else:
-                        mismatched.append(["facts", fact_index, field, evidence_index, "quote"])
-            if mismatched:
-                continue
+                        evidence.quote = span
+        if mismatched:
+            # Every bad quote at once: a correction pass that learns of one per
+            # attempt cannot finish within the retry budget.
+            error = ValueError("Evidence must quote an exact substring of its source message")
+            error.memory_location, error.memory_locations = mismatched[0], mismatched[:10]
+            raise error
+        # The rules below judge the evidence as repaired: a quote moved to another
+        # message is held to that message's role and focus.
+        focus = set(transcript.focus_message_ids)
+        for fact_index, fact in enumerate(self.facts):
+            cites = [messages[e.message_id] for e in [*fact.evidence, *fact.validation_evidence]]
+            # Only a claim or a tool result can be new; anything else in focus is
+            # context. Plain transcripts carry no roles, so any message there can be.
+            if focus and not any(
+                m.id in focus and m.source_type in NEW_EVIDENCE | {"legacy"} for m in cites
+            ):
+                reject(
+                    "A feed fact must cite at least one new focus message",
+                    ["facts", fact_index, "evidence"],
+                )
             if transcript.source_format in {"session-records-v1", "direct-mcp-v1"}:
                 cited = [messages[e.message_id] for e in fact.evidence]
                 claims = [m for m in cited if m.source_type in CLAIMS]
@@ -327,12 +343,6 @@ class Extraction(Model):
                 reject(
                     "Future facts must be planned, not active", ["facts", fact_index, "valid_at"]
                 )
-        if mismatched:
-            # Every bad quote at once: a correction pass that learns of one per
-            # attempt cannot finish within the retry budget.
-            error = ValueError("Evidence must quote an exact substring of its source message")
-            error.memory_location, error.memory_locations = mismatched[0], mismatched[:10]
-            raise error
         return self
 
 

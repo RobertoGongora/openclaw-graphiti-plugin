@@ -40,6 +40,13 @@ def test_daemon_heartbeat_feeds_health_and_status(graph, tmp_path, monkeypatch):
     store.transaction(
         lambda tx: tx.run("MATCH (w:MemoryWorker {namespace:$ns}) DELETE w", ns=ns).consume()
     )
+    # A half-written or older worker record must not break status or health.
+    store.transaction(
+        lambda tx: tx.run(
+            "CREATE (:MemoryWorker {id:$id,namespace:$ns})", id=ns + ":old", ns=ns
+        ).consume()
+    )
+    assert status.status(store, Scope(namespace=ns))["workers"] == []
     with pytest.raises(ValueError, match="role must be"):
         health.check("scheduler", ns)
 

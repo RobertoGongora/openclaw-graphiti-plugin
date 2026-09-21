@@ -16,7 +16,7 @@ from .version import engine_fingerprint
 
 def digest(value) -> str:
     return hashlib.sha256(
-        # surrogatepass: a transcript with a broken escape must still be addressable.
+        # surrogatepass: hashing must not be what rejects text with a broken escape.
         json.dumps(value, sort_keys=True, ensure_ascii=False).encode("utf-8", "surrogatepass")
     ).hexdigest()
 
@@ -264,13 +264,17 @@ class GraphStore:
                 "SET e.worker_lock=coalesce(e.worker_lock,0)+1 "
                 "WITH e WHERE e.status <> 'complete' AND e.quarantine_engine IS NOT NULL "
                 "AND coalesce(e.lease_until,0)<=$now "
-                "SET e.quarantine_engine=null,e.quarantine_reason=null,"
+                # A saved extraction that failed its own validation would fail it again.
+                "SET e.cached_extraction=CASE WHEN e.quarantine_reason IN $stale THEN null "
+                "ELSE e.cached_extraction END "
+                "SET e.quarantine_engine=null,e.quarantine_reason=null,e.infra_failures=0,"
                 "e.validation_failures=0,e.validation_engine=$engine,e.retry_after=0,e.attempts=0 "
                 "RETURN e.id AS episode_id",
                 id=episode_id,
                 ns=namespace,
                 now=now().timestamp(),
                 engine=self.engine,
+                stale=["cached_validation", "schema_validation", "evidence_quote_mismatch"],
             ).single()
         )
         if not row:
@@ -381,6 +385,14 @@ class GraphStore:
         extraction_hash = digest(extraction.model_dump(mode="json"))
         committed_at = now().isoformat()
 
+        def repaired(transcript):
+            try:
+                candidate = extraction.model_copy(deep=True)
+                candidate.validate_evidence(transcript)
+                return digest(candidate.model_dump(mode="json"))
+            except ValueError:
+                return None
+
         def run(tx):
             self.lock(tx, namespace)
 
@@ -396,14 +408,17 @@ class GraphStore:
             if not row:
                 raise ValueError("Episode not found in namespace")
             episode = row["e"]
+            transcript = Transcript.model_validate_json(episode["payload"])
             if episode["status"] == "complete":
-                if episode["extraction_hash"] != extraction_hash:
+                # The stored hash is of the evidence as repaired; the same request
+                # sent again arrives unrepaired.
+                if episode["extraction_hash"] not in (extraction_hash, repaired(transcript)):
                     raise ValueError(
                         "Episode already committed with different extraction; retract incorrect facts explicitly"
                     )
                 return {"episode_id": episode_id, "status": "complete", "replayed": True}
-            transcript = Transcript.model_validate_json(episode["payload"])
             extraction.validate_evidence(transcript)
+            committed_hash = digest(extraction.model_dump(mode="json"))
             identities = {
                 e.key: self.canonical(tx, namespace, e, touch) for e in extraction.entities
             }
@@ -500,7 +515,7 @@ class GraphStore:
                 "e.extraction_hash=$hash,e.extraction_payload=$extraction,e.engine=$engine,e.model_info=$model_info,e.completed_at=$at,e.fact_count=$count "
                 "WITH e MATCH (s:MemorySpace {id:$ns}) SET s.revision=s.revision+1",
                 id=episode_id,
-                hash=extraction_hash,
+                hash=committed_hash,
                 extraction=extraction.model_dump_json(),
                 engine=self.engine,
                 model_info=json.dumps(model_info or {"provider": "caller"}),
@@ -652,7 +667,8 @@ class GraphStore:
                     "complete_episodes": counts.get("complete", 0),
                     "pending_episodes": counts.get("pending", 0),
                     "failed_episodes": counts.get("failed", 0),
-                    "excluded_ungrounded_facts": stored_count - len(facts),
+                    # Two reads without a lock can straddle a commit.
+                    "excluded_ungrounded_facts": max(0, stored_count - len(facts)),
                     "coverage": "latest committed evidence; unseen sessions are unknown",
                 },
             }
@@ -835,14 +851,20 @@ class GraphStore:
                 reason=reason,
             ).consume()
             tx.run(
-                "MATCH (s:MemoryEntity {id:$s})-[r:HAS_FACT]->(f),(t:MemoryEntity {id:$t}) "
-                "MERGE (t)-[:HAS_FACT]->(f) SET f.subject_id=t.id,f.subject=t.key DELETE r",
+                # By property, the durable record: a fact whose edge went missing
+                # must move too, or it stays on the entity that no longer exists.
+                "MATCH (f:MemoryFact {namespace:$ns,subject_id:$s}),(t:MemoryEntity {id:$t}) "
+                "SET f.subject_id=t.id,f.subject=t.key MERGE (t)-[:HAS_FACT]->(f) "
+                "WITH f MATCH (:MemoryEntity {id:$s})-[r:HAS_FACT]->(f) DELETE r",
+                ns=namespace,
                 s=s["id"],
                 t=t["id"],
             ).consume()
             tx.run(
-                "MATCH (f)-[r:TARGET]->(s:MemoryEntity {id:$s}),(t:MemoryEntity {id:$t}) "
-                "MERGE (f)-[:TARGET]->(t) SET f.target_id=t.id,f.target=t.key DELETE r",
+                "MATCH (f:MemoryFact {namespace:$ns,target_id:$s}),(t:MemoryEntity {id:$t}) "
+                "SET f.target_id=t.id,f.target=t.key MERGE (f)-[:TARGET]->(t) "
+                "WITH f MATCH (f)-[r:TARGET]->(:MemoryEntity {id:$s}) DELETE r",
+                ns=namespace,
                 s=s["id"],
                 t=t["id"],
             ).consume()

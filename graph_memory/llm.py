@@ -159,8 +159,11 @@ PERSISTENT_REASONS = {"usage_limit", "authentication", "model_unavailable"}
 
 
 def invocation_reason(stderr):
-    lines = [line for line in stderr.splitlines() if line.startswith(("ERROR", "error"))]
-    text = "\n".join(lines or stderr.splitlines()[-20:]).lower()
+    # Only the CLI's own error lines: the rest of the stream echoes the prompt, and
+    # transcript text must never be what decides that the provider is down.
+    text = "\n".join(
+        line for line in stderr.splitlines() if line.startswith(("ERROR", "error"))
+    ).lower()
     return next(
         (name for name, pattern in INVOCATION_REASONS if re.search(pattern, text)), "unknown"
     )
@@ -225,7 +228,25 @@ DISABLED_FEATURES = [
 ]
 # The CLI needs its login and a PATH; the worker's database and MCP secrets are not
 # its business, and the agent could read them from its environment.
-PASSED_ENVIRONMENT = ("PATH", "HOME", "CODEX_HOME", "LANG", "LC_ALL", "TMPDIR", "SSL_CERT_FILE")
+PASSED_ENVIRONMENT = (
+    "PATH",
+    "HOME",
+    "CODEX_HOME",
+    "LANG",
+    "LC_ALL",
+    "TMPDIR",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "https_proxy",
+    "http_proxy",
+    "no_proxy",
+    "OPENAI_API_KEY",
+    "CODEX_API_KEY",
+)
 
 
 class CodexLLM:

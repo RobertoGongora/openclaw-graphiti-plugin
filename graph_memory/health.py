@@ -32,14 +32,15 @@ def check(role, namespace):
     now = time.time()
     if role == "worker":
         rows = _query(
-            "MATCH (w:MemoryWorker {id:$id}) RETURN w.heartbeat_at AS at,w.interval AS interval",
+            "MATCH (w:MemoryWorker {id:$id}) WHERE w.heartbeat_at IS NOT NULL "
+            "RETURN w.heartbeat_at AS at",
             id=worker_id(namespace),
         )
         if not rows:
             return False, {"role": role, "reason": "no_heartbeat"}
         age = now - rows[0]["at"]
-        # The scan loop beats once per interval; a long scan or drain may skip a few.
-        return age < max(180, rows[0]["interval"] * 6), {"role": role, "heartbeat_age": round(age)}
+        # The daemon beats every 30 s at most, from its own thread.
+        return age < 180, {"role": role, "heartbeat_age": round(age)}
     if role == "inventory":
         from .inventory import inventory_id
 
@@ -58,6 +59,7 @@ def check(role, namespace):
             {"role": role, "inventory_age": None if age is None else round(age)},
         )
     if role == "mcp":
+        # serve --port is not visible here; a non-default port sets this variable too.
         port = os.environ.get("MEMORY_HTTP_PORT", "8765")
         request = Request(
             f"http://127.0.0.1:{port}/mcp",

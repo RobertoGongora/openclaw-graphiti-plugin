@@ -6,7 +6,7 @@ import uuid
 
 from . import models as m
 from . import retrieval, status
-from .diagnostics import diagnostic
+from .diagnostics import SYSTEMIC, diagnostic
 from .extraction_policy import extraction_payload
 from .llm import DREAM_INSTRUCTIONS, ModelUnavailable, extraction_instructions
 from .retry import feedback, restored_feedback
@@ -174,8 +174,9 @@ class MemoryService:
                 "duration_seconds": round(time.monotonic() - started, 3),
                 "engine": self.store.engine,
             }
-            # A provider outage leaves the episode as it was: nothing about it failed.
-            if isinstance(exc, ModelUnavailable):
+            # A provider outage or a namespace fault leaves the episode as it was:
+            # nothing about it failed.
+            if isinstance(exc, ModelUnavailable) or exc.memory_diagnostic["code"] in SYSTEMIC:
                 raise
             self.store.failed(
                 request.namespace,
@@ -252,7 +253,9 @@ class MemoryService:
         if self.llm is None:
             raise ValueError("Configure MEMORY_LLM=codex for unattended dreaming")
         dream = self.dream_get(request)
-        if dream.get("engine") != engine_fingerprint() or self.store.engine != engine_fingerprint():
+        if dream.get("engine") != engine_fingerprint() or self.store.engine != engine_fingerprint(
+            fresh=True
+        ):
             raise ValueError("Dream engine changed; create a fresh dream")
         if dream["status"] in ("completed", "applied"):
             return dream

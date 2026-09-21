@@ -23,6 +23,10 @@ def load_cases():
 def suite_fingerprint():
     return digest(
         {
+            # The harness decides what passes, so a changed harness is a changed suite.
+            "harness": {
+                path.name: path.read_text() for path in sorted(Path(__file__).parent.glob("*.py"))
+            },
             "engine_cases": load_cases(),
             "e2e_cases": [
                 json.loads(p.read_text())

@@ -25,8 +25,10 @@ replay, changed-diff acceptance, and concurrent-write promotion rejection.
 
 ```sh
 uv sync
-# Explicit endpoint is mandatory; use an isolated Neo4j in CI.
-export MEMORY_TEST_NEO4J_URI=bolt://127.0.0.1:17687
+# Explicit endpoint is mandatory. Use the disposable database from compose.test.yaml.
+# Never use 17687 or 27687: those are the live graphs, and evals wipe what they touch.
+make test-db-up
+export MEMORY_TEST_NEO4J_URI=bolt://127.0.0.1:37687
 uv run pytest -q
 MEMORY_LLM=codex uv run python -m evals.run --runs 2 \
   --output .local/baseline-candidate.json

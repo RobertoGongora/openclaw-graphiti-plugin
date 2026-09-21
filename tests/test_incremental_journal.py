@@ -442,8 +442,24 @@ def test_retract_and_merge_journal_only_what_they_touch(graph, monkeypatch):
 
     monkeypatch.setattr(journal_module, "elements", counting)
     store.retract(ns, receipt["fact_ids"][0], "superseded")
+    # A fact whose edge went missing still moves with its entity.
+    store.transaction(
+        lambda tx: tx.run(
+            "MATCH (:MemoryEntity {namespace:$ns,key:$key})-[r:HAS_FACT]->() DELETE r",
+            ns=ns,
+            key=other["key"],
+        ).consume()
+    )
     store.merge(ns, other["key"], PROJECT["key"], "same project")
     assert full == []
+    stranded = store.transaction(
+        lambda tx: tx.run(
+            "MATCH (f:MemoryFact {namespace:$ns,subject:$key}) RETURN count(f) AS n",
+            ns=ns,
+            key=other["key"],
+        ).single()["n"]
+    )
+    assert stranded == 0
     monkeypatch.undo()
     assert Journal(store).verify(ns)["verified"] and Journal(store).verify_live(ns)["verified"]
     # New facts about the merged-away key land on the entity it became.

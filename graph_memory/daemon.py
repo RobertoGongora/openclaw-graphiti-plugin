@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from . import settings
-from .diagnostics import diagnostic
+from .diagnostics import SYSTEMIC, diagnostic
 from .feeds import Breaker, worker_tick
 from .follow import follow_once
 from .health import worker_id
@@ -101,6 +101,10 @@ def heartbeat(service, namespace, workers, interval, breaker):
     state = breaker.state()
     service.store.transaction(
         lambda tx: tx.run(
+            # Every recreated container is a new host name; drop the long dead.
+            "OPTIONAL MATCH (old:MemoryWorker {namespace:$ns}) WHERE old.id<>$id "
+            "AND coalesce(old.heartbeat_at,0)<$at-86400 DELETE old "
+            "WITH count(*) AS _ "
             "MERGE (w:MemoryWorker {id:$id}) SET w.namespace=$ns,w.heartbeat_at=$at,"
             "w.interval=$interval,w.workers=$workers,w.engine=$engine,w.pid=$pid,"
             "w.provider_open=$open,w.provider_reason=$reason",
@@ -150,13 +154,24 @@ def run_daemon(
     seen, feed_seen = {}, {}
     stop = threading.Event()
     breaker = service.breaker = Breaker()
-    announced = {"open": False}
+    announced, announcing = {"open": False}, threading.Lock()
 
     def report(state):
         # One line when the provider goes away, per failed probe, and when it returns.
-        if state["open"] or announced["open"]:
-            announced["open"] = state["open"]
-            emit("provider_unavailable" if state["open"] else "provider_recovered", **state)
+        with announcing:
+            if state["open"] or announced["open"]:
+                announced["open"] = state["open"]
+                fault = (state["reason"] or announced.get("reason")) in SYSTEMIC
+                announced["reason"] = state["reason"] or announced.get("reason")
+                name = (
+                    ("namespace_fault", "namespace_recovered")
+                    if fault
+                    else (
+                        "provider_unavailable",
+                        "provider_recovered",
+                    )
+                )
+                emit(name[0] if state["open"] else name[1], **state)
 
     def consume(number):
         while not stop.is_set():
@@ -213,6 +228,19 @@ def run_daemon(
     if threading.current_thread() is threading.main_thread():
         for sig in (signal.SIGTERM, signal.SIGINT):
             previous[sig] = signal.signal(sig, handle)
+    beating = threading.Event()
+
+    def beat():
+        # Its own timer: a long scan or a long drain is not a dead worker, and a
+        # liveness signal must never be what stops the process it reports on.
+        while not beating.is_set():
+            try:
+                heartbeat(service, namespace, workers, interval, breaker)
+            except Exception as exc:
+                emit("heartbeat_error", error=type(exc).__name__)
+            beating.wait(min(interval, 30))
+
+    pulse = threading.Thread(target=beat, name="heartbeat", daemon=True)
     emit(
         "daemon_start",
         pid=os.getpid(),
@@ -222,6 +250,7 @@ def run_daemon(
         # A one-shot run may share the namespace with a live daemon; leave its leases.
         reclaimed_leases=0 if once else reclaim_leases(service, namespace),
     )
+    pulse.start()
     try:
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = []
@@ -229,10 +258,13 @@ def run_daemon(
             # pool never finishes and the process hangs instead of restarting.
             try:
                 while not stop.is_set():
-                    heartbeat(service, namespace, workers, interval, breaker)
-                    result = scan_bank(service, namespace, roots, seen)
-                    emit("bank_scan", **result)
                     # Staging during an outage only builds a queue nobody can work.
+                    result = (
+                        {"skipped": "queue_paused"}
+                        if breaker.open
+                        else scan_bank(service, namespace, roots, seen)
+                    )
+                    emit("bank_scan", **result)
                     if transcript_roots and not breaker.open:
                         try:
                             began = time.monotonic()
@@ -261,6 +293,8 @@ def run_daemon(
         raise
     finally:
         stop.set()
+        beating.set()
+        pulse.join(timeout=5)
         # ru_maxrss is bytes on macOS and kilobytes on Linux.
         emit(
             "daemon_exit",

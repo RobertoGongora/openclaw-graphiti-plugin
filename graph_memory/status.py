@@ -107,16 +107,19 @@ def status(store, request):
             )
         workers = [
             {
-                "workers": w["workers"],
+                "workers": w.get("workers"),
                 "heartbeat_age_seconds": round(checked.timestamp() - w["heartbeat_at"]),
-                "alive": checked.timestamp() - w["heartbeat_at"] < max(180, w["interval"] * 6),
-                "same_engine": w["engine"] == store.engine,
-                "provider_unavailable": w["provider_reason"] if w["provider_open"] else None,
+                "alive": checked.timestamp() - w["heartbeat_at"] < 180,
+                "same_engine": w.get("engine") == store.engine,
+                "provider_unavailable": w.get("provider_reason")
+                if w.get("provider_open")
+                else None,
             }
             for w in (
                 row["w"]
                 for row in tx.run(
-                    "MATCH (w:MemoryWorker {namespace:$ns}) RETURN properties(w) AS w "
+                    "MATCH (w:MemoryWorker {namespace:$ns}) WHERE w.heartbeat_at IS NOT NULL "
+                    "RETURN properties(w) AS w "
                     "ORDER BY w.heartbeat_at DESC LIMIT 5",
                     **params,
                 )

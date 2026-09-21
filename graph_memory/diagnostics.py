@@ -22,6 +22,9 @@ REASONS = {
     "Graph differs from its journal; investigate an untracked write before continuing": "journal_state_mismatch",
     "Codex extraction timed out; durable input can be retried": "model_timeout",
 }
+# Faults of the namespace or the process, not of the episode that met them: the
+# next episode would fail the same way, so none of them is charged or quarantined.
+SYSTEMIC = {"journal_state_mismatch", "engine_changed"}
 FIELDS = {
     "entities",
     "facts",
