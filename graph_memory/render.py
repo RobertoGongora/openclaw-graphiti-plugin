@@ -3,8 +3,10 @@
 import base64
 import json
 import math
+import os
 import re
 import shutil
+import signal
 import struct
 import subprocess
 import textwrap
@@ -32,6 +34,8 @@ COLORS = {
 LEX = re.compile(
     r"//[^\n]*|/\*[\s\S]*?\*/|'(?:\\.|''|[^'\\])*'|\"(?:\\.|\"\"|[^\"\\])*\"|`(?:``|[^`])*`|[A-Za-z_][A-Za-z_0-9]*|[^\s]"
 )
+MAX_IMAGE = 4_000_000
+LAYOUT_TIMEOUT = 45
 FORBIDDEN = set(
     "CALL LOAD CYPHER EXPLAIN PROFILE SHOW USE CREATE MERGE DELETE DETACH SET REMOVE DROP ALTER GRANT DENY REVOKE FOREACH TERMINATE START STOP".split()
 )
@@ -152,12 +156,20 @@ def snapshot(store, request):
         tx = session.begin_transaction(timeout=15)
         try:
             if request.cypher is None:
+                from .journal import LABELS
+
+                # One labelled branch each, so label/namespace indexes apply; an
+                # unlabelled namespace match scans every node in the database.
+                branches = " UNION ALL ".join(
+                    f"MATCH (n:{label} {{namespace:$namespace}}) RETURN n ORDER BY n.id LIMIT $cap"
+                    for label in LABELS
+                    if label in COLORS
+                )
                 for row in tx.run(
-                    "MATCH (n {namespace:$namespace}) WHERE any(l IN labels(n) WHERE l IN $labels) "
+                    f"CALL {{ {branches} }} "
                     "RETURN elementId(n) AS id, labels(n) AS labels, n.name AS name, "
                     "n.summary AS summary, n.source_id AS source_id ORDER BY n.id LIMIT $cap",
                     namespace=request.namespace,
-                    labels=list(COLORS),
                     cap=request.max_nodes + 1,
                 ):
                     graph.record_node(row["id"], row["labels"], row.data())
@@ -279,38 +291,49 @@ def render_graph(store, request):
             "Graph rendering requires Graphviz (sfdp). It is included in the Docker image."
         )
     graph = snapshot(store, request)
+    # Own process group: a timed-out layout is killed with anything it spawned.
+    process = subprocess.Popen(
+        [executable, "-Tpng"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
     try:
-        run = subprocess.run(
-            [executable, "-Tpng"],
-            input=dot_source(graph).encode(),
-            capture_output=True,
-            timeout=45,
-            check=False,
-        )
+        image, _ = process.communicate(dot_source(graph).encode(), timeout=LAYOUT_TIMEOUT)
     except subprocess.TimeoutExpired as exc:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.communicate()
         raise ValueError(
             "Graph layout exceeded 45 seconds; use a focused Cypher query or lower limits."
         ) from exc
-    if run.returncode or not run.stdout.startswith(b"\x89PNG\r\n\x1a\n"):
+    if process.returncode or not image.startswith(b"\x89PNG\r\n\x1a\n"):
         raise ValueError(
             "Graphviz could not render this view; simplify the query or lower the limits."
         )
-    if len(run.stdout) > 12_000_000:
-        raise ValueError("Rendered image is too large; use a focused query or lower limits.")
-    width, height = struct.unpack(">II", run.stdout[16:24])
-    return {
+    width, height = struct.unpack(">II", image[16:24])
+    limits = set(graph.truncated)
+    if len(image) > MAX_IMAGE:
+        limits.add("image_bytes")
+    result = {
         "namespace": request.namespace,
         "rendered_at": datetime.now(UTC).isoformat(),
         "nodes": len(graph.nodes),
         "relationships": len(graph.edges),
         "node_types": dict(Counter(n["kind"] for n in graph.nodes.values())),
         "relationship_types": dict(Counter(r for _, _, r in graph.edges.values())),
-        "truncated": bool(graph.truncated),
-        "limits_reached": sorted(graph.truncated),
+        "truncated": bool(limits),
+        "limits_reached": sorted(limits),
         "max_nodes": request.max_nodes,
         "max_relationships": request.max_relationships,
         "labels": "all" if len(graph.nodes) <= 100 else "major_entity_hubs",
         "width": width,
         "height": height,
-        "image": {"mimeType": "image/png", "data": base64.b64encode(run.stdout).decode()},
     }
+    # An oversized picture is reported, not inlined as a multi-megabyte base64 body.
+    if len(image) <= MAX_IMAGE:
+        result["image"] = {"mimeType": "image/png", "data": base64.b64encode(image).decode()}
+    return result

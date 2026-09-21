@@ -3,8 +3,9 @@
 import argparse
 import json
 import os
+import signal
 import sys
-import time
+import threading
 from pathlib import Path
 
 from .importers import memory_files, transcripts
@@ -26,8 +27,86 @@ def build_service():
     return MemoryService(store, configured_llm())
 
 
+class Version(argparse.Action):
+    def __call__(self, parser, *_):
+        from . import __version__
+        from .version import engine_fingerprint
+
+        print(f"graph-memory {__version__} engine {engine_fingerprint()}")
+        parser.exit()
+
+
+def env_list(name):
+    return [v.strip() for v in os.environ.get(name, "").split(",") if v.strip()]
+
+
+def run_hook(namespace):
+    """Instructions must reach the agent even when the database is slow or down."""
+    from .feeds import feed, hook
+
+    try:
+        payload = json.load(sys.stdin)
+    except ValueError:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    path = payload.get("transcript_path")
+    # Without a transcript path the hook formats its output and never touches the service.
+    output = hook(None, namespace, {k: v for k, v in payload.items() if k != "transcript_path"})
+    instructing = "hookSpecificOutput" in output
+    if instructing:
+        print(json.dumps(output, indent=2), flush=True)
+    service = None
+    try:
+        if path and Path(path).is_file():
+            service = build_service()
+            if instructing:
+                feed(service, namespace, Path(path), payload["session_id"])
+            else:
+                output = hook(service, namespace, payload)
+    except Exception as exc:
+        print(f"graph-memory hook: staging skipped ({type(exc).__name__})", file=sys.stderr)
+    finally:
+        if service is not None:
+            service.store.close()
+    if not instructing:
+        print(json.dumps(output, indent=2))
+
+
 def main():
+    debug = "--debug" in sys.argv[1:]
+    try:
+        run()
+    except KeyboardInterrupt:
+        raise SystemExit(130) from None
+    except Exception as exc:
+        if debug:
+            raise
+        from neo4j.exceptions import AuthError, ServiceUnavailable
+        from pydantic import ValidationError
+
+        if isinstance(exc, ValidationError):
+            # Locations and messages only; inputs can hold private content.
+            detail = "; ".join(
+                f"{'.'.join(map(str, e['loc']))}: {e['msg']}"
+                for e in exc.errors(include_input=False)
+            )
+            print(f"graph-memory: invalid input: {detail}", file=sys.stderr)
+            raise SystemExit(2) from None
+        if isinstance(exc, ValueError):
+            print(f"graph-memory: {exc}", file=sys.stderr)
+            raise SystemExit(2) from None
+        if isinstance(exc, (ServiceUnavailable, AuthError)):
+            print(f"graph-memory: database unavailable ({type(exc).__name__})", file=sys.stderr)
+            raise SystemExit(69) from None
+        print(f"graph-memory: {type(exc).__name__}: {exc} (--debug for traceback)", file=sys.stderr)
+        raise SystemExit(1) from None
+
+
+def run():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--version", action=Version, nargs=0, help="Package and engine identity")
+    parser.add_argument("--debug", action="store_true", help="Show tracebacks on failure")
     parser.add_argument("--namespace", default=os.environ.get("MEMORY_NAMESPACE", "personal"))
     commands = parser.add_subparsers(dest="command", required=True)
     serve = commands.add_parser("serve")
@@ -97,6 +176,8 @@ def main():
     inventory.add_argument("--interval", type=float, default=300)
     inventory.add_argument("--once", action="store_true")
     commands.add_parser("hook")
+    health = commands.add_parser("health", help="Container health probe; no schema setup")
+    health.add_argument("--role", choices=("worker", "inventory", "mcp"), required=True)
     follower = commands.add_parser("follow")
     follower.add_argument("paths", nargs="+", type=Path)
     follower.add_argument("--interval", type=float, default=5)
@@ -147,15 +228,58 @@ def main():
 
         print(json.dumps(write_claude_config(args.directory, args.namespace), indent=2))
         return
+    if args.command == "hook":
+        return run_hook(args.namespace)
+    if args.command == "health":
+        # Runs every few seconds as the container HEALTHCHECK: one line, no traceback.
+        try:
+            from .health import check
+
+            ok, report = check(args.role, args.namespace)
+        except Exception as exc:
+            ok, report = False, {"ok": False, "error": type(exc).__name__}
+        print(json.dumps(report))
+        raise SystemExit(0 if ok else 1)
+    # Argument errors must not cost a database connection and schema setup first.
+    if args.command == "work":
+        if not 1 <= args.limit <= 100:
+            parser.error("--limit must be 1..100")
+        if args.interval < 1:
+            parser.error("--interval must be at least 1 second")
+    if args.command == "daemon" and (not 1 <= args.workers <= 16 or args.interval < 1):
+        parser.error("--workers must be 1..16 and --interval at least 1 second")
+    if args.command == "follow":
+        if args.interval < 1:
+            parser.error("--interval must be at least 1 second")
+        if not all(p.exists() for p in args.paths):
+            parser.error("All transcript paths must exist")
+    if args.command in ("work", "daemon") and os.environ.get("MEMORY_LLM", "caller") == "caller":
+        parser.error(f"{args.command} requires MEMORY_LLM=codex or compatible")
     service = build_service()
     try:
         if args.command == "serve":
             protocol = Protocol(service, namespace=args.namespace, read_only=args.read_only)
             if args.transport == "stdio":
+
+                def leave(*_):
+                    raise SystemExit(0)
+
+                signal.signal(signal.SIGTERM, leave)
                 stdio(protocol)
             else:
                 server = http_server(
-                    protocol, args.host, args.port, os.environ.get("MEMORY_HTTP_TOKEN")
+                    protocol,
+                    args.host,
+                    args.port,
+                    os.environ.get("MEMORY_HTTP_TOKEN"),
+                    env_list("MEMORY_HTTP_ORIGINS"),
+                    env_list("MEMORY_HTTP_HOSTS"),
+                )
+                # shutdown() blocks until serve_forever returns, so it cannot run
+                # in the handler, which interrupts that very loop.
+                signal.signal(
+                    signal.SIGTERM,
+                    lambda *_: threading.Thread(target=server.shutdown, daemon=True).start(),
                 )
                 try:
                     server.serve_forever()
@@ -266,19 +390,20 @@ def main():
         elif args.command == "work":
             if service.llm is None:
                 parser.error("work requires MEMORY_LLM=codex or compatible")
-            if not 1 <= args.limit <= 100:
-                parser.error("--limit must be 1..100")
             from .feeds import worker_tick
 
-            if args.interval < 1:
-                parser.error("--interval must be at least 1 second")
+            stop = threading.Event()
+            if args.watch:
+                for sig in (signal.SIGTERM, signal.SIGINT):
+                    signal.signal(sig, lambda *_: stop.set())
             while True:
                 result = worker_tick(service, args.namespace, args.limit)
                 if not args.watch:
                     break
                 if result["receipts"]:
                     print(json.dumps(result), flush=True)
-                time.sleep(args.interval)
+                if stop.wait(args.interval):
+                    return
         elif args.command == "inventory":
             from .inventory import run_inventory
 
@@ -287,10 +412,6 @@ def main():
         elif args.command == "follow":
             from .follow import follow_loop, follow_once
 
-            if args.interval < 1:
-                parser.error("--interval must be at least 1 second")
-            if not all(p.exists() for p in args.paths):
-                parser.error("All transcript paths must exist")
             if args.once:
                 result = {
                     "feeds": follow_once(
@@ -300,10 +421,6 @@ def main():
             else:
                 follow_loop(service, args.namespace, args.paths, args.interval, args.source_records)
                 return
-        elif args.command == "hook":
-            from .feeds import hook
-
-            result = hook(service, args.namespace, json.load(sys.stdin))
         elif args.command == "feed":
             from .feeds import feed
 
@@ -325,6 +442,8 @@ def main():
                 if args.arguments.startswith("@")
                 else args.arguments
             )
+            if args.tool not in service.tools():
+                parser.error(f"Unknown tool {args.tool}; see: {', '.join(sorted(service.tools()))}")
             result = service.call(args.tool, json.loads(raw))
         else:
             result = service.store.repair(args.namespace)
