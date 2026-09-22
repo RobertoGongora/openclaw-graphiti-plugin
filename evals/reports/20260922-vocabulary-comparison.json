@@ -1,0 +1,123 @@
+{
+  "date": "2026-09-22",
+  "kind": "paired_vocabulary_counts",
+  "model": "gpt-5.6-terra",
+  "effort": "low",
+  "input": "24 frozen real Claude transcript batches, sampled from 40 files with seed 1; private corpus retained locally",
+  "runs_per_engine": 1,
+  "reports": {
+    "old": {
+      "engine": "4a279525401f484ae11c4201533bfc319ee8c08325618d3d9e355b0787ae5d63",
+      "model": "gpt-5.6-terra",
+      "effort": "low",
+      "corpus_sha256": "6c32605f73914bc18b9901a0f2e75700b8a027fe246beb124610f6eac6136239",
+      "batches": 24,
+      "complete": true,
+      "totals": {
+        "batches": 24,
+        "model_calls": 24,
+        "facts": 104,
+        "status:uncertain": 81,
+        "assistant_facts": 97,
+        "assistant_facts_validated": 16,
+        "status:active": 19,
+        "status:planned": 2,
+        "status:ended": 2,
+        "failed": 1,
+        "failed:ValueError": 1,
+        "seconds": 731.7
+      },
+      "relations": {
+        "related_to": 67,
+        "occurred": 17,
+        "resolved": 9,
+        "uses_service": 5,
+        "decided": 3,
+        "worked_on": 2,
+        "prefers": 1
+      },
+      "related_to_share": 0.644,
+      "validation_rate": 0.165,
+      "slots": {
+        "distinct": 0,
+        "single_use": 0,
+        "shared": 0
+      }
+    },
+    "new": {
+      "engine": "0eb286e53a73cf8f03d3fe0ebc52da702174344237a6e4444fb466504498e59b",
+      "model": "gpt-5.6-terra",
+      "effort": "low",
+      "corpus_sha256": "6c32605f73914bc18b9901a0f2e75700b8a027fe246beb124610f6eac6136239",
+      "batches": 24,
+      "complete": true,
+      "totals": {
+        "batches": 24,
+        "model_calls": 23,
+        "facts": 103,
+        "status:active": 13,
+        "assistant_facts": 97,
+        "assistant_facts_validated": 13,
+        "status:planned": 1,
+        "status:uncertain": 85,
+        "status:ended": 4,
+        "failed": 1,
+        "failed:ValueError": 1,
+        "seconds": 782.3
+      },
+      "relations": {
+        "has_issue": 54,
+        "about": 20,
+        "decided": 8,
+        "resolved": 8,
+        "occurred": 6,
+        "uses_service": 5,
+        "related_to": 2
+      },
+      "related_to_share": 0.019,
+      "validation_rate": 0.134,
+      "slots": {
+        "distinct": 0,
+        "single_use": 0,
+        "shared": 0
+      }
+    }
+  },
+  "gate": {
+    "decision": "hold",
+    "related_to_reduced": true,
+    "assistant_claim_validation_not_lower": false,
+    "single_use_slot_reduction": "inconclusive: zero emitted by both engines",
+    "failed_batches_not_increased": true
+  },
+  "caveats": [
+    "One run per engine does not establish a systematic regression; the observed validation rate nevertheless fails the agreed non-regression gate.",
+    "The engines failed different batches; failed extractions contribute no facts to the validation-rate denominator.",
+    "No slots were emitted, so these batches cannot measure a single-use-slot reduction."
+  ],
+  "separate_diagnostic": {
+    "new_engine_failed_batch_zero_based": 7,
+    "rerun_passed": true,
+    "model_calls": 2,
+    "facts": 6,
+    "included_in_comparison": false
+  },
+  "checks": {
+    "deterministic_passed": 289,
+    "deterministic_skipped": 1,
+    "golden_passed": 6,
+    "golden_total": 6,
+    "lint": "passed",
+    "format": "passed",
+    "typecheck": "passed",
+    "ci": "https://github.com/RobertoGongora/openclaw-graphiti-plugin/actions/runs/35747837226"
+  },
+  "deployment": {
+    "live_commit": "c7ebce3",
+    "vocabulary_deployed": false,
+    "inventory_prefix_mismatches_before": 528,
+    "inventory_prefix_mismatches_after": 2,
+    "journal_verified": true
+  },
+  "next_validation": "Repeat paired runs to measure validation variance and add real batches that exercise slots before reconsidering vocabulary rollout."
+}

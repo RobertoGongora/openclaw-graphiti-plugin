@@ -83,6 +83,13 @@ or corpus refuses the checkpoint. Slot identities in the report are hashed.
 The 2026-09-22 change adds three relations, limits slots to role-bearing relations,
 and ignores single-use slots at read time.
 
+The [2026-09-22 paired run](reports/20260922-vocabulary-comparison.json) reduced
+`related_to` from 67/104 facts to 2/103, but assistant-claim validation fell from
+16/97 to 13/97. Both engines failed one of 24 batches and emitted no slots.
+The vocabulary release is held: repeat paired runs to check validation variance
+and include batches that exercise slots. The separately retried failed new-engine
+batch passed, but its retry is not substituted into the comparison.
+
 ## Establishing the golden standard
 
 `baselines/candidate.json` records the current candidate, not an automatically
