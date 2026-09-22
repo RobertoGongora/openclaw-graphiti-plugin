@@ -20,6 +20,7 @@ def prepare(store, request):
         )
         sources = {row["source"]["id"]: row["source"] for row in rows}
     messages = []
+    origins = {}
     for msg in transcript.messages:
         ref = request.sources.get(msg.id)
         if ref:
@@ -43,6 +44,11 @@ def prepare(store, request):
                     gaps=source.get("gaps", []),
                 )
             )
+            if source.get("memory_read_refs"):
+                origins[msg.id] = m.RecallOrigin(
+                    result_ids=source["memory_read_refs"],
+                    fact_ids=source.get("recalled_fact_ids", []),
+                )
         else:
             messages.append(
                 m.Message(
@@ -60,6 +66,7 @@ def prepare(store, request):
             "source_kind": "transcript",
             "verified_source_refs": dict(request.sources),
             "messages": messages,
+            "memory_origins": origins,
             "source_created_at": None,
             "source_updated_at": None,
         }

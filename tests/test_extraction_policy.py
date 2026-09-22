@@ -83,7 +83,7 @@ def test_reduced_view_and_committed_fact_keep_original_evidence(graph):
         def generate(self, instructions, payload, schema):
             assert (
                 sha256(instructions.encode()).hexdigest()
-                == "98de9f64bfa498ab55b338c0e31fb9aa90e33fb65927ce9468b784e5ff2a56bf"
+                == "275c759f403c12c8a8bf511e57af2f5c192c0e7917936cde0994c64b3368b7d9"
             )
             assert payload["transcript"]["messages"][1]["content"].startswith(
                 "[Context text omitted"

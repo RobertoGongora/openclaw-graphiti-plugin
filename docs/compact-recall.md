@@ -17,18 +17,25 @@ If vocabulary does not match, omit the question or use a more specific term.
 The default response contains at most five facts/derived conclusions total.
 Each fact has its ID, text, temporal category, date and source episode ID.
 Identical facts in the same temporal category are grouped, with support counts.
-Repeated events with different dates remain distinct. An uncertain claim is
-grouped more loosely: every unverified fact with the same subject, relation and
-target is one entry, shown in its latest wording, with `support_count` and, when
-it was said in more than one conversation, `sessions`. Repetition across sessions
-is a reason to check the claim (see `memory_status.corroboration`), never a
-promotion out of the uncertain category. A fact the user confirmed
+Repeated events with different dates remain distinct. Different uncertain
+wordings also remain distinct: a shorter later summary cannot replace a detailed
+earlier report just because they name the same endpoints. Identical uncertain
+reports expose `report_count` and `source_sessions`, not an independent-support
+count. Repetition across sessions can include memory-derived echoes; it is never
+a promotion out of the uncertain category. `reported_at` is the source message's
+time and orders comparable reports; it does not fill a missing event date or prove
+that a later report corrected an earlier one. A fact the user confirmed
 with `memory_confirm` carries `confirmed_by_user: true`. Summary excerpts are capped
 at 500 characters and explicitly marked when truncated. Plans, uncertain claims,
 undated documents and conflicting claims never become current facts by formatting.
 
-Questions select the strongest token matches. Matching an older value also
-selects other facts in the same subject/relation/exclusive role, so asking about
+Questions rank individual facts by weighted lexical overlap, with small lexical
+normalizations for deployment/evaluation questions and a preference for measured
+outcomes when asking for results. Partial matches remain available through
+pagination instead of being discarded by a highest-score-only filter. Explicit
+database/framework/language questions also match the relation and target kind.
+Matching an older value also selects other facts in the same genuine exclusive
+state role, so asking about
 an old database can surface its replacement. A role is a slot that at least two
 facts of that subject and relation share; a slot only one fact carries is a
 label, and the fact is grouped by its target instead. This relies on the existing entity
@@ -43,9 +50,12 @@ Every call resolves the graph again. Check the revision between pages, or use
 `known_at`/`at_change` for a fixed historical view. Derived conclusions have their
 own availability counts and support IDs; `detail:"full"` exposes their full lists.
 
-For original records, call `memory_recall` with `detail:"full", limit:30`.
-This is the legacy entity projection: compact-only `question`, `offset` and
-`include_history` do not filter this diagnostic view. The same full detail option
+With a `question`, `detail:"full"` uses exactly the same ranking, total limit,
+offset, history selection and `facts` envelope as compact, expanding each chosen
+fact to its original record. Detail changes the amount of evidence returned,
+not which question is answered. For the legacy unranked diagnostic projection,
+omit `question` and pass `detail:"full", limit:30`; its limit remains per lane,
+and offset/history filtering do not apply. The same full detail option
 is available on `memory_latest`. Latest retains ties/conflicts/uncertainty before
 applying its response limit; truncation cannot manufacture a single winner.
 

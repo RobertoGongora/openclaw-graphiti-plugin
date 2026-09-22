@@ -488,6 +488,9 @@ class GraphStore:
             )
             fact_ids = []
             documented = transcript.source_updated_at or transcript.source_created_at
+            messages = {m.id: m for m in transcript.messages}
+            from .recall_provenance import latest_report_time
+
             for fact in extraction.facts:
                 raw = fact.model_dump(mode="json")
                 fid = digest([episode_id, raw])
@@ -536,6 +539,11 @@ class GraphStore:
                     "session_id": transcript.session_id,
                     "source_kind": transcript.source_kind,
                     "recorded_at": committed_at,
+                    "reported_at": latest_report_time(
+                        stamp.isoformat()
+                        for e in fact.evidence
+                        if (stamp := messages[e.message_id].timestamp)
+                    ),
                     "retracted": False,
                 }
                 tx.run(
@@ -610,7 +618,10 @@ class GraphStore:
             "MATCH (s:MemoryEntity {namespace:$ns}),(t:MemoryEntity {namespace:$ns}),"
             "(e:MemoryEpisode {namespace:$ns,status:'complete'}) "
             "WHERE s.id=f.subject_id AND t.id=f.target_id AND e.id=f.episode_id "
-            "RETURN f {.*,subject_name:s.name,subject_kind:s.kind,target_name:t.name,target_kind:t.kind} AS fact",
+            "CALL { WITH f UNWIND coalesce(f.message_refs,[]) AS mid "
+            "OPTIONAL MATCH (m:MemoryMessage {id:mid,namespace:$ns}) "
+            "RETURN toString(max(datetime(m.timestamp))) AS reported } "
+            "RETURN f {.*,reported_at:coalesce(f.reported_at,reported),subject_name:s.name,subject_kind:s.kind,target_name:t.name,target_kind:t.kind} AS fact",
             ns=namespace,
             ids=ids,
             relation=relation,

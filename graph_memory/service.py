@@ -69,7 +69,7 @@ class MemoryService:
         transcript = m.Transcript.model_validate(packet["transcript"])
         payload = extraction_payload(
             {
-                "transcript": packet["transcript"],
+                "transcript": transcript.model_dump(mode="json"),
                 "existing_entities": packet["existing_entities"],
                 "existing_relationships": packet["existing_relationships"],
             }

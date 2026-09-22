@@ -106,6 +106,16 @@ non-inferiority; batch evidence and the report preserve the variability and fail
 
 ## Establishing the golden standard
 
+### Frozen recall regression
+
+`python -m evals.recall_regression PRIVATE_SNAPSHOT --output REPORT` evaluates
+question-ranked compact/full views on saved complete projections, without any
+live graph or model access. Inputs contain `cases` with `entity`, `question`,
+`raw`, source-reviewed `expected_ids`, and optional `baseline_ids`. Empty
+expectations are unscored. Outputs contain only sizes, timings and hit counts.
+Keep private snapshots in `.local/`. The 2026-09-22 development comparison is
+`reports/20260922-recall-ranking.json`; it is not an independent accuracy estimate.
+
 `baselines/candidate.json` records the current candidate, not an automatically
 approved baseline. Review the cases for product correctness and the repeated
 results for model variance before blessing them. Changes to `cases/*.json` are

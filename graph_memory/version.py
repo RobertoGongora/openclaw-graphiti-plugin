@@ -13,6 +13,7 @@ ENGINE_FILES = (
     "models.py",
     "llm.py",
     "extraction_policy.py",
+    "recall_provenance.py",
     "retry.py",
     "diagnostics.py",
     "service.py",

@@ -445,6 +445,9 @@ def feed_records(
     """
     path = path.expanduser().resolve(strict=True)
     messages = list(records(path))
+    from .recall_provenance import report_origins
+
+    origins = report_origins(messages)
     fid = feed_id or digest([FORMAT, namespace, str(path), session_id])
     title_message = next(
         (
@@ -481,6 +484,7 @@ def feed_records(
                 source_format=FORMAT,
                 title=title,
                 messages=selected,
+                memory_origins={m.id: origins[m.id] for m in selected if m.id in origins},
                 focus_message_ids=[m.id for m in messages[count:end]],
             )
             receipts.append(service.store.stage(t, transaction=tx))

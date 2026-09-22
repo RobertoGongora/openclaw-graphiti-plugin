@@ -927,12 +927,20 @@ class Journal:
         ids = {e["id"] for e in selected}
 
         def grounded(f):
+            from .recall_provenance import latest_report_time
+
             s = state["MemoryEntity"].get(f["subject_id"])
             t = state["MemoryEntity"].get(f["target_id"])
             e = state["MemoryEpisode"].get(f["episode_id"])
             if s and t and e and e["status"] == "complete":
                 return {
                     **f,
+                    "reported_at": f.get("reported_at")
+                    or latest_report_time(
+                        state["MemoryMessage"][mid]["timestamp"]
+                        for mid in f.get("message_refs", [])
+                        if state["MemoryMessage"].get(mid, {}).get("timestamp")
+                    ),
                     "subject_name": s["name"],
                     "subject_kind": s["kind"],
                     "target_name": t["name"],

@@ -126,6 +126,12 @@ class Message(Model):
     gaps: list[str] = Field(default_factory=list)
 
 
+class RecallOrigin(Model):
+    # Local source-message IDs (same session), plus memory fact IDs when available.
+    result_ids: Annotated[list[Key], Field(max_length=200)] = Field(default_factory=list)
+    fact_ids: Annotated[list[Key], Field(max_length=200)] = Field(default_factory=list)
+
+
 class Transcript(Model):
     namespace: Key
     source_id: Key
@@ -136,6 +142,7 @@ class Transcript(Model):
     source_updated_at: AwareDatetime | None = None
     source_format: str | None = None
     verified_source_refs: dict[str, Key] = Field(default_factory=dict)
+    memory_origins: dict[Key, RecallOrigin] = Field(default_factory=dict)
     title: Text | None = None
     focus_message_ids: list[Key] = Field(default_factory=list)
     messages: Annotated[list[Message], Field(min_length=1, max_length=500)]
@@ -148,6 +155,14 @@ class Transcript(Model):
             raise ValueError("Focus messages must exist in the transcript")
         if sum(len(m.content) for m in self.messages) > 500_000:
             raise ValueError("Split transcripts into chunks of at most 500000 characters")
+        if not set(self.memory_origins) <= {m.id for m in self.messages}:
+            raise ValueError("Memory origins must identify messages in the transcript")
+        if self.source_format in {"session-records-v1", "direct-mcp-v1"}:
+            from .recall_provenance import report_origins
+
+            for mid, origin in report_origins(self.messages).items():
+                if mid not in self.memory_origins:
+                    self.memory_origins[mid] = RecallOrigin(**origin)
         return self
 
     def can_yield_facts(self):
@@ -157,7 +172,14 @@ class Transcript(Model):
         if self.source_format not in {"session-records-v1", "direct-mcp-v1"}:
             return True
         focus = set(self.focus_message_ids)
-        return any(m.source_type in CLAIMS for m in self.messages if not focus or m.id in focus)
+        from .recall_provenance import fresh_results
+
+        fresh = fresh_results(self)
+        return any(
+            m.source_type in CLAIMS and (m.id not in self.memory_origins or fresh)
+            for m in self.messages
+            if not focus or m.id in focus
+        )
 
 
 class Entity(Model):
@@ -344,6 +366,9 @@ class Extraction(Model):
         # The rules below judge the evidence as repaired: a quote moved to another
         # message is held to that message's role and focus.
         focus = set(transcript.focus_message_ids)
+        from .recall_provenance import fresh_results
+
+        fresh = fresh_results(transcript)
         for fact_index, fact in enumerate(self.facts):
             cites = [messages[e.message_id] for e in [*fact.evidence, *fact.validation_evidence]]
             # A feed fact states a new claim: the same rule that decides whether the
@@ -365,8 +390,21 @@ class Extraction(Model):
                         ["facts", fact_index, "evidence"],
                     )
                 validation = [messages[e.message_id] for e in fact.validation_evidence]
+                independent_user = any(
+                    m.source_type == "user_assertion" and (not focus or m.id in focus)
+                    for m in claims
+                )
+                if (
+                    any(m.id in transcript.memory_origins for m in claims)
+                    and not independent_user
+                    and not any(m.id in fresh for m in validation)
+                ):
+                    reject(
+                        "A memory-derived report is not a new independent claim. Cite fresh corroborating tool evidence or omit the repeated fact; retain original memory fact IDs in source provenance.",
+                        ["facts", fact_index, "evidence"],
+                    )
                 primary = any(m.source_type == "user_assertion" for m in claims) or any(
-                    m.source_type == "tool_result" and m.tool_failed is not True for m in validation
+                    m.id in fresh for m in validation
                 )
                 if not primary and (fact.status != "uncertain" or fact.valid_at is not None):
                     reject(

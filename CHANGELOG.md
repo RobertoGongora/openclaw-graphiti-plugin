@@ -3,6 +3,15 @@
 
 ### Fixed
 
+- Question-based full memory recall now ranks and pages the same facts as compact
+  recall. Partial matches and distinct uncertain reports remain available instead
+  of being discarded in favor of one wording or the highest keyword score.
+- Assistant reports derived from memory or delegated summaries retain read/fact
+  provenance and require fresh corroboration before producing another fact.
+  Pure recall-report batches complete without another model extraction.
+- Comparable reports use source-message time rather than ingestion time; repeated
+  uncertain reports no longer advertise their count as independent support.
+
 - **Cross-session leak in ContextEngine mode**: per-session state was kept on the
   shared engine instance, so `assemble()` for one session could inject another
   session's transcript and lifecycle events. State is now keyed by session id.

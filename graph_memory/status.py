@@ -113,7 +113,8 @@ def status(store, request):
             ),
             "basis": "Unverified, unconfirmed claims stated in at least min_sessions separate sessions, "
             "one row per subject, relation and target with the latest wording. Check the claim, then "
-            "memory_confirm the latest fact or let a tool result validate it; nothing is promoted here.",
+            "memory_confirm the latest fact or let a tool result validate it; nothing is promoted here. "
+            "Sessions can repeat recalled evidence; these counts do not establish independent support.",
         }
         active = episodes(ACTIVE, "e.ingested_at", 5)
         row = tx.run(

@@ -194,7 +194,7 @@ def test_mcp_compact_and_exact_evidence_historical_namespace_retraction(graph):
     assert len(json.dumps(result)) < len(json.dumps(full))
 
 
-def test_specific_question_does_not_fill_budget_with_loose_matches():
+def test_specific_question_ranks_strong_match_without_discarding_partial_match():
     data = raw(
         documented=[
             fact(
@@ -209,8 +209,10 @@ def test_specific_question_does_not_fill_budget_with_loose_matches():
             fact("loose", summary="Callback timeout is 15 seconds.", target="callback", slot=None)
         ],
     )
-    result = retrieve(data, question="statement timeout")
+    result = retrieve(data, question="statement timeout", limit=1)
     assert [f["id"] for f in result["facts"]] == ["exact"]
+    assert result["next_offset"] == 1
+    assert retrieve(data, question="statement timeout", offset=1)["facts"][0]["id"] == "loose"
 
 
 @pytest.mark.integration
@@ -291,7 +293,7 @@ def test_bound_remember_injects_nested_namespace_without_mutating_input(graph):
     assert protocol.dispatch(message)[0] == 403
 
 
-def test_uncertain_claim_repeated_in_other_words_is_one_entry_with_session_count():
+def test_uncertain_different_wordings_survive_and_identical_reports_are_not_support():
     said = [
         fact(
             f"u{i}",
@@ -307,12 +309,158 @@ def test_uncertain_claim_repeated_in_other_words_is_one_entry_with_session_count
     dated = [fact(f"d{i}", summary=f"Atlas uses MySQL, wording {i}.") for i in range(2)]
     result = retrieve(raw(uncertain=said, current=dated), limit=10)
     uncertain = [f for f in result["facts"] if f["lane"] == "uncertain"]
-    assert len(uncertain) == 1
-    assert uncertain[0]["id"] == "u3"  # the latest wording stands for the claim
-    assert uncertain[0]["support_count"] == 4 and uncertain[0]["sessions"] == 2
+    assert len(uncertain) == 4
     # Dated claims keep their exact-wording grouping: different words, different entries.
     assert len([f for f in result["facts"] if f["lane"] == "current"]) == 2
-    assert result["counts"]["matching_unique"] == 3
-    one_session = retrieve(raw(uncertain=said[:1] + [{**said[1], "session_id": "session-0"}]))
-    assert "sessions" not in one_session["facts"][0]
-    assert one_session["facts"][0]["support_count"] == 2
+    assert result["counts"]["matching_unique"] == 6
+    duplicates = retrieve(
+        raw(uncertain=[said[0], {**said[0], "id": "copy", "session_id": "other"}])
+    )
+    assert len(duplicates["facts"]) == 1
+    assert duplicates["facts"][0]["report_count"] == 2
+    assert duplicates["facts"][0]["source_sessions"] == 2
+    assert "support_count" not in duplicates["facts"][0]
+
+
+def test_question_full_expands_same_ranked_page_and_retains_raw_view_without_question():
+    data = raw(
+        current=[fact("answer", summary="Database is MySQL.")],
+        uncertain=[fact("noise", summary="Release banner changed.", target="banner", slot=None)],
+    )
+    compact = retrieve(data, question="database", limit=1)
+    full = retrieve(data, question="database", detail="full", limit=1)
+    assert [f["id"] for f in full["facts"]] == [f["id"] for f in compact["facts"]] == ["answer"]
+    assert full["facts"][0]["summary"] == "Database is MySQL."
+    assert full["counts"] == compact["counts"]
+    assert retrieve(data, detail="full") == data
+
+
+@pytest.mark.integration
+def test_recall_word_normalization_does_not_change_entity_name_search(graph):
+    store, ns = graph
+    named = {
+        **PROJECT,
+        "key": "project:eval-tracker",
+        "name": "Eval Tracker",
+        "aliases": ["Eval Tracker"],
+    }
+    ingest(
+        store,
+        ns,
+        "tracker",
+        "Eval Tracker uses MySQL.",
+        [named, MYSQL],
+        [
+            {
+                "subject": named["key"],
+                "target": MYSQL["key"],
+                "relation": "uses_database",
+                "valid_at": "2026-09-01T00:00:00Z",
+            }
+        ],
+    )
+    assert (
+        v.search_entities(store, v.EntitySearch(namespace=ns, query="Tracker Eval"))["matches"][0][
+            "key"
+        ]
+        == named["key"]
+    )
+
+
+def test_report_order_uses_source_time_not_reingestion_and_preserves_detail():
+    common = {"status": "uncertain", "valid_at": None, "valid_ts": None, "slot": None}
+    old = fact(
+        "old",
+        summary="Deployment is waiting.",
+        reported_at="2026-09-01T00:00:00Z",
+        recorded_at="2026-09-22T00:00:00Z",
+        **common,
+    )
+    new = fact(
+        "new",
+        summary="Deployment completed; validation is 16%.",
+        reported_at="2026-09-02T00:00:00Z",
+        recorded_at="2026-09-03T00:00:00Z",
+        **common,
+    )
+    out = retrieve(raw(uncertain=[old, new]), question="deployment")
+    assert [f["id"] for f in out["facts"]] == ["new", "old"]
+    assert out["facts"][0]["at"] is None
+    assert out["facts"][0]["reported_at"] == new["reported_at"]
+    assert retrieve(raw(uncertain=[old, new]), question="validation")["facts"][0]["id"] == "new"
+
+
+def test_event_role_does_not_transfer_question_score_to_unrelated_summary():
+    data = raw(
+        uncertain=[
+            fact(
+                "relevant",
+                relation="occurred",
+                target="event:release",
+                slot="status",
+                summary="Vocabulary validation is 16%.",
+            ),
+            fact(
+                "unrelated",
+                relation="occurred",
+                target="event:release",
+                slot="status",
+                summary="Release paused while CI runs.",
+            ),
+        ]
+    )
+    assert [f["id"] for f in retrieve(data, question="validation")["facts"]] == ["relevant"]
+
+
+def test_result_question_retains_measured_outcome_alongside_progress_reports():
+    data = raw(
+        uncertain=[
+            fact(
+                "progress",
+                relation="occurred",
+                slot=None,
+                target="event:vocabulary-evaluation",
+                summary="Extraction vocabulary evaluation results are still pending.",
+            ),
+            fact(
+                "outcome",
+                relation="occurred",
+                slot=None,
+                target="event:vocabulary-rollout",
+                summary="Validation rate rose from 14% to 16%; deployment completed.",
+            ),
+        ]
+    )
+    out = retrieve(data, question="What were the vocabulary evaluation results?", limit=2)
+    assert "outcome" in [f["id"] for f in out["facts"]]
+
+
+@pytest.mark.integration
+def test_report_time_live_and_historical_does_not_become_event_time(graph):
+    from graph_memory.models import Transcript
+    from tests.test_session_sources import extraction
+
+    store, ns = graph
+    t = Transcript(
+        namespace=ns,
+        source_id="report-time",
+        session_id="report-time",
+        source_format="session-records-v1",
+        messages=[
+            {
+                "id": "report",
+                "role": "assistant",
+                "source_type": "assistant_report",
+                "content": "Atlas uses MySQL.",
+                "timestamp": "2026-09-22T12:00:00Z",
+            }
+        ],
+    )
+    receipt = store.stage(t)
+    store.commit(ns, receipt["episode_id"], extraction("report", status="uncertain"))
+    checkpoint = Journal(store).verify(ns)["sequence"]
+    live = v.recall(store, v.RecallView(namespace=ns, entity="Atlas"))
+    historical = v.recall(store, v.RecallView(namespace=ns, entity="Atlas", at_change=checkpoint))
+    assert live["facts"] == historical["facts"]
+    assert live["facts"][0]["reported_at"] == "2026-09-22T12:00:00+00:00"
+    assert live["facts"][0]["at"] is None

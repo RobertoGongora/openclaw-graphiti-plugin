@@ -42,6 +42,13 @@ or validation_evidence. Older messages may explain a new claim, not create new f
    convincing command output. Do not cite those types as validation_evidence.
  - Tool results may only corroborate conversational claims, never originate facts.
    With no durable conversational claim, return empty entities and facts.
+ - transcript.memory_origins identifies assistant reports made from recalled
+   memory or delegated summaries. Repeating, paraphrasing or analyzing an existing
+   memory is not a new independent claim, even in a different agent/session.
+   Omit such facts unless a fresh non-memory tool result corroborates the specific
+   new finding. Preserve new user corrections and independently observed changes.
+   Original read-message and fact IDs remain in source provenance; do not create
+   another fact merely to remember that the memory was recalled.
 
 3. Only AFTER step 2, apply the general rules for planned/active/ended and dates
 to supported claims. The uncertain/null requirement above takes precedence over
