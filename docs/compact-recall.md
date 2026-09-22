@@ -29,7 +29,9 @@ undated documents and conflicting claims never become current facts by formattin
 
 Questions select the strongest token matches. Matching an older value also
 selects other facts in the same subject/relation/exclusive role, so asking about
-an old database can surface its replacement. This relies on the existing entity
+an old database can surface its replacement. A role is a slot that at least two
+facts of that subject and relation share; a slot only one fact carries is a
+label, and the fact is grouped by its target instead. This relies on the existing entity
 and relationship identities; it cannot repair misclassified or missing facts.
 Historical rows are hidden by default; `include_history:true` makes them eligible.
 Conflicts, source backlog counts, entity ambiguity, omitted-result counts and

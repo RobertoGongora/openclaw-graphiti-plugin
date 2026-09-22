@@ -114,7 +114,9 @@ current-state neighborhood returned by `memory_recall`.
 
 - Source messages retain their timestamps and IDs. Every relationship cites an
   exact quote from an ingested message. Original content stays in the graph.
-- State assertions may use an exclusive `slot`, such as `production-primary`.
+- A technology choice (`uses_*`, `implemented_in`, `depends_on`) may name an
+  exclusive `slot`, such as `production-primary`. A slot elsewhere is dropped, and
+  a slot only one fact uses groups nothing: such facts group by target.
   Multiple databases otherwise coexist. A planned migration cannot displace the
   deployed database. Equal-time incompatible assertions remain conflicts.
 - Confirmed chronological events require timezone-aware occurrence times. Undated
