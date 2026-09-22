@@ -205,11 +205,14 @@ def run():
     call.add_argument("arguments", help="JSON object, or @path to a JSON file")
     commands.add_parser("repair")
     feeds = commands.add_parser("feeds", help="Maintain transcript feed identity")
-    feeds.add_argument("action", choices=("stamp",))
+    feeds.add_argument("action", choices=("stamp", "plan-revision", "apply-revision"))
+    feeds.add_argument("--feed", help="Source feed ID for plan-revision")
+    feeds.add_argument("--path", type=Path, help="Mounted transcript path for plan-revision")
+    feeds.add_argument("--reason", help="Why the changed source should continue")
+    feeds.add_argument("--plan", type=Path, help="Reviewed JSON plan for apply-revision")
     feeds.add_argument(
         "--root",
         action="append",
-        required=True,
         help="A transcript root, or LABEL=PATH where PATH is the prefix the feeds were "
         "stored under (it need not exist here), e.g. claude=/sessions/claude",
     )
@@ -316,9 +319,24 @@ def run():
                     failures.append({"path": str(path), "error": type(exc).__name__})
             result = {"receipts": outputs, "failures": failures}
         elif args.command == "feeds":
-            from .feed_identity import stamp_existing
+            if args.action == "stamp":
+                from .feed_identity import stamp_existing
 
-            result = stamp_existing(service.store, args.namespace, args.root)
+                if not args.root:
+                    parser.error("feeds stamp requires --root")
+                result = stamp_existing(service.store, args.namespace, args.root)
+            elif args.action == "plan-revision":
+                from .source_revisions import plan
+
+                if not args.feed or not args.path or not args.reason:
+                    parser.error("plan-revision requires --feed, --path and --reason")
+                result = plan(service.store, args.namespace, args.feed, args.path, args.reason)
+            else:
+                from .source_revisions import apply
+
+                if not args.plan:
+                    parser.error("apply-revision requires --plan")
+                result = apply(service.store, args.namespace, json.loads(args.plan.read_text()))
         elif args.command == "aliases":
             from . import aliases
 

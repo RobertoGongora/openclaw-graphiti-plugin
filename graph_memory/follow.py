@@ -36,7 +36,7 @@ def seed_seen(service, namespace, roots, files, seen):
     feeds.rekey(service.store, files)
     rows = service.store.read(
         lambda tx: tx.run(
-            "MATCH (f:MemoryFeed {namespace:$ns}) WHERE f.caught_up_size IS NOT NULL "
+            "MATCH (f:MemoryFeed {namespace:$ns}) WHERE f.caught_up_size IS NOT NULL AND f.superseded_by IS NULL "
             "RETURN f.source_key AS key,f.source_uri AS uri,"
             "f.caught_up_mtime_ns AS mtime,f.caught_up_size AS size",
             ns=namespace,

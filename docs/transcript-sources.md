@@ -66,6 +66,33 @@ stages nothing while older feeds cannot be named under the current roots; see
 [ingestion pipeline](ingestion-pipeline.md#intake).
 Source files must remain available until intake has caught up.
 
+### Reviewed source continuations
+
+When a transcript rewrites already-ingested history, preserve the original
+evidence and review a separate continuation rather than resetting its cursor.
+Stop the intake worker first; it caches feed identity until restart. Use the
+same mounted path the worker reads:
+
+```sh
+graph-memory --namespace transcripts feeds plan-revision \
+  --feed OLD_FEED_ID --path /sessions/claude/project/session.jsonl \
+  --reason 'Resume the changed continuation while preserving original evidence' > plan.json
+# Review the common prefix, retained old tail and new tail counts, and the changed source.
+graph-memory --namespace transcripts feeds apply-revision --plan plan.json
+```
+
+The plan binds the source bytes, stored episode evidence, feed cursor and reason
+by digest. Applying rechecks them under the namespace lock and refuses stale or
+modified plans. It archives the old feed and creates a new session identity at
+the first changed chunk. Restart the worker to ingest that tail. The unchanged
+prefix is context only, and all original episodes, facts, decisions and journal
+history remain intact. A repeated apply of the same plan is idempotent.
+
+This is a source continuation, not a correction of old claims: source-file
+rewriting alone does not establish that an earlier statement was false. The
+operation currently refuses nested rewrites of a revised session; those require
+reviewing its ancestor history too. A partial final record also blocks planning.
+
 ### Backlog inventory
 
 The Compose `inventory` service independently scans the same read-only transcript
