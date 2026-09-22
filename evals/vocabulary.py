@@ -22,6 +22,7 @@ import time
 from collections import Counter
 from pathlib import Path
 
+from graph_memory.diagnostics import diagnostic
 from graph_memory.llm import configured_llm, extraction_instructions
 from graph_memory.models import CLAIMS, Transcript
 from graph_memory.service import MemoryService
@@ -34,6 +35,7 @@ from .lookback import sample, transcript
 def write_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.touch(mode=0o600)
     temporary.write_text(json.dumps(value, indent=2))
     temporary.replace(path)
 
@@ -48,6 +50,9 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
         "--corpus", type=Path, help="Freeze input transcripts here; reuse for both engines"
+    )
+    parser.add_argument(
+        "--details-dir", type=Path, help="Private per-batch extractions for evidence comparison"
     )
     args = parser.parse_args()
     if args.corpus and args.corpus.exists():
@@ -69,6 +74,7 @@ def main():
     llm = configured_llm()
     service = MemoryService(None, llm)
     identity = {
+        "report_version": 2,
         "engine": engine_fingerprint(),
         "model": llm.model,
         "effort": llm.effort,
@@ -76,6 +82,7 @@ def main():
         "batches": len(corpus),
     }
     totals, relations, slots, seconds = Counter(), Counter(), Counter(), 0.0
+    batch_results = []
     if args.output.exists():
         previous = json.loads(args.output.read_text())
         if any(previous.get(k) != v for k, v in identity.items()):
@@ -84,6 +91,7 @@ def main():
         seconds = totals.pop("seconds", 0.0)
         relations.update(previous["relations"])
         slots.update(previous["slot_counts"])
+        batch_results = previous["batch_results"]
 
     def checkpoint():
         if engine_fingerprint(fresh=True) != identity["engine"]:
@@ -103,17 +111,48 @@ def main():
                 "shared": sum(1 for c in slots.values() if c > 1),
             },
             "slot_counts": dict(slots),
+            "batch_results": batch_results,
         }
         write_json(args.output, report)
-        print(json.dumps({k: v for k, v in report.items() if k != "slot_counts"}), flush=True)
+        print(
+            json.dumps(
+                {k: v for k, v in report.items() if k not in {"slot_counts", "batch_results"}}
+            ),
+            flush=True,
+        )
+
+    def finish_batch(index, before, duration, progress, extraction=None, error=None):
+        result = {
+            "index": index,
+            "totals": dict(totals - before),
+            "seconds": round(duration, 1),
+        }
+        if error is not None:
+            result["diagnostic"] = diagnostic(error, progress.get("stage", "eval"))
+        batch_results.append(result)
+        if args.details_dir:
+            candidate = extraction if extraction is not None else progress.get("extraction")
+            write_json(
+                args.details_dir / f"{index:03d}.json",
+                {
+                    **result,
+                    "accepted": extraction is not None,
+                    "extraction": candidate.model_dump(mode="json")
+                    if candidate is not None
+                    else None,
+                },
+            )
+        checkpoint()
 
     checkpoint()
-    for data in corpus[totals["batches"] :]:
+    for index in range(totals["batches"], len(corpus)):
+        data = corpus[index]
+        before = totals.copy()
         t = Transcript.model_validate(data)
         totals["batches"] += 1
         if not t.can_yield_facts():
             totals["skipped"] += 1
-            checkpoint()
+            finish_batch(index, before, 0.0, {})
             continue
         packet = {
             "transcript": t.model_dump(mode="json"),
@@ -122,16 +161,20 @@ def main():
             "instructions": extraction_instructions(t),
         }
         started = time.monotonic()
+        progress = {}
         try:
-            extraction, calls = service.propose(packet)
+            extraction, calls = service.propose(packet, progress=progress)
         except Exception as exc:
             totals["failed"] += 1
             totals[f"failed:{type(exc).__name__}"] += 1
-            seconds += time.monotonic() - started
-            checkpoint()
+            duration = time.monotonic() - started
+            seconds += duration
+            totals["model_calls"] += progress.get("attempt", -1) + 1
+            finish_batch(index, before, duration, progress, error=exc)
             continue
         else:
-            seconds += time.monotonic() - started
+            duration = time.monotonic() - started
+            seconds += duration
         totals["model_calls"] += calls
         claims = {m.id: m.source_type for m in t.messages if m.source_type in CLAIMS}
         for fact in extraction.facts:
@@ -147,7 +190,7 @@ def main():
             if all(claims.get(e.message_id) == "assistant_report" for e in fact.evidence):
                 totals["assistant_facts"] += 1
                 totals["assistant_facts_validated"] += bool(fact.validation_evidence)
-        checkpoint()
+        finish_batch(index, before, duration, progress, extraction=extraction)
 
 
 if __name__ == "__main__":

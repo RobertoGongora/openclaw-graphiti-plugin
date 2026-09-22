@@ -80,6 +80,11 @@ session files that are still changing. The corpus contains private transcript
 text and must stay under ignored `.local/`. Reports checkpoint atomically after
 every batch; repeat the same command to resume. A different engine, model, effort
 or corpus refuses the checkpoint. Slot identities in the report are hashed.
+Version 2 reports include per-batch counts and bounded failure diagnostics. Use
+`--details-dir /absolute/path/.local/vocabulary-details` to retain accepted and
+last rejected extractions for evidence review. Those files contain private claim
+text and quotes; never commit them. Version 1 reports need a fresh output path
+because they cannot reconstruct batch-level results.
 The 2026-09-22 change adds three relations, limits slots to role-bearing relations,
 and ignores single-use slots at read time.
 
