@@ -74,10 +74,14 @@ rules (commit 7ee5f34). Compare later snapshots against it.
 `evals/vocabulary.py` extracts sampled real batches and reports the relation
 mix, the share that falls back to `related_to`, how many slots are emitted and
 how many of those only one fact uses, and the assistant-claim validation rate as
-a regression check. Run it from two worktrees with the same seed to compare
-engines; reports stay under `.local/`, since the sampled batches are real
-sessions. The 2026-09-22 change (three relations, slots only on technology
-choices, single-use slots ignored at read time) was measured this way.
+a regression check. Create a shared `--corpus /absolute/path/.local/vocabulary-corpus.json`
+on the first run and reuse it from both worktrees: a seed alone cannot freeze
+session files that are still changing. The corpus contains private transcript
+text and must stay under ignored `.local/`. Reports checkpoint atomically after
+every batch; repeat the same command to resume. A different engine, model, effort
+or corpus refuses the checkpoint. Slot identities in the report are hashed.
+The 2026-09-22 change adds three relations, limits slots to role-bearing relations,
+and ignores single-use slots at read time.
 
 ## Establishing the golden standard
 
