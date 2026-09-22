@@ -1,0 +1,3634 @@
+{
+  "kind": "graph_baseline_counts_only",
+  "captured_at": "2026-09-22T12:55:26.561532+00:00",
+  "namespace": "transcripts",
+  "commit": "7ee5f34d0315f24d065d2ea3db5aac5476f04545",
+  "engine": "4a279525401f484ae11c4201533bfc319ee8c08325618d3d9e355b0787ae5d63",
+  "schema": {
+    "neo4j": [
+      {
+        "name": "Neo4j Kernel",
+        "version": "5.26.30",
+        "edition": "community"
+      }
+    ],
+    "labels": [
+      "MemoryAlias",
+      "MemoryArtifact",
+      "MemoryArtifactObservation",
+      "MemoryChange",
+      "MemoryDream",
+      "MemoryEntity",
+      "MemoryEpisode",
+      "MemoryFact",
+      "MemoryFeed",
+      "MemoryInsight",
+      "MemoryInventory",
+      "MemoryMessage",
+      "MemoryRevision",
+      "MemoryRevisionCandidate",
+      "MemoryRevisionDream",
+      "MemorySession",
+      "MemorySnapshotPart",
+      "MemorySpace",
+      "MemoryWorker"
+    ],
+    "relationship_types": [
+      "ALIAS_OF",
+      "CITES",
+      "CONTAINS",
+      "HAS_EPISODE",
+      "HAS_FACT",
+      "HAS_MESSAGE",
+      "PART",
+      "RESULT_OF",
+      "SUPPORTED_BY",
+      "TARGET",
+      "TOUCHED_MEMORY",
+      "VALIDATED_BY",
+      "VERSION_OF"
+    ],
+    "indexes": [
+      {
+        "name": "index_343aff4e",
+        "type": "LOOKUP",
+        "labelsOrTypes": null,
+        "properties": null,
+        "state": "ONLINE"
+      },
+      {
+        "name": "index_f7700477",
+        "type": "LOOKUP",
+        "labelsOrTypes": null,
+        "properties": null,
+        "state": "ONLINE"
+      },
+      {
+        "name": "memory_alias_contains",
+        "type": "TEXT",
+        "labelsOrTypes": [
+          "MemoryAlias"
+        ],
+        "properties": [
+          "text"
+        ],
+        "state": "ONLINE"
+      },
+      {
+        "name": "memory_alias_loose",
+        "type": "RANGE",
+        "labelsOrTypes": [
+          "MemoryAlias"
+        ],
+        "properties": [
+          "namespace",
+          "loose"
+        ],
+        "state": "ONLINE"
+      },
+      {
+        "name": "memory_alias_text",
+        "type": "RANGE",
+        "labelsOrTypes": [
+          "MemoryAlias"
+        ],
+        "properties": [
+          "namespace",
+          "text"
+        ],
+        "state": "ONLINE"
+      },
+      {
+        "name": "memory_change_scope",
+        "type": "RANGE",
+        "labelsOrTypes": [
+          "MemoryChange"
+        ],
+        "properties": [
+          "scope",
+          "sequence"
+        ],
+        "state": "ONLINE"
+      },
+      {
+        "name": "memory_entity_namespace",
+        "type": "RANGE",
+        "labelsOrTypes": [
+          "MemoryEntity"
+        ],
+        "properties": [
+          "namespace"
+        ],
+        "state": "ONLINE"
+      },
+      {
+        "name": "memory_episode_namespace",
+        "type": "RANGE",
+        "labelsOrTypes": [
+          "MemoryEpisode"
+        ],
+        "properties": [
+          "namespace",
+          "status"
+        ],
+        "state": "ONLINE"
+      },
+      {
+        "name": "memory_fact_episode_id",
+        "type": "RANGE",
+        "labelsOrTypes": [
+          "MemoryFact"
+        ],
+        "properties": [
+          "namespace",
+          "episode_id"
+        ],
+        "state": "ONLINE"
+      },
+      {
+        "name": "memory_fact_subject_id",
+        "type": "RANGE",
+        "labelsOrTypes": [
+          "MemoryFact"
+        ],
+        "properties": [
+          "namespace",
+          "subject_id"
+        ],
+        "state": "ONLINE"
+      },
+      {
+        "name": "memory_fact_target_id",
+        "type": "RANGE",
+        "labelsOrTypes": [
+          "MemoryFact"
+        ],
+        "properties": [
+          "namespace",
+          "target_id"
+        ],
+        "state": "ONLINE"
+      },
+      {
+        "name": "memory_message_call",
+        "type": "RANGE",
+        "labelsOrTypes": [
+          "MemoryMessage"
+        ],
+        "properties": [
+          "session_ref",
+          "call_id"
+        ],
+        "state": "ONLINE"
+      },
+      {
+        "name": "memory_observation_message",
+        "type": "RANGE",
+        "labelsOrTypes": [
+          "MemoryArtifactObservation"
+        ],
+        "properties": [
+          "message_ref"
+        ],
+        "state": "ONLINE"
+      },
+      {
+        "name": "memory_snapshot_part_event",
+        "type": "RANGE",
+        "labelsOrTypes": [
+          "MemorySnapshotPart"
+        ],
+        "properties": [
+          "scope",
+          "sequence"
+        ],
+        "state": "ONLINE"
+      },
+      {
+        "name": "memoryalias_id",
+        "type": "RANGE",
+        "labelsOrTypes": [
+          "MemoryAlias"
+        ],
+        "properties": [
+          "id"
+        ],
+        "state": "ONLINE"
+      },
+      {
+        "name": "memoryartifact_id",
+        "type": "RANGE",
+        "labelsOrTypes": [
+          "MemoryArtifact"
+        ],
+        "properties": [
+          "id"
+        ],
+        "state": "ONLINE"
+      },
+      {
+        "name": "memoryartifactobservation_id",
+        "type": "RANGE",
+        "labelsOrTypes": [
+          "MemoryArtifactObservation"
+        ],
+        "properties": [
+          "id"
+        ],
+        "state": "ONLINE"
+      },
+      {
+        "name": "memorychange_id",
+        "type": "RANGE",
+        "labelsOrTypes": [
+          "MemoryChange"
+        ],
+        "properties": [
+          "id"
+        ],
+        "state": "ONLINE"
+      },
+      {
+        "name": "memorydream_id",
+        "type": "RANGE",
+        "labelsOrTypes": [
+          "MemoryDream"
+        ],
+        "properties": [
+          "id"
+        ],
+        "state": "ONLINE"
+      },
+      {
+        "name": "memoryentity_id",
+        "type": "RANGE",
+        "labelsOrTypes": [
+          "MemoryEntity"
+        ],
+        "properties": [
+          "id"
+        ],
+        "state": "ONLINE"
+      },
+      {
+        "name": "memoryepisode_id",
+        "type": "RANGE",
+        "labelsOrTypes": [
+          "MemoryEpisode"
+        ],
+        "properties": [
+          "id"
+        ],
+        "state": "ONLINE"
+      },
+      {
+        "name": "memoryfact_id",
+        "type": "RANGE",
+        "labelsOrTypes": [
+          "MemoryFact"
+        ],
+        "properties": [
+          "id"
+        ],
+        "state": "ONLINE"
+      },
+      {
+        "name": "memoryfeed_id",
+        "type": "RANGE",
+        "labelsOrTypes": [
+          "MemoryFeed"
+        ],
+        "properties": [
+          "id"
+        ],
+        "state": "ONLINE"
+      },
+      {
+        "name": "memoryinsight_id",
+        "type": "RANGE",
+        "labelsOrTypes": [
+          "MemoryInsight"
+        ],
+        "properties": [
+          "id"
+        ],
+        "state": "ONLINE"
+      },
+      {
+        "name": "memoryinventory_id",
+        "type": "RANGE",
+        "labelsOrTypes": [
+          "MemoryInventory"
+        ],
+        "properties": [
+          "id"
+        ],
+        "state": "ONLINE"
+      },
+      {
+        "name": "memorymessage_id",
+        "type": "RANGE",
+        "labelsOrTypes": [
+          "MemoryMessage"
+        ],
+        "properties": [
+          "id"
+        ],
+        "state": "ONLINE"
+      },
+      {
+        "name": "memoryrevision_id",
+        "type": "RANGE",
+        "labelsOrTypes": [
+          "MemoryRevision"
+        ],
+        "properties": [
+          "id"
+        ],
+        "state": "ONLINE"
+      },
+      {
+        "name": "memoryrevisioncandidate_id",
+        "type": "RANGE",
+        "labelsOrTypes": [
+          "MemoryRevisionCandidate"
+        ],
+        "properties": [
+          "id"
+        ],
+        "state": "ONLINE"
+      },
+      {
+        "name": "memoryrevisiondream_id",
+        "type": "RANGE",
+        "labelsOrTypes": [
+          "MemoryRevisionDream"
+        ],
+        "properties": [
+          "id"
+        ],
+        "state": "ONLINE"
+      },
+      {
+        "name": "memorysession_id",
+        "type": "RANGE",
+        "labelsOrTypes": [
+          "MemorySession"
+        ],
+        "properties": [
+          "id"
+        ],
+        "state": "ONLINE"
+      },
+      {
+        "name": "memorysnapshotpart_id",
+        "type": "RANGE",
+        "labelsOrTypes": [
+          "MemorySnapshotPart"
+        ],
+        "properties": [
+          "id"
+        ],
+        "state": "ONLINE"
+      },
+      {
+        "name": "memoryspace_id",
+        "type": "RANGE",
+        "labelsOrTypes": [
+          "MemorySpace"
+        ],
+        "properties": [
+          "id"
+        ],
+        "state": "ONLINE"
+      }
+    ],
+    "constraints": [
+      {
+        "name": "memoryalias_id",
+        "type": "UNIQUENESS",
+        "labelsOrTypes": [
+          "MemoryAlias"
+        ],
+        "properties": [
+          "id"
+        ]
+      },
+      {
+        "name": "memoryartifact_id",
+        "type": "UNIQUENESS",
+        "labelsOrTypes": [
+          "MemoryArtifact"
+        ],
+        "properties": [
+          "id"
+        ]
+      },
+      {
+        "name": "memoryartifactobservation_id",
+        "type": "UNIQUENESS",
+        "labelsOrTypes": [
+          "MemoryArtifactObservation"
+        ],
+        "properties": [
+          "id"
+        ]
+      },
+      {
+        "name": "memorychange_id",
+        "type": "UNIQUENESS",
+        "labelsOrTypes": [
+          "MemoryChange"
+        ],
+        "properties": [
+          "id"
+        ]
+      },
+      {
+        "name": "memorydream_id",
+        "type": "UNIQUENESS",
+        "labelsOrTypes": [
+          "MemoryDream"
+        ],
+        "properties": [
+          "id"
+        ]
+      },
+      {
+        "name": "memoryentity_id",
+        "type": "UNIQUENESS",
+        "labelsOrTypes": [
+          "MemoryEntity"
+        ],
+        "properties": [
+          "id"
+        ]
+      },
+      {
+        "name": "memoryepisode_id",
+        "type": "UNIQUENESS",
+        "labelsOrTypes": [
+          "MemoryEpisode"
+        ],
+        "properties": [
+          "id"
+        ]
+      },
+      {
+        "name": "memoryfact_id",
+        "type": "UNIQUENESS",
+        "labelsOrTypes": [
+          "MemoryFact"
+        ],
+        "properties": [
+          "id"
+        ]
+      },
+      {
+        "name": "memoryfeed_id",
+        "type": "UNIQUENESS",
+        "labelsOrTypes": [
+          "MemoryFeed"
+        ],
+        "properties": [
+          "id"
+        ]
+      },
+      {
+        "name": "memoryinsight_id",
+        "type": "UNIQUENESS",
+        "labelsOrTypes": [
+          "MemoryInsight"
+        ],
+        "properties": [
+          "id"
+        ]
+      },
+      {
+        "name": "memoryinventory_id",
+        "type": "UNIQUENESS",
+        "labelsOrTypes": [
+          "MemoryInventory"
+        ],
+        "properties": [
+          "id"
+        ]
+      },
+      {
+        "name": "memorymessage_id",
+        "type": "UNIQUENESS",
+        "labelsOrTypes": [
+          "MemoryMessage"
+        ],
+        "properties": [
+          "id"
+        ]
+      },
+      {
+        "name": "memoryrevision_id",
+        "type": "UNIQUENESS",
+        "labelsOrTypes": [
+          "MemoryRevision"
+        ],
+        "properties": [
+          "id"
+        ]
+      },
+      {
+        "name": "memoryrevisioncandidate_id",
+        "type": "UNIQUENESS",
+        "labelsOrTypes": [
+          "MemoryRevisionCandidate"
+        ],
+        "properties": [
+          "id"
+        ]
+      },
+      {
+        "name": "memoryrevisiondream_id",
+        "type": "UNIQUENESS",
+        "labelsOrTypes": [
+          "MemoryRevisionDream"
+        ],
+        "properties": [
+          "id"
+        ]
+      },
+      {
+        "name": "memorysession_id",
+        "type": "UNIQUENESS",
+        "labelsOrTypes": [
+          "MemorySession"
+        ],
+        "properties": [
+          "id"
+        ]
+      },
+      {
+        "name": "memorysnapshotpart_id",
+        "type": "UNIQUENESS",
+        "labelsOrTypes": [
+          "MemorySnapshotPart"
+        ],
+        "properties": [
+          "id"
+        ]
+      },
+      {
+        "name": "memoryspace_id",
+        "type": "UNIQUENESS",
+        "labelsOrTypes": [
+          "MemorySpace"
+        ],
+        "properties": [
+          "id"
+        ]
+      }
+    ],
+    "graph_counts": {
+      "nodes": [
+        {
+          "count": 344066
+        },
+        {
+          "count": 1,
+          "label": "MemorySpace"
+        },
+        {
+          "count": 19596,
+          "label": "MemoryEpisode"
+        },
+        {
+          "count": 20780,
+          "label": "MemoryEntity"
+        },
+        {
+          "count": 34041,
+          "label": "MemoryFact"
+        },
+        {
+          "count": 0,
+          "label": "MemoryDream"
+        },
+        {
+          "count": 0,
+          "label": "MemoryInsight"
+        },
+        {
+          "count": 0,
+          "label": "MemoryRevision"
+        },
+        {
+          "count": 882,
+          "label": "MemoryFeed"
+        },
+        {
+          "count": 39124,
+          "label": "MemoryChange"
+        },
+        {
+          "count": 874,
+          "label": "MemorySession"
+        },
+        {
+          "count": 152446,
+          "label": "MemoryMessage"
+        },
+        {
+          "count": 437,
+          "label": "MemoryArtifact"
+        },
+        {
+          "count": 1898,
+          "label": "MemoryArtifactObservation"
+        },
+        {
+          "count": 1,
+          "label": "MemoryInventory"
+        },
+        {
+          "count": 4,
+          "label": "MemoryWorker"
+        },
+        {
+          "count": 73539,
+          "label": "MemoryAlias"
+        },
+        {
+          "count": 0,
+          "label": "MemoryRevisionCandidate"
+        },
+        {
+          "count": 0,
+          "label": "MemoryRevisionDream"
+        },
+        {
+          "count": 443,
+          "label": "MemorySnapshotPart"
+        }
+      ],
+      "relationships": [
+        {
+          "count": 787116
+        },
+        {
+          "relationshipType": "HAS_EPISODE",
+          "count": 19594
+        },
+        {
+          "count": 19594,
+          "relationshipType": "HAS_EPISODE",
+          "endLabel": "MemoryEpisode"
+        },
+        {
+          "count": 19594,
+          "relationshipType": "HAS_EPISODE",
+          "startLabel": "MemorySession"
+        },
+        {
+          "relationshipType": "CONTAINS",
+          "count": 331675
+        },
+        {
+          "count": 331675,
+          "relationshipType": "CONTAINS",
+          "startLabel": "MemoryEpisode"
+        },
+        {
+          "count": 331675,
+          "relationshipType": "CONTAINS",
+          "endLabel": "MemoryMessage"
+        },
+        {
+          "relationshipType": "HAS_MESSAGE",
+          "count": 152446
+        },
+        {
+          "count": 152446,
+          "relationshipType": "HAS_MESSAGE",
+          "startLabel": "MemorySession"
+        },
+        {
+          "count": 152446,
+          "relationshipType": "HAS_MESSAGE",
+          "endLabel": "MemoryMessage"
+        },
+        {
+          "relationshipType": "RESULT_OF",
+          "count": 64501
+        },
+        {
+          "count": 64501,
+          "relationshipType": "RESULT_OF",
+          "startLabel": "MemoryMessage"
+        },
+        {
+          "count": 64501,
+          "relationshipType": "RESULT_OF",
+          "endLabel": "MemoryMessage"
+        },
+        {
+          "relationshipType": "TOUCHED_MEMORY",
+          "count": 1898
+        },
+        {
+          "count": 1898,
+          "relationshipType": "TOUCHED_MEMORY",
+          "startLabel": "MemoryMessage"
+        },
+        {
+          "count": 1898,
+          "relationshipType": "TOUCHED_MEMORY",
+          "endLabel": "MemoryArtifactObservation"
+        },
+        {
+          "relationshipType": "VERSION_OF",
+          "count": 1898
+        },
+        {
+          "count": 1898,
+          "relationshipType": "VERSION_OF",
+          "endLabel": "MemoryArtifact"
+        },
+        {
+          "count": 1898,
+          "relationshipType": "VERSION_OF",
+          "startLabel": "MemoryArtifactObservation"
+        },
+        {
+          "relationshipType": "HAS_FACT",
+          "count": 34041
+        },
+        {
+          "count": 34041,
+          "relationshipType": "HAS_FACT",
+          "startLabel": "MemoryEntity"
+        },
+        {
+          "count": 34041,
+          "relationshipType": "HAS_FACT",
+          "endLabel": "MemoryFact"
+        },
+        {
+          "relationshipType": "TARGET",
+          "count": 34041
+        },
+        {
+          "count": 34041,
+          "relationshipType": "TARGET",
+          "endLabel": "MemoryEntity"
+        },
+        {
+          "count": 34041,
+          "relationshipType": "TARGET",
+          "startLabel": "MemoryFact"
+        },
+        {
+          "relationshipType": "SUPPORTED_BY",
+          "count": 34041
+        },
+        {
+          "count": 34041,
+          "relationshipType": "SUPPORTED_BY",
+          "endLabel": "MemoryEpisode"
+        },
+        {
+          "count": 34041,
+          "relationshipType": "SUPPORTED_BY",
+          "startLabel": "MemoryFact"
+        },
+        {
+          "relationshipType": "CITES",
+          "count": 34428
+        },
+        {
+          "count": 34428,
+          "relationshipType": "CITES",
+          "startLabel": "MemoryFact"
+        },
+        {
+          "count": 34428,
+          "relationshipType": "CITES",
+          "endLabel": "MemoryMessage"
+        },
+        {
+          "relationshipType": "VALIDATED_BY",
+          "count": 4571
+        },
+        {
+          "count": 4571,
+          "relationshipType": "VALIDATED_BY",
+          "startLabel": "MemoryFact"
+        },
+        {
+          "count": 4571,
+          "relationshipType": "VALIDATED_BY",
+          "endLabel": "MemoryMessage"
+        },
+        {
+          "relationshipType": "ALIAS_OF",
+          "count": 73539
+        },
+        {
+          "count": 73539,
+          "relationshipType": "ALIAS_OF",
+          "endLabel": "MemoryEntity"
+        },
+        {
+          "count": 73539,
+          "relationshipType": "ALIAS_OF",
+          "startLabel": "MemoryAlias"
+        },
+        {
+          "relationshipType": "PART",
+          "count": 443
+        },
+        {
+          "count": 443,
+          "relationshipType": "PART",
+          "startLabel": "MemoryChange"
+        },
+        {
+          "count": 443,
+          "relationshipType": "PART",
+          "endLabel": "MemorySnapshotPart"
+        }
+      ]
+    },
+    "property_keys": {
+      "MemoryAlias": [
+        "id",
+        "kind",
+        "loose",
+        "namespace",
+        "text"
+      ],
+      "MemoryArtifact": [
+        "id",
+        "name",
+        "namespace",
+        "path"
+      ],
+      "MemoryArtifactObservation": [
+        "artifact_ref",
+        "captured",
+        "content",
+        "content_hash",
+        "gap",
+        "id",
+        "message_ref",
+        "name",
+        "namespace",
+        "operation",
+        "timestamp"
+      ],
+      "MemoryChange": [
+        "hash",
+        "id",
+        "kind",
+        "namespace",
+        "payload",
+        "recorded_at",
+        "recorded_us",
+        "scope",
+        "sequence"
+      ],
+      "MemoryDream": [],
+      "MemoryEntity": [
+        "aliases",
+        "id",
+        "key",
+        "kind",
+        "name",
+        "namespace"
+      ],
+      "MemoryEpisode": [
+        "attempts",
+        "completed_at",
+        "engine",
+        "extraction_hash",
+        "extraction_payload",
+        "fact_count",
+        "id",
+        "ingested_at",
+        "lease_until",
+        "message_refs",
+        "model_info",
+        "name",
+        "namespace",
+        "payload",
+        "retry_after",
+        "session_id",
+        "session_ref",
+        "source_id",
+        "status",
+        "validation_engine",
+        "validation_failures",
+        "worker",
+        "worker_lock"
+      ],
+      "MemoryFact": [
+        "confidence",
+        "episode_id",
+        "evidence",
+        "id",
+        "message_refs",
+        "name",
+        "namespace",
+        "recorded_at",
+        "relation",
+        "retracted",
+        "session_id",
+        "slot",
+        "source_kind",
+        "status",
+        "subject",
+        "subject_id",
+        "summary",
+        "target",
+        "target_id",
+        "time_basis",
+        "valid_at",
+        "valid_ts",
+        "validation_evidence",
+        "validation_message_refs"
+      ],
+      "MemoryFeed": [
+        "caught_up_mtime_ns",
+        "caught_up_size",
+        "id",
+        "message_count",
+        "name",
+        "namespace",
+        "prefix_hash",
+        "session_id",
+        "session_uid",
+        "source_format",
+        "source_key",
+        "source_uri"
+      ],
+      "MemoryInsight": [],
+      "MemoryInventory": [
+        "id",
+        "name",
+        "namespace",
+        "payload"
+      ],
+      "MemoryMessage": [
+        "call_id",
+        "content",
+        "gaps",
+        "id",
+        "message_id",
+        "name",
+        "namespace",
+        "record_id",
+        "role",
+        "session_ref",
+        "source_type",
+        "timestamp",
+        "tool_failed",
+        "tool_name"
+      ],
+      "MemoryRevision": [],
+      "MemoryRevisionCandidate": [],
+      "MemoryRevisionDream": [],
+      "MemorySession": [
+        "id",
+        "name",
+        "namespace",
+        "session_id",
+        "source_uri"
+      ],
+      "MemorySnapshotPart": [
+        "data",
+        "i",
+        "id",
+        "label",
+        "namespace",
+        "scope",
+        "sequence"
+      ],
+      "MemorySpace": [
+        "aliases_indexed",
+        "id",
+        "journal_checkpoint_bytes",
+        "journal_checkpoint_sequence",
+        "journal_delta_bytes",
+        "journal_hash",
+        "journal_sequence",
+        "journal_set_hash",
+        "journal_state_hash",
+        "journal_us",
+        "lock",
+        "revision"
+      ],
+      "MemoryWorker": [
+        "engine",
+        "heartbeat_at",
+        "id",
+        "interval",
+        "namespace",
+        "pid",
+        "provider_open",
+        "provider_reason",
+        "workers"
+      ]
+    }
+  },
+  "nodes": {
+    "by_label": {
+      "MemoryAlias": {
+        "transcripts": 73539
+      },
+      "MemoryArtifact": {
+        "transcripts": 437
+      },
+      "MemoryArtifactObservation": {
+        "transcripts": 1898
+      },
+      "MemoryChange": {
+        "audit:transcripts": 39124
+      },
+      "MemoryDream": {},
+      "MemoryEntity": {
+        "transcripts": 20780
+      },
+      "MemoryEpisode": {
+        "transcripts": 19596
+      },
+      "MemoryFact": {
+        "transcripts": 34041
+      },
+      "MemoryFeed": {
+        "transcripts": 882
+      },
+      "MemoryInsight": {},
+      "MemoryInventory": {
+        "transcripts": 1
+      },
+      "MemoryMessage": {
+        "transcripts": 152446
+      },
+      "MemoryRevision": {},
+      "MemoryRevisionCandidate": {},
+      "MemoryRevisionDream": {},
+      "MemorySession": {
+        "transcripts": 874
+      },
+      "MemorySnapshotPart": {
+        "transcripts": 443
+      },
+      "MemorySpace": {
+        "null": 1
+      },
+      "MemoryWorker": {
+        "transcripts": 4
+      }
+    },
+    "degree": {
+      "MemoryAlias": {
+        "count": 73539,
+        "min": 1,
+        "p50": 1,
+        "p90": 1,
+        "p99": 1,
+        "max": 1,
+        "avg": 1.0,
+        "sum": 73539,
+        "isolated": 0
+      },
+      "MemoryArtifact": {
+        "count": 437,
+        "min": 2,
+        "p50": 2,
+        "p90": 6,
+        "p99": 34,
+        "max": 274,
+        "avg": 4.34,
+        "sum": 1898,
+        "isolated": 0
+      },
+      "MemoryArtifactObservation": {
+        "count": 1898,
+        "min": 2,
+        "p50": 2,
+        "p90": 2,
+        "p99": 2,
+        "max": 2,
+        "avg": 2.0,
+        "sum": 3796,
+        "isolated": 0
+      },
+      "MemoryChange": {
+        "count": 39124,
+        "min": 0,
+        "p50": 0,
+        "p90": 0,
+        "p99": 0,
+        "max": 63,
+        "avg": 0.01,
+        "sum": 443,
+        "isolated": 39115
+      },
+      "MemoryDream": {
+        "count": 0,
+        "min": null,
+        "p50": null,
+        "p90": null,
+        "p99": null,
+        "max": null,
+        "avg": null,
+        "sum": 0,
+        "isolated": 0
+      },
+      "MemoryEntity": {
+        "count": 20780,
+        "min": 2,
+        "p50": 5,
+        "p90": 7,
+        "p99": 33,
+        "max": 2930,
+        "avg": 6.82,
+        "sum": 141621,
+        "isolated": 0
+      },
+      "MemoryEpisode": {
+        "count": 19596,
+        "min": 0,
+        "p50": 14,
+        "p90": 36,
+        "p99": 59,
+        "max": 104,
+        "avg": 19.66,
+        "sum": 385310,
+        "isolated": 1
+      },
+      "MemoryFact": {
+        "count": 34041,
+        "min": 3,
+        "p50": 4,
+        "p90": 5,
+        "p99": 6,
+        "max": 8,
+        "avg": 4.15,
+        "sum": 141122,
+        "isolated": 0
+      },
+      "MemoryFeed": {
+        "count": 882,
+        "min": 0,
+        "p50": 0,
+        "p90": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0.0,
+        "sum": 0,
+        "isolated": 882
+      },
+      "MemoryInsight": {
+        "count": 0,
+        "min": null,
+        "p50": null,
+        "p90": null,
+        "p99": null,
+        "max": null,
+        "avg": null,
+        "sum": 0,
+        "isolated": 0
+      },
+      "MemoryInventory": {
+        "count": 1,
+        "min": 0,
+        "p50": 0,
+        "p90": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0.0,
+        "sum": 0,
+        "isolated": 1
+      },
+      "MemoryMessage": {
+        "count": 152446,
+        "min": 2,
+        "p50": 4,
+        "p90": 7,
+        "p99": 12,
+        "max": 54,
+        "avg": 4.29,
+        "sum": 654020,
+        "isolated": 0
+      },
+      "MemoryRevision": {
+        "count": 0,
+        "min": null,
+        "p50": null,
+        "p90": null,
+        "p99": null,
+        "max": null,
+        "avg": null,
+        "sum": 0,
+        "isolated": 0
+      },
+      "MemoryRevisionCandidate": {
+        "count": 0,
+        "min": null,
+        "p50": null,
+        "p90": null,
+        "p99": null,
+        "max": null,
+        "avg": null,
+        "sum": 0,
+        "isolated": 0
+      },
+      "MemoryRevisionDream": {
+        "count": 0,
+        "min": null,
+        "p50": null,
+        "p90": null,
+        "p99": null,
+        "max": null,
+        "avg": null,
+        "sum": 0,
+        "isolated": 0
+      },
+      "MemorySession": {
+        "count": 874,
+        "min": 2,
+        "p50": 94,
+        "p90": 380,
+        "p99": 2805,
+        "max": 4791,
+        "avg": 196.84,
+        "sum": 172040,
+        "isolated": 0
+      },
+      "MemorySnapshotPart": {
+        "count": 443,
+        "min": 1,
+        "p50": 1,
+        "p90": 1,
+        "p99": 1,
+        "max": 1,
+        "avg": 1.0,
+        "sum": 443,
+        "isolated": 0
+      },
+      "MemorySpace": {
+        "count": 1,
+        "min": 0,
+        "p50": 0,
+        "p90": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0.0,
+        "sum": 0,
+        "isolated": 1
+      },
+      "MemoryWorker": {
+        "count": 4,
+        "min": 0,
+        "p50": 0,
+        "p90": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0.0,
+        "sum": 0,
+        "isolated": 4
+      }
+    },
+    "relationships": {
+      "ALIAS_OF": {
+        "n": 73539,
+        "distinct_sources": 73539,
+        "distinct_targets": 20780
+      },
+      "CITES": {
+        "n": 34428,
+        "distinct_sources": 34039,
+        "distinct_targets": 13046
+      },
+      "CONTAINS": {
+        "n": 331675,
+        "distinct_sources": 19594,
+        "distinct_targets": 152446
+      },
+      "HAS_EPISODE": {
+        "n": 19594,
+        "distinct_sources": 874,
+        "distinct_targets": 19594
+      },
+      "HAS_FACT": {
+        "n": 34041,
+        "distinct_sources": 1337,
+        "distinct_targets": 34041
+      },
+      "HAS_MESSAGE": {
+        "n": 152446,
+        "distinct_sources": 874,
+        "distinct_targets": 152446
+      },
+      "PART": {
+        "n": 443,
+        "distinct_sources": 9,
+        "distinct_targets": 443
+      },
+      "RESULT_OF": {
+        "n": 64501,
+        "distinct_sources": 64366,
+        "distinct_targets": 60869
+      },
+      "SUPPORTED_BY": {
+        "n": 34041,
+        "distinct_sources": 34041,
+        "distinct_targets": 8290
+      },
+      "TARGET": {
+        "n": 34041,
+        "distinct_sources": 34041,
+        "distinct_targets": 20355
+      },
+      "TOUCHED_MEMORY": {
+        "n": 1898,
+        "distinct_sources": 1686,
+        "distinct_targets": 1898
+      },
+      "VALIDATED_BY": {
+        "n": 4571,
+        "distinct_sources": 4213,
+        "distinct_targets": 3462
+      },
+      "VERSION_OF": {
+        "n": 1898,
+        "distinct_sources": 1898,
+        "distinct_targets": 437
+      }
+    }
+  },
+  "episodes": {
+    "by_status": {
+      "complete": 19517,
+      "failed": 79
+    },
+    "by_engine": {
+      "4a967fcc2b87b7c51bd4c9681614f29e391afd09616067c17c7ca0a6b19a72eb": 2919,
+      "c947f21871fe364eab09856a3b3585572a9f64ed91233c2aa3177d989440b448": 1946,
+      "d32c0aa606ab9532f3a6cccf4202b69d769c94b85a8dbbb69e48c201cee3f467": 1049,
+      "b588063f1eba2dc8a33ae38c793a9c69b5c243d65bc9d35f388ad69e6293acf8": 95,
+      "4637d8a98c6047b3d9a88071273950d2ea325ceb80b7b53b69ff9b529056a290": 51,
+      "4a279525401f484ae11c4201533bfc319ee8c08325618d3d9e355b0787ae5d63": 8468,
+      "5e33014a32563f58ed1ff14322f69469ed49be18276c9dd88d7ecc2fb8d71d0b": 4970,
+      "bc74c4af20e5a11dc15be1a69e1866c6171d627ae3cab7f061c143e77533bc06": 19,
+      "null": 79
+    },
+    "by_model_info": {
+      "{\"provider\": \"CodexLLM\", \"model\": \"gpt-5.6-terra\", \"effort\": \"low\"}": 16057,
+      "null": 79,
+      "{\"provider\": \"none\", \"skipped\": \"no_claim_in_focus\"}": 3460
+    },
+    "distinct_workers": 11109,
+    "quarantined_by_status": {
+      "failed": 79
+    },
+    "failed_by_error": {
+      "ValueError": 79
+    },
+    "quarantine_reasons": {
+      "evidence_quote_mismatch": 45,
+      "ambiguous_identity": 28,
+      "evidence_focus_missing": 5,
+      "unvalidated_assistant_claim": 1
+    },
+    "counters": {
+      "attempts": 73686,
+      "infra_failures": 1,
+      "validation_failures": 876,
+      "with_retry_feedback": 54,
+      "with_cached_extraction": 28,
+      "with_retry_after": 2949,
+      "with_worker_lock": 19596
+    },
+    "attempts": {
+      "count": 19596,
+      "min": 0,
+      "p50": 0,
+      "p90": 25,
+      "p99": 42,
+      "max": 71,
+      "avg": 3.76,
+      "sum": 73686
+    },
+    "by_validation_engine": {
+      "null": 18227,
+      "b588063f1eba2dc8a33ae38c793a9c69b5c243d65bc9d35f388ad69e6293acf8": 52,
+      "d32c0aa606ab9532f3a6cccf4202b69d769c94b85a8dbbb69e48c201cee3f467": 20,
+      "80aa8033f2213fa7bbe0083ca65bfe4352ec561778e8fb5a118749bd5e442463": 4,
+      "4a279525401f484ae11c4201533bfc319ee8c08325618d3d9e355b0787ae5d63": 360,
+      "5e33014a32563f58ed1ff14322f69469ed49be18276c9dd88d7ecc2fb8d71d0b": 926,
+      "7ac2dbc45ba81a8a75821d8e6d3df917de9e16d1ac72b4762a5ac542d5ede184": 7
+    },
+    "fact_count_buckets": {
+      "2-5": 4549,
+      "0": 11227,
+      "1": 1897,
+      "6-10": 1304,
+      "11-20": 498,
+      "21+": 42
+    },
+    "fact_count": {
+      "count": 19517,
+      "min": 0,
+      "p50": 0,
+      "p90": 5,
+      "p99": 15,
+      "max": 37,
+      "avg": 1.74,
+      "sum": 34041
+    },
+    "messages_per_episode": {
+      "count": 19594,
+      "min": 1,
+      "p50": 12,
+      "p90": 34,
+      "p99": 56,
+      "max": 96,
+      "avg": 16.93,
+      "sum": 331675
+    },
+    "payload_chars": {
+      "count": 19598,
+      "min": 950,
+      "p50": 35083,
+      "p90": 85047,
+      "p99": 145896,
+      "max": 198362,
+      "avg": 41776.34,
+      "sum": 818732753
+    },
+    "extraction_payload_chars": {
+      "count": 19517,
+      "min": 26,
+      "p50": 26,
+      "p90": 4699,
+      "p99": 12579,
+      "max": 27928,
+      "avg": 1569.98,
+      "sum": 30641303
+    },
+    "ingested_by_day": {
+      "2026-09-17": 3039,
+      "2026-09-18": 1594,
+      "2026-09-19": 30,
+      "2026-09-20": 3813,
+      "2026-09-21": 6372,
+      "2026-09-22": 4750
+    },
+    "completed_by_day": {
+      "2026-09-17": 2366,
+      "2026-09-19": 2188,
+      "2026-09-20": 3837,
+      "2026-09-21": 6379,
+      "2026-09-22": 4748
+    },
+    "completed_by_engine_and_day": [
+      {
+        "engine": "4a967fcc2b87b7c51bd4c9681614f29e391afd09616067c17c7ca0a6b19a72eb",
+        "day": "2026-09-17",
+        "n": 2366
+      },
+      {
+        "engine": "4637d8a98c6047b3d9a88071273950d2ea325ceb80b7b53b69ff9b529056a290",
+        "day": "2026-09-19",
+        "n": 51
+      },
+      {
+        "engine": "4a967fcc2b87b7c51bd4c9681614f29e391afd09616067c17c7ca0a6b19a72eb",
+        "day": "2026-09-19",
+        "n": 553
+      },
+      {
+        "engine": "c947f21871fe364eab09856a3b3585572a9f64ed91233c2aa3177d989440b448",
+        "day": "2026-09-19",
+        "n": 1584
+      },
+      {
+        "engine": "5e33014a32563f58ed1ff14322f69469ed49be18276c9dd88d7ecc2fb8d71d0b",
+        "day": "2026-09-20",
+        "n": 2331
+      },
+      {
+        "engine": "b588063f1eba2dc8a33ae38c793a9c69b5c243d65bc9d35f388ad69e6293acf8",
+        "day": "2026-09-20",
+        "n": 95
+      },
+      {
+        "engine": "c947f21871fe364eab09856a3b3585572a9f64ed91233c2aa3177d989440b448",
+        "day": "2026-09-20",
+        "n": 362
+      },
+      {
+        "engine": "d32c0aa606ab9532f3a6cccf4202b69d769c94b85a8dbbb69e48c201cee3f467",
+        "day": "2026-09-20",
+        "n": 1049
+      },
+      {
+        "engine": "4a279525401f484ae11c4201533bfc319ee8c08325618d3d9e355b0787ae5d63",
+        "day": "2026-09-21",
+        "n": 3721
+      },
+      {
+        "engine": "5e33014a32563f58ed1ff14322f69469ed49be18276c9dd88d7ecc2fb8d71d0b",
+        "day": "2026-09-21",
+        "n": 2639
+      },
+      {
+        "engine": "bc74c4af20e5a11dc15be1a69e1866c6171d627ae3cab7f061c143e77533bc06",
+        "day": "2026-09-21",
+        "n": 19
+      },
+      {
+        "engine": "4a279525401f484ae11c4201533bfc319ee8c08325618d3d9e355b0787ae5d63",
+        "day": "2026-09-22",
+        "n": 4748
+      }
+    ],
+    "per_session": {
+      "count": 875,
+      "min": 1,
+      "p50": 11,
+      "p90": 44,
+      "p99": 313,
+      "max": 533,
+      "avg": 22.4,
+      "sum": 19598
+    },
+    "has_fact_mismatch": 0,
+    "with_cached_extraction_pending": 0,
+    "ingested_at_range": {
+      "first": "2026-09-17T11:34:01.201821+00:00",
+      "last": "2026-09-22T12:55:34.099949+00:00",
+      "last_completed": "2026-09-22T12:55:46.234892+00:00"
+    }
+  },
+  "facts": {
+    "by_status": {
+      "planned": 1302,
+      "uncertain": 26183,
+      "active": 5451,
+      "ended": 1105
+    },
+    "retracted": 0,
+    "by_source_kind": {
+      "transcript": 34041
+    },
+    "by_time_basis": {
+      "explicit": 7859,
+      "unknown": 26182
+    },
+    "slots": {
+      "distinct_slots": 24427,
+      "facts_with_slot": 29703
+    },
+    "evidence_chars": {
+      "count": 34041,
+      "min": 52,
+      "p50": 174,
+      "p90": 358,
+      "p99": 685,
+      "max": 2128,
+      "avg": 208.72,
+      "sum": 7104897
+    },
+    "validation_evidence_chars": {
+      "count": 34041,
+      "min": 2,
+      "p50": 2,
+      "p90": 101,
+      "p99": 437,
+      "max": 2260,
+      "avg": 28.89,
+      "sum": 983278
+    },
+    "validated_by_status": [
+      {
+        "status": "uncertain",
+        "validated": false,
+        "n": 25853
+      },
+      {
+        "status": "active",
+        "validated": true,
+        "n": 2957
+      },
+      {
+        "status": "active",
+        "validated": false,
+        "n": 2494
+      },
+      {
+        "status": "planned",
+        "validated": false,
+        "n": 1247
+      },
+      {
+        "status": "ended",
+        "validated": true,
+        "n": 871
+      },
+      {
+        "status": "uncertain",
+        "validated": true,
+        "n": 330
+      },
+      {
+        "status": "ended",
+        "validated": false,
+        "n": 234
+      },
+      {
+        "status": "planned",
+        "validated": true,
+        "n": 55
+      }
+    ],
+    "by_relation": [
+      {
+        "relation": "related_to",
+        "n": 17545,
+        "validated": 1431,
+        "uncertain": 14668
+      },
+      {
+        "relation": "occurred",
+        "n": 9108,
+        "validated": 2139,
+        "uncertain": 6648
+      },
+      {
+        "relation": "uses_service",
+        "n": 2813,
+        "validated": 395,
+        "uncertain": 1942
+      },
+      {
+        "relation": "decided",
+        "n": 1489,
+        "validated": 42,
+        "uncertain": 652
+      },
+      {
+        "relation": "worked_on",
+        "n": 1041,
+        "validated": 68,
+        "uncertain": 956
+      },
+      {
+        "relation": "resolved",
+        "n": 750,
+        "validated": 80,
+        "uncertain": 597
+      },
+      {
+        "relation": "uses_database",
+        "n": 397,
+        "validated": 29,
+        "uncertain": 299
+      },
+      {
+        "relation": "uses_framework",
+        "n": 368,
+        "validated": 12,
+        "uncertain": 154
+      },
+      {
+        "relation": "uses_language",
+        "n": 212,
+        "validated": 7,
+        "uncertain": 140
+      },
+      {
+        "relation": "prefers",
+        "n": 133,
+        "validated": 0,
+        "uncertain": 14
+      },
+      {
+        "relation": "learned",
+        "n": 58,
+        "validated": 7,
+        "uncertain": 56
+      },
+      {
+        "relation": "has_habit",
+        "n": 37,
+        "validated": 0,
+        "uncertain": 5
+      },
+      {
+        "relation": "part_of",
+        "n": 36,
+        "validated": 1,
+        "uncertain": 16
+      },
+      {
+        "relation": "implemented_in",
+        "n": 36,
+        "validated": 0,
+        "uncertain": 28
+      },
+      {
+        "relation": "owned_by",
+        "n": 18,
+        "validated": 2,
+        "uncertain": 8
+      }
+    ],
+    "distinct_relations": 15,
+    "confidence": {
+      "count": 34041,
+      "min": 0.14,
+      "p50": 0.72,
+      "p90": 0.96,
+      "p99": 0.99,
+      "max": 1.0,
+      "avg": 0.75,
+      "sum": 25584.430000001143
+    },
+    "confidence_buckets": {
+      "0.1": 1,
+      "0.2": 2,
+      "0.3": 2,
+      "0.4": 40,
+      "0.5": 701,
+      "0.6": 6048,
+      "0.7": 13378,
+      "0.8": 4992,
+      "0.9": 4233,
+      "1.0": 4644
+    },
+    "cited_messages_per_fact": {
+      "count": 34041,
+      "min": 0,
+      "p50": 1,
+      "p90": 1,
+      "p99": 2,
+      "max": 13,
+      "avg": 1.06,
+      "sum": 35993
+    },
+    "validation_messages_per_fact": {
+      "count": 4213,
+      "min": 1,
+      "p50": 1,
+      "p90": 2,
+      "p99": 3,
+      "max": 6,
+      "avg": 1.21,
+      "sum": 5088
+    },
+    "valid_at_present": {
+      "True": 7859,
+      "False": 26182
+    },
+    "valid_at_by_month": {
+      "2025-11": 65,
+      "2025-12": 28,
+      "2026-01": 142,
+      "2026-02": 66,
+      "2026-04": 26,
+      "2026-05": 324,
+      "2026-06": 759,
+      "2026-07": 14,
+      "2026-08": 3309,
+      "2026-09": 3126
+    },
+    "recorded_by_day": {
+      "2026-09-17": 1052,
+      "2026-09-19": 979,
+      "2026-09-20": 6919,
+      "2026-09-21": 15017,
+      "2026-09-22": 10074
+    },
+    "per_episode": {
+      "count": 8290,
+      "min": 1,
+      "p50": 3,
+      "p90": 9,
+      "p99": 18,
+      "max": 37,
+      "avg": 4.11,
+      "sum": 34041
+    },
+    "per_subject": {
+      "count": 1337,
+      "min": 1,
+      "p50": 2,
+      "p90": 27,
+      "p99": 406,
+      "max": 2906,
+      "avg": 25.46,
+      "sum": 34041
+    },
+    "per_target": {
+      "count": 20355,
+      "min": 1,
+      "p50": 1,
+      "p90": 2,
+      "p99": 12,
+      "max": 275,
+      "avg": 1.67,
+      "sum": 34041
+    },
+    "name_chars": {
+      "count": 34041,
+      "min": 17,
+      "p50": 145,
+      "p90": 160,
+      "p99": 160,
+      "max": 160,
+      "avg": 128.46,
+      "sum": 4372762
+    },
+    "summary_chars": {
+      "count": 34041,
+      "min": 17,
+      "p50": 145,
+      "p90": 269,
+      "p99": 407,
+      "max": 787,
+      "avg": 160.46,
+      "sum": 5462095
+    },
+    "duplicate_triples": {
+      "groups": 3457,
+      "facts": 11053,
+      "largest": 48
+    },
+    "without_cites_edge": 2,
+    "without_episode_edge": 0,
+    "validated_by_source_type": {
+      "context": 142,
+      "tool_result": 4068,
+      "memory_read": 1,
+      "assistant_report": 4
+    },
+    "validated_by_tool": {
+      "exec": 2369,
+      "Bash": 956,
+      "js": 320,
+      "Read": 78,
+      "Write": 52,
+      "wait": 50,
+      "exec_command": 40,
+      "Edit": 34,
+      "Agent": 33,
+      "list_agents": 24,
+      "apply_patch": 21,
+      "mcp__context7__query-docs": 20,
+      "mcp__railway__list_deployments": 17,
+      "mcp__claude-in-chrome__javascript_tool": 14,
+      "shell_command": 13,
+      "mcp__railway__get_logs": 13,
+      "SendMessage": 13,
+      "mcp__railway__deploy": 13,
+      "mcp__claude-in-chrome__tabs_context_mcp": 11,
+      "WebFetch": 11,
+      "write_stdin": 9,
+      "mcp__railway__set_variables": 8,
+      "mcp__claude-in-chrome__browser_batch": 7,
+      "mcp__railway__connect_service_source": 7,
+      "AskUserQuestion": 7,
+      "mcp__railway__list_services": 6,
+      "DesignSync": 6,
+      "TaskStop": 5,
+      "TaskOutput": 5,
+      "(none)": 4,
+      "mcp__railway__update_service": 4,
+      "Monitor": 4,
+      "mcp__railway__list_variables": 4,
+      "mcp__railway__get_service_config": 4,
+      "mcp__claude-in-chrome__list_connected_browsers": 3,
+      "mcp__claude-in-chrome__get_page_text": 3,
+      "mcp__railway__scale_service": 3,
+      "WebSearch": 3,
+      "mcp__t3-code__preview_evaluate": 3,
+      "Skill": 3
+    },
+    "cited_source_types": {
+      "user_assertion": 4196,
+      "assistant_report": 30232
+    },
+    "status_by_cited_claim": [
+      {
+        "kinds": [
+          "assistant_report"
+        ],
+        "status": "uncertain",
+        "n": 25988
+      },
+      {
+        "kinds": [
+          "assistant_report"
+        ],
+        "status": "active",
+        "n": 2945
+      },
+      {
+        "kinds": [
+          "user_assertion"
+        ],
+        "status": "active",
+        "n": 2501
+      },
+      {
+        "kinds": [
+          "user_assertion"
+        ],
+        "status": "planned",
+        "n": 1237
+      },
+      {
+        "kinds": [
+          "assistant_report"
+        ],
+        "status": "ended",
+        "n": 866
+      },
+      {
+        "kinds": [
+          "user_assertion"
+        ],
+        "status": "ended",
+        "n": 238
+      },
+      {
+        "kinds": [
+          "user_assertion"
+        ],
+        "status": "uncertain",
+        "n": 190
+      },
+      {
+        "kinds": [
+          "assistant_report"
+        ],
+        "status": "planned",
+        "n": 50
+      },
+      {
+        "kinds": [
+          "user_assertion",
+          "assistant_report"
+        ],
+        "status": "planned",
+        "n": 8
+      },
+      {
+        "kinds": [
+          "assistant_report",
+          "user_assertion"
+        ],
+        "status": "planned",
+        "n": 7
+      },
+      {
+        "kinds": [
+          "assistant_report",
+          "user_assertion"
+        ],
+        "status": "uncertain",
+        "n": 4
+      },
+      {
+        "kinds": [
+          "assistant_report",
+          "user_assertion"
+        ],
+        "status": "active",
+        "n": 2
+      },
+      {
+        "kinds": [
+          "user_assertion",
+          "assistant_report"
+        ],
+        "status": "active",
+        "n": 1
+      },
+      {
+        "kinds": [
+          "user_assertion",
+          "assistant_report"
+        ],
+        "status": "uncertain",
+        "n": 1
+      },
+      {
+        "kinds": [
+          "user_assertion",
+          "assistant_report"
+        ],
+        "status": "ended",
+        "n": 1
+      }
+    ]
+  },
+  "entities": {
+    "total": 20780,
+    "by_kind": {
+      "event": 9022,
+      "issue": 6396,
+      "topic": 2975,
+      "decision": 1413,
+      "service": 641,
+      "project": 120,
+      "lesson": 58,
+      "person": 56,
+      "framework": 38,
+      "habit": 28,
+      "language": 14,
+      "organization": 11,
+      "database": 8
+    },
+    "aliases_per_entity": {
+      "count": 20780,
+      "min": 2,
+      "p50": 4,
+      "p90": 5,
+      "p99": 7,
+      "max": 48,
+      "avg": 3.54,
+      "sum": 73539
+    },
+    "facts_as_subject": {
+      "count": 20780,
+      "min": 0,
+      "p50": 0,
+      "p90": 0,
+      "p99": 13,
+      "max": 2906,
+      "avg": 1.64,
+      "sum": 34041
+    },
+    "facts_as_target": {
+      "count": 20780,
+      "min": 0,
+      "p50": 1,
+      "p90": 2,
+      "p99": 12,
+      "max": 275,
+      "avg": 1.64,
+      "sum": 34041
+    },
+    "without_facts": 77,
+    "active_facts_as_subject": {
+      "count": 20780,
+      "min": 0,
+      "p50": 0,
+      "p90": 0,
+      "p99": 2,
+      "max": 591,
+      "avg": 0.26,
+      "sum": 5451,
+      "none": 20316
+    },
+    "name_chars": {
+      "count": 20780,
+      "min": 2,
+      "p50": 43,
+      "p90": 61,
+      "p99": 79,
+      "max": 105,
+      "avg": 42.99,
+      "sum": 893247
+    },
+    "case_insensitive_duplicate_names": {
+      "groups": 65,
+      "entities": 142
+    },
+    "aliases": {
+      "nodes_by_kind": {
+        "project": 351,
+        "decision": 5058,
+        "service": 1935,
+        "database": 27,
+        "framework": 89,
+        "event": 30617,
+        "topic": 11662,
+        "issue": 23326,
+        "person": 131,
+        "habit": 93,
+        "lesson": 180,
+        "language": 36,
+        "organization": 34
+      },
+      "loose": {
+        "null": 50437,
+        "True": 23102
+      },
+      "alias_of_edges": {
+        "n": 73539,
+        "entities": 20780
+      }
+    }
+  },
+  "messages": {
+    "by_source_type": {
+      "user_assertion": 4549,
+      "assistant_report": 21391,
+      "tool_call": 60882,
+      "context": 34745,
+      "tool_result": 29971,
+      "memory_read": 762,
+      "memory_write": 157
+    },
+    "by_role": {
+      "user": 5448,
+      "assistant": 82273,
+      "tool": 64373,
+      "note": 363
+    },
+    "by_role_and_source_type": [
+      {
+        "role": "assistant",
+        "source_type": "tool_call",
+        "n": 60882
+      },
+      {
+        "role": "tool",
+        "source_type": "context",
+        "n": 33483
+      },
+      {
+        "role": "tool",
+        "source_type": "tool_result",
+        "n": 29971
+      },
+      {
+        "role": "assistant",
+        "source_type": "assistant_report",
+        "n": 21391
+      },
+      {
+        "role": "user",
+        "source_type": "user_assertion",
+        "n": 4549
+      },
+      {
+        "role": "user",
+        "source_type": "context",
+        "n": 899
+      },
+      {
+        "role": "tool",
+        "source_type": "memory_read",
+        "n": 762
+      },
+      {
+        "role": "note",
+        "source_type": "context",
+        "n": 363
+      },
+      {
+        "role": "tool",
+        "source_type": "memory_write",
+        "n": 157
+      }
+    ],
+    "top_tools": [
+      {
+        "tool": "Bash",
+        "source_type": "tool_call",
+        "n": 24127
+      },
+      {
+        "tool": "exec",
+        "source_type": "tool_call",
+        "n": 21499
+      },
+      {
+        "tool": "Bash",
+        "source_type": "context",
+        "n": 20316
+      },
+      {
+        "tool": "exec",
+        "source_type": "tool_result",
+        "n": 13336
+      },
+      {
+        "tool": "exec",
+        "source_type": "context",
+        "n": 10067
+      },
+      {
+        "tool": "Read",
+        "source_type": "tool_result",
+        "n": 4375
+      },
+      {
+        "tool": "Bash",
+        "source_type": "tool_result",
+        "n": 3572
+      },
+      {
+        "tool": "Read",
+        "source_type": "tool_call",
+        "n": 3473
+      },
+      {
+        "tool": "js",
+        "source_type": "tool_result",
+        "n": 1829
+      },
+      {
+        "tool": "js",
+        "source_type": "tool_call",
+        "n": 1730
+      },
+      {
+        "tool": "Edit",
+        "source_type": "tool_call",
+        "n": 1005
+      },
+      {
+        "tool": "exec_command",
+        "source_type": "tool_call",
+        "n": 990
+      },
+      {
+        "tool": "Edit",
+        "source_type": "tool_result",
+        "n": 950
+      },
+      {
+        "tool": "Write",
+        "source_type": "tool_call",
+        "n": 940
+      },
+      {
+        "tool": "wait_agent",
+        "source_type": "tool_call",
+        "n": 862
+      },
+      {
+        "tool": "wait_agent",
+        "source_type": "context",
+        "n": 862
+      },
+      {
+        "tool": "exec_command",
+        "source_type": "context",
+        "n": 849
+      },
+      {
+        "tool": "Write",
+        "source_type": "tool_result",
+        "n": 770
+      },
+      {
+        "tool": "mcp__claude-in-chrome__computer",
+        "source_type": "tool_result",
+        "n": 763
+      },
+      {
+        "tool": "mcp__claude-in-chrome__computer",
+        "source_type": "tool_call",
+        "n": 763
+      },
+      {
+        "tool": "send_message",
+        "source_type": "context",
+        "n": 555
+      },
+      {
+        "tool": "send_message",
+        "source_type": "tool_call",
+        "n": 555
+      },
+      {
+        "tool": "shell_command",
+        "source_type": "tool_call",
+        "n": 409
+      },
+      {
+        "tool": "mcp__context7__query-docs",
+        "source_type": "tool_result",
+        "n": 374
+      },
+      {
+        "tool": "mcp__context7__query-docs",
+        "source_type": "tool_call",
+        "n": 373
+      },
+      {
+        "tool": "exec",
+        "source_type": "memory_read",
+        "n": 357
+      },
+      {
+        "tool": "shell_command",
+        "source_type": "context",
+        "n": 346
+      },
+      {
+        "tool": "Bash",
+        "source_type": "memory_read",
+        "n": 324
+      },
+      {
+        "tool": "SendMessage",
+        "source_type": "tool_result",
+        "n": 279
+      },
+      {
+        "tool": "SendMessage",
+        "source_type": "tool_call",
+        "n": 279
+      },
+      {
+        "tool": "Agent",
+        "source_type": "tool_call",
+        "n": 246
+      },
+      {
+        "tool": "mcp__context7__resolve-library-id",
+        "source_type": "tool_result",
+        "n": 242
+      },
+      {
+        "tool": "Agent",
+        "source_type": "tool_result",
+        "n": 242
+      },
+      {
+        "tool": "mcp__context7__resolve-library-id",
+        "source_type": "tool_call",
+        "n": 241
+      },
+      {
+        "tool": "list_agents",
+        "source_type": "tool_result",
+        "n": 230
+      },
+      {
+        "tool": "list_agents",
+        "source_type": "tool_call",
+        "n": 222
+      },
+      {
+        "tool": "exec_command",
+        "source_type": "tool_result",
+        "n": 199
+      },
+      {
+        "tool": "ToolSearch",
+        "source_type": "tool_result",
+        "n": 199
+      },
+      {
+        "tool": "ToolSearch",
+        "source_type": "tool_call",
+        "n": 199
+      },
+      {
+        "tool": "sleep",
+        "source_type": "tool_call",
+        "n": 198
+      },
+      {
+        "tool": "sleep",
+        "source_type": "tool_result",
+        "n": 198
+      },
+      {
+        "tool": "followup_task",
+        "source_type": "tool_call",
+        "n": 189
+      },
+      {
+        "tool": "followup_task",
+        "source_type": "context",
+        "n": 189
+      },
+      {
+        "tool": "WebFetch",
+        "source_type": "tool_result",
+        "n": 188
+      },
+      {
+        "tool": "WebFetch",
+        "source_type": "tool_call",
+        "n": 185
+      },
+      {
+        "tool": "DesignSync",
+        "source_type": "tool_result",
+        "n": 178
+      },
+      {
+        "tool": "spawn_agent",
+        "source_type": "tool_call",
+        "n": 177
+      },
+      {
+        "tool": "spawn_agent",
+        "source_type": "context",
+        "n": 177
+      },
+      {
+        "tool": "DesignSync",
+        "source_type": "tool_call",
+        "n": 174
+      },
+      {
+        "tool": "mcp__claude-in-chrome__javascript_tool",
+        "source_type": "tool_call",
+        "n": 137
+      },
+      {
+        "tool": "mcp__claude-in-chrome__javascript_tool",
+        "source_type": "tool_result",
+        "n": 137
+      },
+      {
+        "tool": "mcp__claude-in-chrome__browser_batch",
+        "source_type": "tool_call",
+        "n": 131
+      },
+      {
+        "tool": "mcp__claude-in-chrome__browser_batch",
+        "source_type": "tool_result",
+        "n": 131
+      },
+      {
+        "tool": "mcp__supabase-atlas-nexus__execute_sql",
+        "source_type": "tool_call",
+        "n": 114
+      },
+      {
+        "tool": "mcp__supabase-atlas-nexus__execute_sql",
+        "source_type": "context",
+        "n": 108
+      },
+      {
+        "tool": "mcp__railway__get_logs",
+        "source_type": "tool_result",
+        "n": 102
+      },
+      {
+        "tool": "apply_patch",
+        "source_type": "tool_call",
+        "n": 102
+      },
+      {
+        "tool": "mcp__railway__get_logs",
+        "source_type": "tool_call",
+        "n": 100
+      },
+      {
+        "tool": "apply_patch",
+        "source_type": "tool_result",
+        "n": 99
+      },
+      {
+        "tool": "wait",
+        "source_type": "tool_call",
+        "n": 90
+      }
+    ],
+    "distinct_tools": 135,
+    "tool_failed_by_source_type": [
+      {
+        "source_type": "context",
+        "failed": false,
+        "n": 19630
+      },
+      {
+        "source_type": "context",
+        "failed": true,
+        "n": 722
+      },
+      {
+        "source_type": "memory_read",
+        "failed": false,
+        "n": 290
+      },
+      {
+        "source_type": "tool_result",
+        "failed": true,
+        "n": 293
+      },
+      {
+        "source_type": "tool_result",
+        "failed": false,
+        "n": 3463
+      },
+      {
+        "source_type": "memory_read",
+        "failed": true,
+        "n": 34
+      },
+      {
+        "source_type": "memory_write",
+        "failed": true,
+        "n": 1
+      }
+    ],
+    "gaps": {
+      "opaque_command_artifacts_not_resolved": 78202,
+      "record_split_into_chunks": 7669,
+      "delegated_instruction": 852,
+      "non_text_tool_output": 1094,
+      "non_text_attachment": 134,
+      "artifact_excerpt_truncated_see_source_chunks": 8,
+      "automated_prompt_not_direct_user_assertion": 47,
+      "delegated_agent_report_not_execution_evidence": 1783,
+      "derived_context": 229,
+      "shell_output_not_attributed_to_files": 17181,
+      "tool_call_not_present": 7,
+      "tool_result_semantics_unknown": 7
+    },
+    "gap_count_per_message": {
+      "0": 50398,
+      "1": 96983,
+      "2": 4998,
+      "3": 78
+    },
+    "content_chars_by_source_type": {
+      "assistant_report": {
+        "count": 21391,
+        "min": 1,
+        "p50": 253,
+        "p90": 2061,
+        "p99": 12739,
+        "max": 24000,
+        "avg": 889.67,
+        "sum": 19030887
+      },
+      "context": {
+        "count": 34745,
+        "min": 1,
+        "p50": 1344,
+        "p90": 15231,
+        "p99": 24000,
+        "max": 24000,
+        "avg": 4244.35,
+        "sum": 147469848
+      },
+      "memory_read": {
+        "count": 762,
+        "min": 1,
+        "p50": 5602,
+        "p90": 23854,
+        "p99": 24000,
+        "max": 24000,
+        "avg": 8468.77,
+        "sum": 6453206
+      },
+      "memory_write": {
+        "count": 157,
+        "min": 50,
+        "p50": 131,
+        "p90": 189,
+        "p99": 757,
+        "max": 3382,
+        "avg": 175.18,
+        "sum": 27504
+      },
+      "tool_call": {
+        "count": 60882,
+        "min": 2,
+        "p50": 344,
+        "p90": 1795,
+        "p99": 11015,
+        "max": 24000,
+        "avg": 904.7,
+        "sum": 55079747
+      },
+      "tool_result": {
+        "count": 29971,
+        "min": 1,
+        "p50": 732,
+        "p90": 16373,
+        "p99": 24000,
+        "max": 24000,
+        "avg": 4399.4,
+        "sum": 131854404
+      },
+      "user_assertion": {
+        "count": 4549,
+        "min": 1,
+        "p50": 188,
+        "p90": 12441,
+        "p99": 24000,
+        "max": 24000,
+        "avg": 2945.01,
+        "sum": 13396857
+      }
+    },
+    "timestamped": {
+      "True": 152457
+    },
+    "by_month": {
+      "2025-11": 348,
+      "2025-12": 279,
+      "2026-01": 502,
+      "2026-02": 308,
+      "2026-04": 6,
+      "2026-05": 2381,
+      "2026-06": 11215,
+      "2026-07": 1828,
+      "2026-08": 70835,
+      "2026-09": 64755
+    },
+    "timestamp_range": {
+      "first": "2025-11-20T12:12:13.641000+00:00",
+      "last": "2026-09-22T12:55:29.763000+00:00"
+    },
+    "cited_by_facts_by_source_type": {
+      "user_assertion": 1787,
+      "assistant_report": 11259
+    },
+    "validating_by_source_type": {
+      "context": 131,
+      "tool_result": 3326,
+      "memory_read": 1,
+      "assistant_report": 4
+    },
+    "episodes_per_message": {
+      "1": 59681,
+      "2": 63191,
+      "3": 8451,
+      "4": 7232,
+      "5": 5382,
+      "6": 3380,
+      "7": 2206,
+      "8": 1215,
+      "9": 746,
+      "10": 404,
+      "11": 231,
+      "12": 100,
+      "13": 77,
+      "14": 52,
+      "15": 19,
+      "16": 12,
+      "17": 7,
+      "18": 4,
+      "19": 12,
+      "20": 3,
+      "21": 2,
+      "22": 1,
+      "23": 7,
+      "27": 1,
+      "28": 4,
+      "29": 5,
+      "30": 2,
+      "31": 2,
+      "33": 2,
+      "34": 1,
+      "35": 2,
+      "36": 5,
+      "37": 1,
+      "38": 1,
+      "45": 2,
+      "46": 2,
+      "48": 2,
+      "49": 1,
+      "50": 3,
+      "51": 5,
+      "52": 1
+    },
+    "tool_calls_without_result": 8,
+    "results_without_call": 2,
+    "per_session": {
+      "count": 874,
+      "min": 1,
+      "p50": 83,
+      "p90": 337,
+      "p99": 2492,
+      "max": 4258,
+      "avg": 174.44,
+      "sum": 152457
+    },
+    "record_ids_present": {
+      "True": 152457
+    }
+  },
+  "sessions": {
+    "total": 874,
+    "messages": {
+      "count": 874,
+      "min": 1,
+      "p50": 83,
+      "p90": 337,
+      "p99": 2492,
+      "max": 4258,
+      "avg": 174.44,
+      "sum": 152457
+    },
+    "episodes": {
+      "count": 874,
+      "min": 1,
+      "p50": 11,
+      "p90": 44,
+      "p99": 313,
+      "max": 533,
+      "avg": 22.42,
+      "sum": 19596
+    },
+    "facts": {
+      "count": 874,
+      "min": 0,
+      "p50": 13,
+      "p90": 76,
+      "p99": 622,
+      "max": 1154,
+      "avg": 38.95,
+      "sum": 34039,
+      "without_facts": 137
+    },
+    "validated_facts": {
+      "count": 874,
+      "min": 0,
+      "p50": 0,
+      "p90": 5,
+      "p99": 123,
+      "max": 302,
+      "avg": 4.82,
+      "sum": 4213,
+      "without_validated": 642
+    },
+    "without_messages": 0,
+    "by_source_kind": {
+      "codex": 379,
+      "claude": 495
+    }
+  },
+  "feeds": {
+    "total": 882,
+    "by_source_format": {
+      "session-records-v1": 882
+    },
+    "caught_up": {
+      "True": 870,
+      "False": 12
+    },
+    "with_source_key": {
+      "True": 882
+    },
+    "with_prefix_hash": {
+      "True": 882
+    },
+    "message_count": {
+      "count": 882,
+      "min": 0,
+      "p50": 81,
+      "p90": 330,
+      "p99": 2492,
+      "max": 4258,
+      "avg": 172.85,
+      "sum": 152457
+    },
+    "caught_up_bytes": {
+      "count": 870,
+      "min": 778,
+      "p50": 715450,
+      "p90": 4667653,
+      "p99": 30111861,
+      "max": 186982872,
+      "avg": 2453585.27,
+      "sum": 2134619188
+    }
+  },
+  "artifacts": {
+    "artifacts": 437,
+    "observations": 1898,
+    "by_operation": {
+      "read": 1580,
+      "write": 174,
+      "patch": 144
+    },
+    "captured": {
+      "unavailable": 1518,
+      "submitted_content": 174,
+      "patch": 144,
+      "excerpt": 62
+    },
+    "gaps": {
+      "execution_not_yet_observed": 949,
+      "compound_output_not_attributed_to_individual_file": 728,
+      "write_request_not_independent_confirmation": 159,
+      "read_extent_not_proven": 62
+    },
+    "content_chars": {
+      "count": 1898,
+      "min": 0,
+      "p50": 0,
+      "p90": 1950,
+      "p99": 7522,
+      "max": 24000,
+      "avg": 552.97,
+      "sum": 1049530
+    },
+    "observations_per_artifact": {
+      "count": 437,
+      "min": 2,
+      "p50": 2,
+      "p90": 6,
+      "p99": 34,
+      "max": 274,
+      "avg": 4.34,
+      "sum": 1898
+    },
+    "by_extension": {
+      "md": 436,
+      "yaml": 1
+    },
+    "absolute_paths": {
+      "True": 276,
+      "False": 161
+    }
+  },
+  "journal": {
+    "space": {
+      "journal_hash": "6ce01f701a41d110c2cacb96d6e722b231a2cd62e0c6d04a0ca3f2cc03b49426",
+      "journal_checkpoint_bytes": 244082475,
+      "journal_checkpoint_sequence": 39038,
+      "journal_sequence": 39126,
+      "journal_us": 1790081746249173,
+      "journal_set_hash": "51fe9aee33db0586d906482d039d54524999b6c5a12ba8446bba4153727c55d0",
+      "aliases_indexed": true,
+      "journal_delta_bytes": 825724,
+      "id": "transcripts",
+      "journal_state_hash": "v3:51fe9aee33db0586d906482d039d54524999b6c5a12ba8446bba4153727c55d0",
+      "revision": 19518
+    },
+    "changes": {
+      "n": 39130,
+      "first_sequence": 0,
+      "last_sequence": 39129,
+      "first": "2026-09-17T11:34:01.328109+00:00",
+      "last": "2026-09-22T12:56:33.388646+00:00",
+      "payload_chars": 25531005610
+    },
+    "changes_by_kind": {
+      "source_saved": 19599,
+      "facts_committed": 19520,
+      "checkpoint": 10,
+      "baseline": 1
+    },
+    "changes_by_scope": {
+      "transcripts": 39130
+    },
+    "changes_by_day": {
+      "2026-09-17": 5406,
+      "2026-09-18": 1594,
+      "2026-09-19": 2216,
+      "2026-09-20": 7653,
+      "2026-09-21": 12755,
+      "2026-09-22": 9506
+    },
+    "payload_chars_by_kind": {
+      "baseline": {
+        "count": 1,
+        "chars": 619
+      },
+      "source_saved": {
+        "count": 19602,
+        "chars": 11288261845
+      },
+      "facts_committed": {
+        "count": 19521,
+        "chars": 13885515446
+      },
+      "checkpoint": {
+        "count": 10,
+        "chars": 357252152
+      }
+    },
+    "snapshot_parts": [
+      {
+        "label": "MemoryArtifact",
+        "sequence": 22973,
+        "parts": 1,
+        "data_chars": 24351
+      },
+      {
+        "label": "MemoryArtifactObservation",
+        "sequence": 22973,
+        "parts": 1,
+        "data_chars": 206542
+      },
+      {
+        "label": "MemoryEntity",
+        "sequence": 22973,
+        "parts": 1,
+        "data_chars": 919040
+      },
+      {
+        "label": "MemoryEpisode",
+        "sequence": 22973,
+        "parts": 9,
+        "data_chars": 9407622
+      },
+      {
+        "label": "MemoryFact",
+        "sequence": 22973,
+        "parts": 6,
+        "data_chars": 4344628
+      },
+      {
+        "label": "MemoryMessage",
+        "sequence": 22973,
+        "parts": 16,
+        "data_chars": 14722162
+      },
+      {
+        "label": "MemorySession",
+        "sequence": 22973,
+        "parts": 1,
+        "data_chars": 109584
+      },
+      {
+        "label": "MemoryArtifact",
+        "sequence": 24986,
+        "parts": 1,
+        "data_chars": 24482
+      },
+      {
+        "label": "MemoryArtifactObservation",
+        "sequence": 24986,
+        "parts": 1,
+        "data_chars": 207717
+      },
+      {
+        "label": "MemoryEntity",
+        "sequence": 24986,
+        "parts": 2,
+        "data_chars": 1118064
+      },
+      {
+        "label": "MemoryEpisode",
+        "sequence": 24986,
+        "parts": 10,
+        "data_chars": 10707528
+      },
+      {
+        "label": "MemoryFact",
+        "sequence": 24986,
+        "parts": 7,
+        "data_chars": 5593302
+      },
+      {
+        "label": "MemoryMessage",
+        "sequence": 24986,
+        "parts": 17,
+        "data_chars": 15449609
+      },
+      {
+        "label": "MemorySession",
+        "sequence": 24986,
+        "parts": 1,
+        "data_chars": 112430
+      },
+      {
+        "label": "MemoryArtifact",
+        "sequence": 26991,
+        "parts": 1,
+        "data_chars": 25001
+      },
+      {
+        "label": "MemoryArtifactObservation",
+        "sequence": 26991,
+        "parts": 1,
+        "data_chars": 213989
+      },
+      {
+        "label": "MemoryEntity",
+        "sequence": 26991,
+        "parts": 2,
+        "data_chars": 1243853
+      },
+      {
+        "label": "MemoryEpisode",
+        "sequence": 26991,
+        "parts": 12,
+        "data_chars": 11973446
+      },
+      {
+        "label": "MemoryFact",
+        "sequence": 26991,
+        "parts": 8,
+        "data_chars": 6339035
+      },
+      {
+        "label": "MemoryMessage",
+        "sequence": 26991,
+        "parts": 18,
+        "data_chars": 16689878
+      },
+      {
+        "label": "MemorySession",
+        "sequence": 26991,
+        "parts": 1,
+        "data_chars": 112430
+      },
+      {
+        "label": "MemoryArtifact",
+        "sequence": 29005,
+        "parts": 1,
+        "data_chars": 25592
+      },
+      {
+        "label": "MemoryArtifactObservation",
+        "sequence": 29005,
+        "parts": 1,
+        "data_chars": 220251
+      },
+      {
+        "label": "MemoryEntity",
+        "sequence": 29005,
+        "parts": 2,
+        "data_chars": 1370227
+      },
+      {
+        "label": "MemoryEpisode",
+        "sequence": 29005,
+        "parts": 13,
+        "data_chars": 13261047
+      },
+      {
+        "label": "MemoryFact",
+        "sequence": 29005,
+        "parts": 9,
+        "data_chars": 7109074
+      },
+      {
+        "label": "MemoryMessage",
+        "sequence": 29005,
+        "parts": 19,
+        "data_chars": 17937538
+      },
+      {
+        "label": "MemorySession",
+        "sequence": 29005,
+        "parts": 1,
+        "data_chars": 112430
+      },
+      {
+        "label": "MemoryArtifact",
+        "sequence": 31016,
+        "parts": 1,
+        "data_chars": 26172
+      },
+      {
+        "label": "MemoryArtifactObservation",
+        "sequence": 31016,
+        "parts": 1,
+        "data_chars": 227589
+      },
+      {
+        "label": "MemoryEntity",
+        "sequence": 31016,
+        "parts": 2,
+        "data_chars": 1504700
+      },
+      {
+        "label": "MemoryEpisode",
+        "sequence": 31016,
+        "parts": 14,
+        "data_chars": 14539850
+      },
+      {
+        "label": "MemoryFact",
+        "sequence": 31016,
+        "parts": 10,
+        "data_chars": 7894932
+      },
+      {
+        "label": "MemoryMessage",
+        "sequence": 31016,
+        "parts": 20,
+        "data_chars": 19189018
+      },
+      {
+        "label": "MemorySession",
+        "sequence": 31016,
+        "parts": 1,
+        "data_chars": 112430
+      },
+      {
+        "label": "MemoryArtifact",
+        "sequence": 33024,
+        "parts": 1,
+        "data_chars": 26239
+      },
+      {
+        "label": "MemoryArtifactObservation",
+        "sequence": 33024,
+        "parts": 1,
+        "data_chars": 231249
+      },
+      {
+        "label": "MemoryEntity",
+        "sequence": 33024,
+        "parts": 2,
+        "data_chars": 1649306
+      },
+      {
+        "label": "MemoryEpisode",
+        "sequence": 33024,
+        "parts": 15,
+        "data_chars": 15819657
+      },
+      {
+        "label": "MemoryFact",
+        "sequence": 33024,
+        "parts": 11,
+        "data_chars": 8695476
+      },
+      {
+        "label": "MemoryMessage",
+        "sequence": 33024,
+        "parts": 22,
+        "data_chars": 20457449
+      },
+      {
+        "label": "MemorySession",
+        "sequence": 33024,
+        "parts": 1,
+        "data_chars": 112430
+      },
+      {
+        "label": "MemoryArtifact",
+        "sequence": 35028,
+        "parts": 1,
+        "data_chars": 26642
+      },
+      {
+        "label": "MemoryArtifactObservation",
+        "sequence": 35028,
+        "parts": 1,
+        "data_chars": 235104
+      },
+      {
+        "label": "MemoryEntity",
+        "sequence": 35028,
+        "parts": 2,
+        "data_chars": 1774594
+      },
+      {
+        "label": "MemoryEpisode",
+        "sequence": 35028,
+        "parts": 17,
+        "data_chars": 17072260
+      },
+      {
+        "label": "MemoryFact",
+        "sequence": 35028,
+        "parts": 11,
+        "data_chars": 9376588
+      },
+      {
+        "label": "MemoryMessage",
+        "sequence": 35028,
+        "parts": 23,
+        "data_chars": 21740501
+      },
+      {
+        "label": "MemorySession",
+        "sequence": 35028,
+        "parts": 1,
+        "data_chars": 112430
+      },
+      {
+        "label": "MemoryArtifact",
+        "sequence": 37034,
+        "parts": 1,
+        "data_chars": 26775
+      },
+      {
+        "label": "MemoryArtifactObservation",
+        "sequence": 37034,
+        "parts": 1,
+        "data_chars": 240996
+      },
+      {
+        "label": "MemoryEntity",
+        "sequence": 37034,
+        "parts": 2,
+        "data_chars": 1902136
+      },
+      {
+        "label": "MemoryEpisode",
+        "sequence": 37034,
+        "parts": 18,
+        "data_chars": 18311119
+      },
+      {
+        "label": "MemoryFact",
+        "sequence": 37034,
+        "parts": 12,
+        "data_chars": 10045338
+      },
+      {
+        "label": "MemoryMessage",
+        "sequence": 37034,
+        "parts": 24,
+        "data_chars": 23013816
+      },
+      {
+        "label": "MemorySession",
+        "sequence": 37034,
+        "parts": 1,
+        "data_chars": 112430
+      },
+      {
+        "label": "MemoryArtifact",
+        "sequence": 39038,
+        "parts": 1,
+        "data_chars": 26926
+      },
+      {
+        "label": "MemoryArtifactObservation",
+        "sequence": 39038,
+        "parts": 1,
+        "data_chars": 244301
+      },
+      {
+        "label": "MemoryEntity",
+        "sequence": 39038,
+        "parts": 2,
+        "data_chars": 2028735
+      },
+      {
+        "label": "MemoryEpisode",
+        "sequence": 39038,
+        "parts": 19,
+        "data_chars": 19473984
+      },
+      {
+        "label": "MemoryFact",
+        "sequence": 39038,
+        "parts": 13,
+        "data_chars": 10630545
+      },
+      {
+        "label": "MemoryMessage",
+        "sequence": 39038,
+        "parts": 26,
+        "data_chars": 24273250
+      },
+      {
+        "label": "MemorySession",
+        "sequence": 39038,
+        "parts": 1,
+        "data_chars": 112430
+      }
+    ],
+    "workers": [
+      {
+        "pid": 7,
+        "workers": 8,
+        "interval": 30,
+        "engine": "7ac2dbc45ba81a8a75821d8e6d3df917de9e16d1ac72b4762a5ac542d5ede184",
+        "provider_open": true,
+        "provider_reason": "usage_limit",
+        "heartbeat_at": 1790004688.5960088
+      },
+      {
+        "pid": 7,
+        "workers": 1,
+        "interval": 30,
+        "engine": "bc74c4af20e5a11dc15be1a69e1866c6171d627ae3cab7f061c143e77533bc06",
+        "provider_open": false,
+        "provider_reason": null,
+        "heartbeat_at": 1790020564.9108827
+      },
+      {
+        "pid": 6,
+        "workers": 8,
+        "interval": 30,
+        "engine": "4a279525401f484ae11c4201533bfc319ee8c08325618d3d9e355b0787ae5d63",
+        "provider_open": false,
+        "provider_reason": null,
+        "heartbeat_at": 1790082142.7593832
+      }
+    ],
+    "inventory": [
+      {
+        "name": "Transcript intake inventory",
+        "payload_chars": 808
+      }
+    ]
+  },
+  "other_labels": {
+    "MemoryDream": {
+      "n": 0,
+      "statuses": [],
+      "kinds": []
+    },
+    "MemoryInsight": {
+      "n": 0,
+      "statuses": [],
+      "kinds": []
+    },
+    "MemoryRevision": {
+      "n": 0,
+      "statuses": [],
+      "kinds": []
+    },
+    "MemoryRevisionCandidate": {
+      "n": 0,
+      "statuses": [],
+      "kinds": []
+    },
+    "MemoryRevisionDream": {
+      "n": 0,
+      "statuses": [],
+      "kinds": []
+    }
+  },
+  "integrity": {
+    "facts_citing_missing_messages": 0,
+    "facts_validated_by_context_messages": 142,
+    "facts_validated_by_failed_tool": 5,
+    "facts_without_subject_entity": 0,
+    "facts_with_target_but_no_edge": 0,
+    "facts_whose_episode_is_missing": 0,
+    "messages_without_session": 0,
+    "messages_in_no_episode": 0,
+    "episodes_without_session": 2,
+    "nodes_without_namespace": {
+      "MemorySpace": 1
+    }
+  },
+  "deployment": {
+    "containers": {
+      "graph-memory-transcripts-worker-1": {
+        "image": "graph-memory:7ee5f34",
+        "image_id": "sha256:aea84474e85f875f47e3f94aa217735c0ec7b2909eafce2fc8298e136e4fba27",
+        "state": "running",
+        "health": "healthy",
+        "started_at": "2026-09-21T20:43:56.184135623Z",
+        "restarts": 0,
+        "command": [
+          "daemon",
+          "--source-records",
+          "--transcripts",
+          "/sessions/claude",
+          "--transcripts",
+          "/sessions/codex",
+          "--workers",
+          "8"
+        ],
+        "memory_limit": 6442450944,
+        "env": {
+          "MEMORY_FEED_ACCEPT_UNMATCHED": "",
+          "MEMORY_INTAKE_FILES": "4",
+          "MEMORY_INTAKE_QUEUE": "32",
+          "MEMORY_JOURNAL_AUDIT": "503",
+          "MEMORY_LLM": "codex",
+          "MEMORY_LLM_TIMEOUT": "420",
+          "MEMORY_LLM_URL": "",
+          "MEMORY_MODEL": "gpt-5.6-terra",
+          "MEMORY_NAMESPACE": "transcripts",
+          "MEMORY_REASONING_EFFORT": "low",
+          "NEO4J_URI": "bolt://neo4j:7687"
+        }
+      },
+      "graph-memory-transcripts-inventory-1": {
+        "image": "graph-memory:7ee5f34",
+        "image_id": "sha256:aea84474e85f875f47e3f94aa217735c0ec7b2909eafce2fc8298e136e4fba27",
+        "state": "running",
+        "health": "healthy",
+        "started_at": "2026-09-21T20:43:56.183780344Z",
+        "restarts": 0,
+        "command": [
+          "inventory",
+          "--transcripts",
+          "/sessions/claude",
+          "--transcripts",
+          "/sessions/codex",
+          "--interval",
+          "300"
+        ],
+        "memory_limit": 536870912,
+        "env": {
+          "MEMORY_LLM": "caller",
+          "MEMORY_NAMESPACE": "transcripts",
+          "NEO4J_URI": "bolt://neo4j:7687"
+        }
+      },
+      "graph-memory-transcripts-mcp-1": {
+        "image": "graph-memory:7ee5f34",
+        "image_id": "sha256:aea84474e85f875f47e3f94aa217735c0ec7b2909eafce2fc8298e136e4fba27",
+        "state": "running",
+        "health": "healthy",
+        "started_at": "2026-09-21T20:43:56.183456002Z",
+        "restarts": 0,
+        "command": [
+          "serve",
+          "--transport",
+          "http",
+          "--host",
+          "0.0.0.0"
+        ],
+        "memory_limit": 2147483648,
+        "env": {
+          "MEMORY_HTTP_HOSTS": "",
+          "MEMORY_HTTP_ORIGINS": "",
+          "MEMORY_LLM": "caller",
+          "MEMORY_NAMESPACE": "transcripts",
+          "NEO4J_URI": "bolt://neo4j:7687"
+        }
+      },
+      "graph-memory-transcripts-neo4j-browser-1": {
+        "image": "alpine/socat@sha256:24220ef2c80a2a421ea08e4624488e985330c421b6aa3329bae14b0933a1d403",
+        "image_id": "sha256:24220ef2c80a2a421ea08e4624488e985330c421b6aa3329bae14b0933a1d403",
+        "state": "exited",
+        "health": null,
+        "started_at": "2026-09-21T12:44:33.516445567Z",
+        "restarts": 0,
+        "command": [
+          "TCP-LISTEN:7474,fork,reuseaddr",
+          "TCP:neo4j:7474"
+        ],
+        "memory_limit": 67108864,
+        "env": {}
+      },
+      "graph-memory-transcripts-neo4j-1": {
+        "image": "neo4j:5.26-community",
+        "image_id": "sha256:bb268a2f1b4f3c79e4bd1a00a82a6e63bbd4fcc4088da03c1b2380655f256cb2",
+        "state": "running",
+        "health": "healthy",
+        "started_at": "2026-09-21T15:29:49.497358489Z",
+        "restarts": 0,
+        "command": [
+          "neo4j"
+        ],
+        "memory_limit": 8589934592,
+        "env": {
+          "NEO4J_EDITION": "community",
+          "NEO4J_HOME": "/var/lib/neo4j",
+          "NEO4J_SHA256": "f22934e3f7c1ddae743d91243f38aa492f007471c6a2bdbdc882fe2b3e1e4bdd",
+          "NEO4J_TARBALL": "neo4j-community-5.26.30-unix.tar.gz",
+          "NEO4J_db_lock_acquisition_timeout": "60s",
+          "NEO4J_db_memory_transaction_max": "2g",
+          "NEO4J_db_transaction_timeout": "10m",
+          "NEO4J_db_tx__log_rotation_retention__policy": "1 days 1G",
+          "NEO4J_dbms_security_http__access__control__allow__origin": "http://127.0.0.1:27474",
+          "NEO4J_dbms_usage__report_enabled": "false",
+          "NEO4J_server_bolt_advertised__address": "127.0.0.1:27687",
+          "NEO4J_server_http_advertised__address": "127.0.0.1:27474",
+          "NEO4J_server_memory_heap_initial__size": "1g",
+          "NEO4J_server_memory_heap_max__size": "4g",
+          "NEO4J_server_memory_pagecache_size": "2g"
+        }
+      }
+    },
+    "stats": {
+      "graph-memory-transcripts-worker-1": {
+        "memory": "234.3MiB / 6GiB",
+        "cpu": "3.96%"
+      },
+      "graph-memory-transcripts-inventory-1": {
+        "memory": "134.2MiB / 512MiB",
+        "cpu": "0.00%"
+      },
+      "graph-memory-transcripts-mcp-1": {
+        "memory": "110.8MiB / 2GiB",
+        "cpu": "0.01%"
+      },
+      "graph-memory-transcripts-neo4j-1": {
+        "memory": "4.256GiB / 8GiB",
+        "cpu": "200.16%"
+      }
+    },
+    "store": {
+      "/data/databases/neo4j": "28G",
+      "/data/transactions/neo4j": "1.1G"
+    }
+  },
+  "worker_log": {
+    "events": {
+      "processed": 8983,
+      "bank_scan": 1908,
+      "transcript_scan": 1908,
+      "journal_checkpoint": 8,
+      "daemon_start": 1
+    },
+    "processed": 8983,
+    "by_status": {
+      "complete": 8472,
+      "failed": 511
+    },
+    "errors": {
+      "ValueError": 509,
+      "ValidationError": 1,
+      "ModelUnavailable": 1
+    },
+    "with_model_call": 5011,
+    "model_calls_total": 5466,
+    "per_hour_utc": {
+      "2026-09-21T20": 194,
+      "2026-09-21T21": 1319,
+      "2026-09-21T22": 1211,
+      "2026-09-21T23": 1225,
+      "2026-09-22T00": 1135,
+      "2026-09-22T01": 1279,
+      "2026-09-22T02": 1312,
+      "2026-09-22T03": 1222,
+      "2026-09-22T04": 64,
+      "2026-09-22T05": 4,
+      "2026-09-22T12": 17,
+      "2026-09-22T13": 1
+    },
+    "timings_seconds": {
+      "prepare": {
+        "count": 8472,
+        "min": 0.0,
+        "p50": 0.233,
+        "p90": 0.53,
+        "p99": 1.882,
+        "max": 5.209,
+        "avg": 0.268,
+        "sum": 2270.9
+      },
+      "model": {
+        "count": 5011,
+        "min": 2.513,
+        "p50": 25.318,
+        "p90": 56.736,
+        "p99": 124.612,
+        "max": 225.312,
+        "avg": 31.794,
+        "sum": 159320.9
+      },
+      "validation": {
+        "count": 5011,
+        "min": 0.0,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.019,
+        "max": 0.14,
+        "avg": 0.001,
+        "sum": 4.6
+      },
+      "checkpoint": {
+        "count": 5011,
+        "min": 0.001,
+        "p50": 0.004,
+        "p90": 0.008,
+        "p99": 6.706,
+        "max": 25.112,
+        "avg": 0.159,
+        "sum": 795.2
+      },
+      "commit": {
+        "count": 8472,
+        "min": 0.005,
+        "p50": 0.018,
+        "p90": 0.044,
+        "p99": 0.19,
+        "max": 12.578,
+        "avg": 0.045,
+        "sum": 379.4
+      }
+    },
+    "model_seconds_when_called": {
+      "count": 5011,
+      "min": 2.513,
+      "p50": 25.318,
+      "p90": 56.736,
+      "p99": 124.612,
+      "max": 225.312,
+      "avg": 31.794,
+      "sum": 159320.9
+    },
+    "first_ts": 1790023467.015,
+    "last_ts": 1790082106.37
+  },
+  "capture": {
+    "seconds": 429.8,
+    "slowest_queries": {
+      "j:kindchars": 211.12,
+      "j:changes": 177.24,
+      "ep:payload": 14.61,
+      "m:chars": 4.71,
+      "j:parts": 2.65,
+      "ep:engine": 2.16,
+      "j:day": 1.49,
+      "i:missingcite": 1.26,
+      "i:nosubject": 0.59,
+      "m:type": 0.58,
+      "ep:model": 0.47,
+      "m:gaps": 0.44,
+      "ep:ingested": 0.42,
+      "f:evchars": 0.4,
+      "m:persession": 0.36
+    },
+    "basis": "Read-only aggregate queries against the live graph while it may be ingesting; every number is as of its own query, not one transaction. Docker figures are of the moment; the worker log covers only the current container's lifetime."
+  }
+}

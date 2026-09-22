@@ -47,6 +47,28 @@ reports or aggregate evidence belong in version control.
 The [effort comparison](effort-study.md) records why Luna now defaults to medium,
 including failed trials and the schema correction they exposed.
 
+## Graph baselines
+
+`evals/graph_baseline.py` snapshots everything countable about a live graph:
+schema, node and relationship counts, degree distributions, episode outcomes and
+timings, fact status and validation crosstabs, entity kinds, message types and
+gaps, sessions, feeds, artifacts, journal state, integrity checks, and, with
+`--container-prefix`, the deployment's images, memory, store size and worker
+log. It is read-only and records counts only, so a report can be committed.
+`--names` adds entity, subject, slot and path names; keep such a report under
+`.local/`.
+
+```sh
+set -a; . ~/.local/share/graph-memory/deployment/transcripts.env; set +a
+NEO4J_URI=bolt://127.0.0.1:27687 uv run python -m evals.graph_baseline \
+  --output evals/reports/$(date +%Y%m%d)-graph-baseline.json \
+  --container-prefix graph-memory-transcripts
+```
+
+`reports/20260922-graph-baseline.json` is the first: the transcript graph the
+morning after the backlog finished under the shell-output and turn look-back
+rules (commit 7ee5f34). Compare later snapshots against it.
+
 ## Establishing the golden standard
 
 `baselines/candidate.json` records the current candidate, not an automatically

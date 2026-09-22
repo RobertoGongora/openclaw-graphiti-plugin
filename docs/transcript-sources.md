@@ -6,6 +6,11 @@ The transcript graph is a separate Neo4j Community container and persistent
 volume. Community supports one standard database per instance; namespaces are
 logical separation, not a replacement for database isolation.
 
+**Baseline.** `evals/reports/20260922-graph-baseline.json` records the whole
+graph the morning after the first full backlog run finished (2026-09-22). Take a
+new snapshot with `evals/graph_baseline.py` before and after any change that
+touches extraction, batching or validation, and compare.
+
 ## Evidence contract
 
 Original conversational claims are the origin of facts. Tool outputs are only
