@@ -145,6 +145,7 @@ class KnownElsewhere(ValueError):
 def feed_rows(tx, namespace):
     return tx.run(
         "MATCH (f:MemoryFeed {namespace:$ns,source_format:$format}) "
+        "WHERE f.superseded_by IS NULL "
         "RETURN f.id AS id,f.session_id AS session,f.source_key AS key,f.source_uri AS uri",
         ns=namespace,
         format=FORMAT,
