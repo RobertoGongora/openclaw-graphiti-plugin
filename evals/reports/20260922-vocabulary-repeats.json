@@ -1,0 +1,1541 @@
+{
+  "date": "2026-09-22",
+  "kind": "repeated_paired_vocabulary_eval",
+  "model": "gpt-5.6-terra",
+  "effort": "low",
+  "main_corpus_sha256": "6c32605f73914bc18b9901a0f2e75700b8a027fe246beb124610f6eac6136239",
+  "main": {
+    "old": {
+      "batches": 72,
+      "failed_batches": 3,
+      "facts": 326,
+      "assistant_facts": 307,
+      "assistant_facts_validated": 43,
+      "validation_rate": 0.140065,
+      "related_to_facts": 220,
+      "related_to_share": 0.674847
+    },
+    "new": {
+      "batches": 72,
+      "failed_batches": 4,
+      "facts": 306,
+      "assistant_facts": 287,
+      "assistant_facts_validated": 46,
+      "validation_rate": 0.160279,
+      "related_to_facts": 3,
+      "related_to_share": 0.009804
+    }
+  },
+  "main_runs": {
+    "old": [
+      {
+        "engine": "4a279525401f484ae11c4201533bfc319ee8c08325618d3d9e355b0787ae5d63",
+        "model": "gpt-5.6-terra",
+        "effort": "low",
+        "corpus_sha256": "6c32605f73914bc18b9901a0f2e75700b8a027fe246beb124610f6eac6136239",
+        "batches": 24,
+        "complete": true,
+        "totals": {
+          "batches": 24,
+          "model_calls": 24,
+          "facts": 104,
+          "status:uncertain": 81,
+          "assistant_facts": 97,
+          "assistant_facts_validated": 16,
+          "status:active": 19,
+          "status:planned": 2,
+          "status:ended": 2,
+          "failed": 1,
+          "failed:ValueError": 1,
+          "seconds": 731.7
+        },
+        "relations": {
+          "related_to": 67,
+          "occurred": 17,
+          "resolved": 9,
+          "uses_service": 5,
+          "decided": 3,
+          "worked_on": 2,
+          "prefers": 1
+        },
+        "related_to_share": 0.644,
+        "validation_rate": 0.165,
+        "slots": {
+          "distinct": 0,
+          "single_use": 0,
+          "shared": 0
+        }
+      },
+      {
+        "report_version": 2,
+        "engine": "4a279525401f484ae11c4201533bfc319ee8c08325618d3d9e355b0787ae5d63",
+        "model": "gpt-5.6-terra",
+        "effort": "low",
+        "corpus_sha256": "6c32605f73914bc18b9901a0f2e75700b8a027fe246beb124610f6eac6136239",
+        "batches": 24,
+        "complete": true,
+        "totals": {
+          "batches": 24,
+          "model_calls": 25,
+          "facts": 121,
+          "status:uncertain": 102,
+          "assistant_facts": 116,
+          "assistant_facts_validated": 17,
+          "status:active": 17,
+          "status:ended": 2,
+          "failed": 1,
+          "failed:ValueError": 1,
+          "seconds": 748.9
+        },
+        "relations": {
+          "related_to": 87,
+          "occurred": 12,
+          "resolved": 10,
+          "uses_service": 5,
+          "decided": 4,
+          "learned": 2,
+          "worked_on": 1
+        },
+        "related_to_share": 0.719,
+        "validation_rate": 0.147,
+        "slots": {
+          "distinct": 0,
+          "single_use": 0,
+          "shared": 0
+        }
+      },
+      {
+        "report_version": 2,
+        "engine": "4a279525401f484ae11c4201533bfc319ee8c08325618d3d9e355b0787ae5d63",
+        "model": "gpt-5.6-terra",
+        "effort": "low",
+        "corpus_sha256": "6c32605f73914bc18b9901a0f2e75700b8a027fe246beb124610f6eac6136239",
+        "batches": 24,
+        "complete": true,
+        "totals": {
+          "batches": 24,
+          "model_calls": 26,
+          "facts": 101,
+          "status:uncertain": 86,
+          "assistant_facts": 94,
+          "assistant_facts_validated": 10,
+          "status:planned": 1,
+          "status:active": 11,
+          "status:ended": 3,
+          "failed": 1,
+          "failed:ValueError": 1,
+          "seconds": 740.4
+        },
+        "relations": {
+          "related_to": 66,
+          "resolved": 15,
+          "occurred": 11,
+          "decided": 5,
+          "worked_on": 2,
+          "prefers": 1,
+          "uses_service": 1
+        },
+        "related_to_share": 0.653,
+        "validation_rate": 0.106,
+        "slots": {
+          "distinct": 0,
+          "single_use": 0,
+          "shared": 0
+        }
+      }
+    ],
+    "new": [
+      {
+        "engine": "0eb286e53a73cf8f03d3fe0ebc52da702174344237a6e4444fb466504498e59b",
+        "model": "gpt-5.6-terra",
+        "effort": "low",
+        "corpus_sha256": "6c32605f73914bc18b9901a0f2e75700b8a027fe246beb124610f6eac6136239",
+        "batches": 24,
+        "complete": true,
+        "totals": {
+          "batches": 24,
+          "model_calls": 23,
+          "facts": 103,
+          "status:active": 13,
+          "assistant_facts": 97,
+          "assistant_facts_validated": 13,
+          "status:planned": 1,
+          "status:uncertain": 85,
+          "status:ended": 4,
+          "failed": 1,
+          "failed:ValueError": 1,
+          "seconds": 782.3
+        },
+        "relations": {
+          "has_issue": 54,
+          "about": 20,
+          "decided": 8,
+          "resolved": 8,
+          "occurred": 6,
+          "uses_service": 5,
+          "related_to": 2
+        },
+        "related_to_share": 0.019,
+        "validation_rate": 0.134,
+        "slots": {
+          "distinct": 0,
+          "single_use": 0,
+          "shared": 0
+        }
+      },
+      {
+        "report_version": 2,
+        "engine": "0eb286e53a73cf8f03d3fe0ebc52da702174344237a6e4444fb466504498e59b",
+        "model": "gpt-5.6-terra",
+        "effort": "low",
+        "corpus_sha256": "6c32605f73914bc18b9901a0f2e75700b8a027fe246beb124610f6eac6136239",
+        "batches": 24,
+        "complete": true,
+        "totals": {
+          "batches": 24,
+          "model_calls": 26,
+          "facts": 98,
+          "status:uncertain": 78,
+          "assistant_facts": 92,
+          "assistant_facts_validated": 17,
+          "status:active": 19,
+          "status:ended": 1,
+          "failed": 1,
+          "failed:ValueError": 1,
+          "seconds": 748.9
+        },
+        "relations": {
+          "has_issue": 61,
+          "about": 22,
+          "occurred": 10,
+          "decided": 2,
+          "uses_service": 2,
+          "related_to": 1
+        },
+        "related_to_share": 0.01,
+        "validation_rate": 0.185,
+        "slots": {
+          "distinct": 0,
+          "single_use": 0,
+          "shared": 0
+        }
+      },
+      {
+        "report_version": 2,
+        "engine": "0eb286e53a73cf8f03d3fe0ebc52da702174344237a6e4444fb466504498e59b",
+        "model": "gpt-5.6-terra",
+        "effort": "low",
+        "corpus_sha256": "6c32605f73914bc18b9901a0f2e75700b8a027fe246beb124610f6eac6136239",
+        "batches": 24,
+        "complete": true,
+        "totals": {
+          "batches": 24,
+          "model_calls": 30,
+          "facts": 105,
+          "status:uncertain": 85,
+          "assistant_facts": 98,
+          "assistant_facts_validated": 16,
+          "status:active": 14,
+          "status:planned": 2,
+          "status:ended": 4,
+          "failed": 2,
+          "failed:ValueError": 2,
+          "seconds": 1137.6
+        },
+        "relations": {
+          "has_issue": 53,
+          "about": 25,
+          "resolved": 10,
+          "occurred": 9,
+          "decided": 6,
+          "prefers": 1,
+          "worked_on": 1
+        },
+        "related_to_share": 0.0,
+        "validation_rate": 0.163,
+        "slots": {
+          "distinct": 0,
+          "single_use": 0,
+          "shared": 0
+        }
+      }
+    ]
+  },
+  "slot_study": {
+    "selection": "Eight real stored episodes extracted by the baseline engine that had produced slots: four with role-bearing relations and four with other relations. This targeted sample is not a prevalence estimate.",
+    "results": {
+      "old": {
+        "report_version": 2,
+        "engine": "4a279525401f484ae11c4201533bfc319ee8c08325618d3d9e355b0787ae5d63",
+        "model": "gpt-5.6-terra",
+        "effort": "low",
+        "corpus_sha256": "b221017014bcef6bb6a7b907f22672c2f182c329d724d41594698cf4277bed0b",
+        "batches": 8,
+        "complete": true,
+        "totals": {
+          "batches": 8,
+          "model_calls": 9,
+          "facts": 27,
+          "status:active": 3,
+          "assistant_facts": 27,
+          "assistant_facts_validated": 4,
+          "status:planned": 1,
+          "status:uncertain": 23,
+          "facts_with_slot": 1,
+          "failed": 1,
+          "failed:ValueError": 1,
+          "seconds": 215.8
+        },
+        "relations": {
+          "related_to": 13,
+          "occurred": 7,
+          "uses_service": 3,
+          "decided": 2,
+          "uses_framework": 1,
+          "uses_database": 1
+        },
+        "related_to_share": 0.481,
+        "validation_rate": 0.148,
+        "slots": {
+          "distinct": 1,
+          "single_use": 1,
+          "shared": 0
+        }
+      },
+      "new": {
+        "report_version": 2,
+        "engine": "0eb286e53a73cf8f03d3fe0ebc52da702174344237a6e4444fb466504498e59b",
+        "model": "gpt-5.6-terra",
+        "effort": "low",
+        "corpus_sha256": "b221017014bcef6bb6a7b907f22672c2f182c329d724d41594698cf4277bed0b",
+        "batches": 8,
+        "complete": true,
+        "totals": {
+          "batches": 8,
+          "model_calls": 8,
+          "facts": 26,
+          "status:active": 6,
+          "facts_with_slot": 2,
+          "assistant_facts": 26,
+          "assistant_facts_validated": 6,
+          "status:uncertain": 20,
+          "seconds": 197.4
+        },
+        "relations": {
+          "about": 10,
+          "related_to": 4,
+          "has_issue": 3,
+          "occurred": 3,
+          "uses_service": 2,
+          "decided": 2,
+          "uses_framework": 1,
+          "resolved": 1
+        },
+        "related_to_share": 0.154,
+        "validation_rate": 0.231,
+        "slots": {
+          "distinct": 1,
+          "single_use": 0,
+          "shared": 1
+        }
+      }
+    }
+  },
+  "all_evaluated_batches": {
+    "old": {
+      "batches": 80,
+      "failed_batches": 4,
+      "facts": 353,
+      "assistant_facts": 334,
+      "assistant_facts_validated": 47,
+      "validation_rate": 0.140719,
+      "related_to_facts": 233,
+      "related_to_share": 0.660057
+    },
+    "new": {
+      "batches": 80,
+      "failed_batches": 4,
+      "facts": 332,
+      "assistant_facts": 313,
+      "assistant_facts_validated": 52,
+      "validation_rate": 0.166134,
+      "related_to_facts": 7,
+      "related_to_share": 0.021084
+    }
+  },
+  "release_decision": {
+    "decision": "proceed_after_ci_and_backup",
+    "related_to_share_reduced": true,
+    "assistant_claim_validation_not_lower": true,
+    "single_use_slots_reduced": true,
+    "failed_batches_not_increased_across_both_studies": true
+  },
+  "caveats": [
+    "Main-sample failures were 3/72 old versus 4/72 new; targeted-sample failures were 1/8 old versus 0/8 new. Both totals are 4/80.",
+    "The first validation-rate drop did not repeat: later runs favored the new engine. This bounded sample does not establish statistical non-inferiority or eliminate future model variance.",
+    "Slot reduction was observed on one singleton slot; deterministic tests separately enforce relation restrictions and read-time grouping.",
+    "Quote validation is structural provenance checking, not a semantic correctness score."
+  ],
+  "evidence_review": [
+    "Batch 11 document-write validation flipped direction: old only in repeat 2, new only in repeat 3, on identical frozen input.",
+    "Batch 16 repeat 2 old engine added a tool-centered fact to its otherwise uncertain issue claims; the new engine retained the issue claims as uncertain. This is extraction selection/granularity, not matched-claim invalidation."
+  ],
+  "per_batch_diagnostics": {
+    "old": [
+      {
+        "repeat": 1,
+        "batch_results": null,
+        "available": false
+      },
+      {
+        "repeat": 2,
+        "batch_results": [
+          {
+            "index": 0,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 1,
+              "status:uncertain": 1,
+              "assistant_facts": 1
+            },
+            "seconds": 16.6
+          },
+          {
+            "index": 1,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 7,
+              "status:uncertain": 7,
+              "assistant_facts": 7,
+              "assistant_facts_validated": 2
+            },
+            "seconds": 38.2
+          },
+          {
+            "index": 2,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1
+            },
+            "seconds": 4.6
+          },
+          {
+            "index": 3,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 1,
+              "assistant_facts": 1,
+              "assistant_facts_validated": 1,
+              "status:active": 1
+            },
+            "seconds": 14.8
+          },
+          {
+            "index": 4,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1
+            },
+            "seconds": 5.8
+          },
+          {
+            "index": 5,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 2,
+              "status:uncertain": 2,
+              "assistant_facts": 2
+            },
+            "seconds": 17.7
+          },
+          {
+            "index": 6,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 1,
+              "assistant_facts": 1,
+              "assistant_facts_validated": 1,
+              "status:ended": 1
+            },
+            "seconds": 13.5
+          },
+          {
+            "index": 7,
+            "totals": {
+              "batches": 1,
+              "model_calls": 2,
+              "failed": 1,
+              "failed:ValueError": 1
+            },
+            "seconds": 105.6,
+            "diagnostic": {
+              "stage": "evidence_validation",
+              "code": "evidence_quote_mismatch",
+              "location": [
+                "facts",
+                1,
+                "validation_evidence",
+                0,
+                "quote"
+              ]
+            }
+          },
+          {
+            "index": 8,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 22,
+              "status:uncertain": 19,
+              "assistant_facts": 22,
+              "assistant_facts_validated": 3,
+              "status:active": 3
+            },
+            "seconds": 89.6
+          },
+          {
+            "index": 9,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1
+            },
+            "seconds": 5.2
+          },
+          {
+            "index": 10,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1
+            },
+            "seconds": 4.2
+          },
+          {
+            "index": 11,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 4,
+              "status:uncertain": 3,
+              "assistant_facts": 4,
+              "assistant_facts_validated": 1,
+              "status:active": 1
+            },
+            "seconds": 23.5
+          },
+          {
+            "index": 12,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 5,
+              "status:active": 5
+            },
+            "seconds": 19.6
+          },
+          {
+            "index": 13,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 1,
+              "status:uncertain": 1,
+              "assistant_facts": 1
+            },
+            "seconds": 12.2
+          },
+          {
+            "index": 14,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1
+            },
+            "seconds": 6.4
+          },
+          {
+            "index": 15,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 17,
+              "status:uncertain": 17,
+              "assistant_facts": 17
+            },
+            "seconds": 67.3
+          },
+          {
+            "index": 16,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 17,
+              "status:uncertain": 17,
+              "assistant_facts": 17,
+              "assistant_facts_validated": 1
+            },
+            "seconds": 61.8
+          },
+          {
+            "index": 17,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 1,
+              "assistant_facts": 1,
+              "assistant_facts_validated": 1,
+              "status:active": 1
+            },
+            "seconds": 15.4
+          },
+          {
+            "index": 18,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 5,
+              "status:uncertain": 4,
+              "assistant_facts": 5,
+              "assistant_facts_validated": 1,
+              "status:active": 1
+            },
+            "seconds": 27.8
+          },
+          {
+            "index": 19,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 17,
+              "status:uncertain": 16,
+              "assistant_facts": 17,
+              "assistant_facts_validated": 1,
+              "status:active": 1
+            },
+            "seconds": 70.1
+          },
+          {
+            "index": 20,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 5,
+              "status:uncertain": 3,
+              "assistant_facts": 5,
+              "assistant_facts_validated": 2,
+              "status:active": 2
+            },
+            "seconds": 36.8
+          },
+          {
+            "index": 21,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1
+            },
+            "seconds": 3.8
+          },
+          {
+            "index": 22,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 14,
+              "status:uncertain": 12,
+              "assistant_facts": 14,
+              "assistant_facts_validated": 2,
+              "status:active": 2
+            },
+            "seconds": 76.7
+          },
+          {
+            "index": 23,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 1,
+              "assistant_facts": 1,
+              "assistant_facts_validated": 1,
+              "status:ended": 1
+            },
+            "seconds": 11.9
+          }
+        ],
+        "available": true
+      },
+      {
+        "repeat": 3,
+        "batch_results": [
+          {
+            "index": 0,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 1,
+              "status:uncertain": 1,
+              "assistant_facts": 1
+            },
+            "seconds": 13.8
+          },
+          {
+            "index": 1,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 6,
+              "status:uncertain": 6,
+              "assistant_facts": 6
+            },
+            "seconds": 29.4
+          },
+          {
+            "index": 2,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1
+            },
+            "seconds": 3.6
+          },
+          {
+            "index": 3,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 2,
+              "assistant_facts": 1,
+              "assistant_facts_validated": 1,
+              "status:planned": 1,
+              "status:active": 1
+            },
+            "seconds": 18.9
+          },
+          {
+            "index": 4,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1
+            },
+            "seconds": 4.5
+          },
+          {
+            "index": 5,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 1,
+              "status:uncertain": 1,
+              "assistant_facts": 1
+            },
+            "seconds": 10.9
+          },
+          {
+            "index": 6,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 1,
+              "assistant_facts": 1,
+              "assistant_facts_validated": 1,
+              "status:ended": 1
+            },
+            "seconds": 17.0
+          },
+          {
+            "index": 7,
+            "totals": {
+              "batches": 1,
+              "model_calls": 2,
+              "facts": 5,
+              "status:uncertain": 2,
+              "assistant_facts": 4,
+              "assistant_facts_validated": 2,
+              "status:active": 2,
+              "status:ended": 1
+            },
+            "seconds": 73.5
+          },
+          {
+            "index": 8,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 19,
+              "status:uncertain": 19,
+              "assistant_facts": 19
+            },
+            "seconds": 69.5
+          },
+          {
+            "index": 9,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 1,
+              "status:uncertain": 1,
+              "assistant_facts": 1
+            },
+            "seconds": 11.3
+          },
+          {
+            "index": 10,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1
+            },
+            "seconds": 5.5
+          },
+          {
+            "index": 11,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1
+            },
+            "seconds": 9.7
+          },
+          {
+            "index": 12,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 5,
+              "status:active": 5
+            },
+            "seconds": 21.5
+          },
+          {
+            "index": 13,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 1,
+              "status:uncertain": 1,
+              "assistant_facts": 1
+            },
+            "seconds": 11.0
+          },
+          {
+            "index": 14,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1
+            },
+            "seconds": 5.2
+          },
+          {
+            "index": 15,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 16,
+              "status:uncertain": 16,
+              "assistant_facts": 16
+            },
+            "seconds": 83.9
+          },
+          {
+            "index": 16,
+            "totals": {
+              "batches": 1,
+              "model_calls": 2,
+              "failed": 1,
+              "failed:ValueError": 1
+            },
+            "seconds": 119.6,
+            "diagnostic": {
+              "stage": "evidence_validation",
+              "code": "evidence_quote_mismatch",
+              "location": [
+                "facts",
+                1,
+                "evidence",
+                0,
+                "quote"
+              ]
+            }
+          },
+          {
+            "index": 17,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 1,
+              "assistant_facts": 1,
+              "assistant_facts_validated": 1,
+              "status:active": 1
+            },
+            "seconds": 15.3
+          },
+          {
+            "index": 18,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 4,
+              "status:uncertain": 3,
+              "assistant_facts": 4,
+              "assistant_facts_validated": 1,
+              "status:active": 1
+            },
+            "seconds": 28.4
+          },
+          {
+            "index": 19,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 18,
+              "status:uncertain": 17,
+              "assistant_facts": 18,
+              "assistant_facts_validated": 1,
+              "status:active": 1
+            },
+            "seconds": 65.4
+          },
+          {
+            "index": 20,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 5,
+              "status:uncertain": 5,
+              "assistant_facts": 5
+            },
+            "seconds": 35.3
+          },
+          {
+            "index": 21,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1
+            },
+            "seconds": 6.7
+          },
+          {
+            "index": 22,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 14,
+              "status:uncertain": 14,
+              "assistant_facts": 14,
+              "assistant_facts_validated": 2
+            },
+            "seconds": 66.7
+          },
+          {
+            "index": 23,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 1,
+              "assistant_facts": 1,
+              "assistant_facts_validated": 1,
+              "status:ended": 1
+            },
+            "seconds": 13.7
+          }
+        ],
+        "available": true
+      }
+    ],
+    "new": [
+      {
+        "repeat": 1,
+        "batch_results": null,
+        "available": false
+      },
+      {
+        "repeat": 2,
+        "batch_results": [
+          {
+            "index": 0,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 2,
+              "status:uncertain": 2,
+              "assistant_facts": 2
+            },
+            "seconds": 16.3
+          },
+          {
+            "index": 1,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 7,
+              "status:uncertain": 7,
+              "assistant_facts": 7,
+              "assistant_facts_validated": 3
+            },
+            "seconds": 43.4
+          },
+          {
+            "index": 2,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1
+            },
+            "seconds": 4.5
+          },
+          {
+            "index": 3,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 5,
+              "status:uncertain": 4,
+              "assistant_facts": 5,
+              "assistant_facts_validated": 1,
+              "status:active": 1
+            },
+            "seconds": 29.4
+          },
+          {
+            "index": 4,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1
+            },
+            "seconds": 16.0
+          },
+          {
+            "index": 5,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 1,
+              "status:uncertain": 1,
+              "assistant_facts": 1
+            },
+            "seconds": 13.7
+          },
+          {
+            "index": 6,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 1,
+              "assistant_facts": 1,
+              "assistant_facts_validated": 1,
+              "status:ended": 1
+            },
+            "seconds": 12.2
+          },
+          {
+            "index": 7,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 3,
+              "assistant_facts": 2,
+              "assistant_facts_validated": 2,
+              "status:active": 3
+            },
+            "seconds": 31.2
+          },
+          {
+            "index": 8,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 21,
+              "status:uncertain": 19,
+              "assistant_facts": 21,
+              "assistant_facts_validated": 2,
+              "status:active": 2
+            },
+            "seconds": 77.0
+          },
+          {
+            "index": 9,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 1,
+              "status:uncertain": 1,
+              "assistant_facts": 1
+            },
+            "seconds": 8.5
+          },
+          {
+            "index": 10,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1
+            },
+            "seconds": 5.8
+          },
+          {
+            "index": 11,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1
+            },
+            "seconds": 15.4
+          },
+          {
+            "index": 12,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 5,
+              "status:active": 5
+            },
+            "seconds": 21.1
+          },
+          {
+            "index": 13,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 1,
+              "status:uncertain": 1,
+              "assistant_facts": 1
+            },
+            "seconds": 9.4
+          },
+          {
+            "index": 14,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1
+            },
+            "seconds": 6.3
+          },
+          {
+            "index": 15,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 10,
+              "status:uncertain": 10,
+              "assistant_facts": 10
+            },
+            "seconds": 46.8
+          },
+          {
+            "index": 16,
+            "totals": {
+              "batches": 1,
+              "model_calls": 2,
+              "facts": 15,
+              "status:uncertain": 15,
+              "assistant_facts": 15
+            },
+            "seconds": 108.3
+          },
+          {
+            "index": 17,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 1,
+              "assistant_facts": 1,
+              "assistant_facts_validated": 1,
+              "status:active": 1
+            },
+            "seconds": 13.5
+          },
+          {
+            "index": 18,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 6,
+              "status:uncertain": 4,
+              "assistant_facts": 6,
+              "assistant_facts_validated": 2,
+              "status:active": 2
+            },
+            "seconds": 34.9
+          },
+          {
+            "index": 19,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 14,
+              "status:uncertain": 13,
+              "assistant_facts": 14,
+              "assistant_facts_validated": 1,
+              "status:active": 1
+            },
+            "seconds": 66.0
+          },
+          {
+            "index": 20,
+            "totals": {
+              "batches": 1,
+              "model_calls": 2,
+              "failed": 1,
+              "failed:ValueError": 1
+            },
+            "seconds": 108.8,
+            "diagnostic": {
+              "stage": "evidence_validation",
+              "code": "evidence_quote_mismatch",
+              "location": [
+                "facts",
+                0,
+                "validation_evidence",
+                1,
+                "quote"
+              ]
+            }
+          },
+          {
+            "index": 21,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1
+            },
+            "seconds": 6.2
+          },
+          {
+            "index": 22,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 4,
+              "status:uncertain": 1,
+              "assistant_facts": 4,
+              "assistant_facts_validated": 3,
+              "status:active": 3
+            },
+            "seconds": 41.7
+          },
+          {
+            "index": 23,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 1,
+              "assistant_facts": 1,
+              "assistant_facts_validated": 1,
+              "status:active": 1
+            },
+            "seconds": 12.5
+          }
+        ],
+        "available": true
+      },
+      {
+        "repeat": 3,
+        "batch_results": [
+          {
+            "index": 0,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 1,
+              "status:uncertain": 1,
+              "assistant_facts": 1
+            },
+            "seconds": 15.5
+          },
+          {
+            "index": 1,
+            "totals": {
+              "batches": 1,
+              "model_calls": 2,
+              "facts": 7,
+              "status:uncertain": 4,
+              "assistant_facts": 7,
+              "assistant_facts_validated": 3,
+              "status:active": 3
+            },
+            "seconds": 76.1
+          },
+          {
+            "index": 2,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1
+            },
+            "seconds": 4.4
+          },
+          {
+            "index": 3,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 6,
+              "status:uncertain": 4,
+              "assistant_facts": 5,
+              "assistant_facts_validated": 1,
+              "status:planned": 1,
+              "status:ended": 1
+            },
+            "seconds": 39.8
+          },
+          {
+            "index": 4,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1
+            },
+            "seconds": 4.5
+          },
+          {
+            "index": 5,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 2,
+              "status:uncertain": 2,
+              "assistant_facts": 2
+            },
+            "seconds": 14.0
+          },
+          {
+            "index": 6,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 1,
+              "assistant_facts": 1,
+              "assistant_facts_validated": 1,
+              "status:ended": 1
+            },
+            "seconds": 18.8
+          },
+          {
+            "index": 7,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 8,
+              "status:uncertain": 6,
+              "assistant_facts": 7,
+              "assistant_facts_validated": 1,
+              "status:planned": 1,
+              "status:ended": 1
+            },
+            "seconds": 59.2
+          },
+          {
+            "index": 8,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 20,
+              "status:uncertain": 19,
+              "assistant_facts": 20,
+              "assistant_facts_validated": 1,
+              "status:active": 1
+            },
+            "seconds": 72.1
+          },
+          {
+            "index": 9,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 1,
+              "status:uncertain": 1,
+              "assistant_facts": 1
+            },
+            "seconds": 8.4
+          },
+          {
+            "index": 10,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1
+            },
+            "seconds": 12.7
+          },
+          {
+            "index": 11,
+            "totals": {
+              "batches": 1,
+              "model_calls": 2,
+              "facts": 1,
+              "assistant_facts": 1,
+              "assistant_facts_validated": 1,
+              "status:active": 1
+            },
+            "seconds": 120.6
+          },
+          {
+            "index": 12,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 5,
+              "status:active": 5
+            },
+            "seconds": 19.0
+          },
+          {
+            "index": 13,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 1,
+              "status:uncertain": 1,
+              "assistant_facts": 1
+            },
+            "seconds": 15.5
+          },
+          {
+            "index": 14,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1
+            },
+            "seconds": 12.7
+          },
+          {
+            "index": 15,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 10,
+              "status:uncertain": 10,
+              "assistant_facts": 10
+            },
+            "seconds": 43.2
+          },
+          {
+            "index": 16,
+            "totals": {
+              "batches": 1,
+              "model_calls": 2,
+              "failed": 1,
+              "failed:ValueError": 1
+            },
+            "seconds": 115.5,
+            "diagnostic": {
+              "stage": "evidence_validation",
+              "code": "evidence_quote_mismatch",
+              "location": [
+                "facts",
+                2,
+                "evidence",
+                0,
+                "quote"
+              ]
+            }
+          },
+          {
+            "index": 17,
+            "totals": {
+              "batches": 1,
+              "model_calls": 2,
+              "facts": 2,
+              "status:uncertain": 1,
+              "assistant_facts": 2,
+              "assistant_facts_validated": 1,
+              "status:active": 1
+            },
+            "seconds": 29.0
+          },
+          {
+            "index": 18,
+            "totals": {
+              "batches": 1,
+              "model_calls": 2,
+              "failed": 1,
+              "failed:ValueError": 1
+            },
+            "seconds": 95.7,
+            "diagnostic": {
+              "stage": "evidence_validation",
+              "code": "unvalidated_assistant_claim",
+              "location": [
+                "facts",
+                5,
+                "evidence"
+              ]
+            }
+          },
+          {
+            "index": 19,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 17,
+              "status:uncertain": 17,
+              "assistant_facts": 17,
+              "assistant_facts_validated": 1
+            },
+            "seconds": 123.0
+          },
+          {
+            "index": 20,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 7,
+              "status:uncertain": 4,
+              "assistant_facts": 7,
+              "assistant_facts_validated": 3,
+              "status:active": 3
+            },
+            "seconds": 57.9
+          },
+          {
+            "index": 21,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1
+            },
+            "seconds": 3.8
+          },
+          {
+            "index": 22,
+            "totals": {
+              "batches": 1,
+              "model_calls": 2,
+              "facts": 15,
+              "status:uncertain": 15,
+              "assistant_facts": 15,
+              "assistant_facts_validated": 2
+            },
+            "seconds": 162.2
+          },
+          {
+            "index": 23,
+            "totals": {
+              "batches": 1,
+              "model_calls": 1,
+              "facts": 1,
+              "assistant_facts": 1,
+              "assistant_facts_validated": 1,
+              "status:ended": 1
+            },
+            "seconds": 14.1
+          }
+        ],
+        "available": true
+      }
+    ]
+  },
+  "source_repairs": {
+    "deployment": "c36803c",
+    "original_episodes_preserved": 109,
+    "original_facts_preserved": 183,
+    "original_messages_preserved": 546,
+    "original_knowledge_hashes_equal": true,
+    "journal_verified": true,
+    "prefix_mismatches_after": 0,
+    "new_tail_chunks": [
+      191,
+      165
+    ]
+  },
+  "checks": {
+    "local_tests_passed": 294,
+    "local_tests_skipped": 1,
+    "golden_passed": 6,
+    "golden_engine_matches": true,
+    "lint": "passed",
+    "format": "passed",
+    "typecheck": "passed"
+  }
+}

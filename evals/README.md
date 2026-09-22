@@ -91,9 +91,18 @@ and ignores single-use slots at read time.
 The [2026-09-22 paired run](reports/20260922-vocabulary-comparison.json) reduced
 `related_to` from 67/104 facts to 2/103, but assistant-claim validation fell from
 16/97 to 13/97. Both engines failed one of 24 batches and emitted no slots.
-The vocabulary release is held: repeat paired runs to check validation variance
-and include batches that exercise slots. The separately retried failed new-engine
-batch passed, but its retry is not substituted into the comparison.
+That first run held the release. The separately retried failed new-engine batch
+passed, but its retry is not substituted into the comparison.
+
+The [repeated comparison](reports/20260922-vocabulary-repeats.json) includes three
+runs per engine on those same 24 frozen batches, plus a separate eight-episode
+sample selected for previously emitted slots. Main-sample validation is 43/307
+(14.0%) old versus 46/287 (16.0%) new, and `related_to` falls from 220/326 (67.5%)
+to 3/306 (1.0%). The targeted sample drops one singleton slot to zero and retains
+a shared webhook role. Main-sample failures are 3/72 versus 4/72; targeted-sample
+failures are 1/8 versus 0/8, totaling 4/80 for each engine. The primary metrics
+support rollout after CI and backup. This bounded study does not prove statistical
+non-inferiority; batch evidence and the report preserve the variability and failures.
 
 ## Establishing the golden standard
 
