@@ -81,7 +81,9 @@ graph-memory --namespace transcripts inventory --transcripts /sessions/claude --
 
 `unstaged_episodes` uses the current parser and the same eight-chunk/90,000-character
 batch limits as intake. It excludes invalid, inaccessible, rewritten, or changing
-files and flags incomplete trailing records. Inspect `state`, `gaps`, `stale`, and
+files and flags incomplete trailing records. Like intake, it accepts cursor hashes
+from before shell outputs were classified as results; counting those sources does
+not update their cursors or stored evidence. Inspect `state`, `gaps`, `stale`, and
 scan times before interpreting counts. Paths must match the worker's paths because
 feed identities include them. Source changes during a scan and concurrent staging
 make this an estimate at scan time, not a transactionally consistent total.
