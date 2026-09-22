@@ -289,3 +289,30 @@ def test_bound_remember_injects_nested_namespace_without_mutating_input(graph):
     assert message == before
     arguments["transcript"]["namespace"] = "wrong"
     assert protocol.dispatch(message)[0] == 403
+
+
+def test_uncertain_claim_repeated_in_other_words_is_one_entry_with_session_count():
+    said = [
+        fact(
+            f"u{i}",
+            status="uncertain",
+            valid_at=None,
+            valid_ts=None,
+            summary=f"Atlas reportedly uses MySQL, wording {i}.",
+            session_id=f"session-{i % 2}",
+            recorded_at=f"2026-09-1{i}T00:00:00Z",
+        )
+        for i in range(4)
+    ]
+    dated = [fact(f"d{i}", summary=f"Atlas uses MySQL, wording {i}.") for i in range(2)]
+    result = retrieve(raw(uncertain=said, current=dated), limit=10)
+    uncertain = [f for f in result["facts"] if f["lane"] == "uncertain"]
+    assert len(uncertain) == 1
+    assert uncertain[0]["id"] == "u3"  # the latest wording stands for the claim
+    assert uncertain[0]["support_count"] == 4 and uncertain[0]["sessions"] == 2
+    # Dated claims keep their exact-wording grouping: different words, different entries.
+    assert len([f for f in result["facts"] if f["lane"] == "current"]) == 2
+    assert result["counts"]["matching_unique"] == 3
+    one_session = retrieve(raw(uncertain=said[:1] + [{**said[1], "session_id": "session-0"}]))
+    assert "sessions" not in one_session["facts"][0]
+    assert one_session["facts"][0]["support_count"] == 2

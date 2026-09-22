@@ -67,7 +67,7 @@ def role(f):
     return f["subject"], f["relation"], f.get("slot") or "target:" + f["target"]
 
 
-def compact_fact(f, lane, copies=1):
+def compact_fact(f, lane, copies=1, sessions=1):
     result = {
         "id": f["id"],
         "text": f["summary"][:500],
@@ -85,6 +85,9 @@ def compact_fact(f, lane, copies=1):
     count = max(copies, len(f.get("corroborating_fact_ids", [])))
     if count > 1:
         result["support_count"] = count
+    if sessions > 1:
+        # Said again in another conversation: a reason to check the claim, not proof.
+        result["sessions"] = sessions
     return result
 
 
@@ -124,22 +127,20 @@ def recall(store, r):
         if lane == "history" and not r.include_history:
             continue
         for f in raw[lane]:
-            key = (
-                lane,
-                *role(f),
-                f["target"],
-                f["status"],
-                f.get("valid_at"),
-                normalized(f["summary"]),
-            )
+            # An unverified claim repeated in other words is still one claim: one
+            # entry per subject, relation and target, in its latest wording.
+            wording = () if lane == "uncertain" else (f.get("valid_at"), normalized(f["summary"]))
+            key = (lane, *role(f), f["target"], f["status"], *wording)
             groups.setdefault(key, []).append(f)
     ranked = []
     for key, copies in groups.items():
+        if key[0] == "uncertain":
+            copies.sort(key=lambda f: (f.get("recorded_at") or "", f["id"]), reverse=True)
         f = copies[0]
         score = scores.get(role(f), 0)
         if terms and (score == 0 or score < best_score):
             continue
-        ranked.append((key[0], f, len(copies), score))
+        ranked.append((key[0], f, copies, score))
     priority = {
         "conflicts": 0,
         "current": 1,
@@ -151,7 +152,10 @@ def recall(store, r):
     }
     ranked.sort(key=lambda x: (-x[3], priority[x[0]], -(x[1].get("valid_ts") or 0), x[1]["id"]))
     selected = ranked[r.offset : r.offset + r.limit]
-    facts = [compact_fact(f, lane, copies) for lane, f, copies, _ in selected]
+    facts = [
+        compact_fact(f, lane, len(copies), len({c.get("session_id") for c in copies}))
+        for lane, f, copies, _ in selected
+    ]
     next_offset = r.offset + len(selected)
     # Derived conclusions remain explicitly separate and bounded; they never replace facts.
     derived = []

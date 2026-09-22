@@ -157,6 +157,12 @@ server (or `{"namespace":"personal"}` on an unbound server). It returns:
   jobs can have either pending or failed status; completed episodes never count
   as processing. Up to five active episode summaries are included, with a
   truncation flag.
+- `corroboration`: unverified, unconfirmed claims stated in at least
+  `min_sessions` (three) separate sessions, one row per subject, relation and
+  target with the latest wording, its `latest_fact_id`, and the session and fact
+  counts; `uncertain_triples` and `uncertain_facts` total them. Repetition is a
+  reason to check a claim, not a promotion: after checking, `memory_confirm` the
+  latest fact, or let a tool result validate it. Nothing here changes the graph.
 - Latest saved episode by ingestion time, latest completed episode by completion
   time, and oldest incomplete episode; each is `null` for an empty result.
 - Counts of unmerged entities and unretracted facts (including historical facts).

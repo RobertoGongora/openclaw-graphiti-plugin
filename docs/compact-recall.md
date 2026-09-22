@@ -17,7 +17,12 @@ If vocabulary does not match, omit the question or use a more specific term.
 The default response contains at most five facts/derived conclusions total.
 Each fact has its ID, text, temporal category, date and source episode ID.
 Identical facts in the same temporal category are grouped, with support counts.
-Repeated events with different dates remain distinct. A fact the user confirmed
+Repeated events with different dates remain distinct. An uncertain claim is
+grouped more loosely: every unverified fact with the same subject, relation and
+target is one entry, shown in its latest wording, with `support_count` and, when
+it was said in more than one conversation, `sessions`. Repetition across sessions
+is a reason to check the claim (see `memory_status.corroboration`), never a
+promotion out of the uncertain category. A fact the user confirmed
 with `memory_confirm` carries `confirmed_by_user: true`. Summary excerpts are capped
 at 500 characters and explicitly marked when truncated. Plans, uncertain claims,
 undated documents and conflicting claims never become current facts by formatting.

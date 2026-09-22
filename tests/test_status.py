@@ -105,3 +105,40 @@ def test_status_leases_retries_latest_and_scope(graph, monkeypatch):
     assert other["episodes"]["total"] == 0
     assert other["graph"] == {"entities": 0, "facts": 0}
     assert other["latest_episode"] is None
+
+
+def test_status_lists_uncertain_claims_repeated_across_sessions(graph):
+    store, ns = graph
+    facts = []
+    for triple, sessions in (("thrice", 3), ("twice", 2)):
+        for i in range(sessions + 1):  # one session says it twice: still that many sessions
+            facts.append(
+                {
+                    "id": f"{ns}{triple}-{i}",
+                    "namespace": ns,
+                    "status": "uncertain",
+                    "subject_id": f"{ns}s",
+                    "relation": "related_to",
+                    "target_id": f"{ns}{triple}",
+                    "subject": "Atlas",
+                    "target": triple,
+                    "session_id": f"session-{min(i, sessions - 1)}",
+                    "recorded_at": f"2026-09-2{i}T00:00:00+00:00",
+                    "summary": f"Atlas {triple} wording {i}",
+                }
+            )
+    # Retracted or confirmed copies and validated claims do not count.
+    facts += [
+        {**facts[0], "id": f"{ns}retracted", "session_id": "session-9", "retracted": True},
+        {**facts[0], "id": f"{ns}confirmed", "session_id": "session-8", "confirmed_at": "x"},
+        {**facts[0], "id": f"{ns}active", "session_id": "session-7", "status": "active"},
+    ]
+    store.transaction(
+        lambda tx: tx.run("UNWIND $facts AS props CREATE (f:MemoryFact) SET f=props", facts=facts)
+    )
+    result = status(store, SimpleNamespace(namespace=ns))["corroboration"]
+    assert result["min_sessions"] == 3
+    assert result["uncertain_triples"] == 1 and result["uncertain_facts"] == 4
+    (row,) = result["top"]
+    assert row["sessions"] == 3 and row["facts"] == 4 and row["target"] == "thrice"
+    assert row["latest_fact_id"] == f"{ns}thrice-3" and row["text"] == "Atlas thrice wording 3"

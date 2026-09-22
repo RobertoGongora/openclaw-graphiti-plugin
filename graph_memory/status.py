@@ -31,6 +31,9 @@ EPISODE = (
 )
 
 
+CORROBORATING_SESSIONS = 3
+
+
 def status(store, request):
     def read(tx):
         checked = now()
@@ -80,6 +83,38 @@ def status(store, request):
                 f"MATCH (n:{label} {{namespace:$ns}}) WHERE {predicate} RETURN count(*) AS count",
                 ns=request.namespace,
             ).single()["count"]
+        # Unverified claims made again in separate conversations. Repetition is a
+        # reason to check a claim, never a promotion: uncertain stays uncertain
+        # until a tool result validates it or a person confirms it.
+        unconfirmed = (
+            "MATCH (f:MemoryFact {namespace:$ns}) WHERE f.status='uncertain' "
+            "AND coalesce(f.retracted,false)=false AND f.confirmed_at IS NULL "
+        )
+        repeated = tx.run(
+            unconfirmed + "WITH f ORDER BY f.recorded_at DESC, f.id "
+            "WITH f.subject_id AS s,f.relation AS rel,f.target_id AS t,"
+            "count(DISTINCT f.session_id) AS sessions,collect(f) AS fs "
+            "WHERE sessions>=$min_sessions "
+            "RETURN count(*) AS triples,sum(size(fs)) AS facts,"
+            "collect({subject:fs[0].subject,relation:rel,target:fs[0].target,"
+            "sessions:sessions,facts:size(fs),latest_fact_id:fs[0].id,"
+            "text:substring(fs[0].summary,0,200)})[..$top] AS top",
+            **params,
+            min_sessions=CORROBORATING_SESSIONS,
+            top=10,
+        ).single()
+        corroboration = {
+            "min_sessions": CORROBORATING_SESSIONS,
+            "uncertain_triples": repeated["triples"] if repeated else 0,
+            "uncertain_facts": (repeated["facts"] if repeated else 0) or 0,
+            "top": sorted(
+                repeated["top"] if repeated else [],
+                key=lambda x: (-x["sessions"], -x["facts"], x["latest_fact_id"]),
+            ),
+            "basis": "Unverified, unconfirmed claims stated in at least min_sessions separate sessions, "
+            "one row per subject, relation and target with the latest wording. Check the claim, then "
+            "memory_confirm the latest fact or let a tool result validate it; nothing is promoted here.",
+        }
         active = episodes(ACTIVE, "e.ingested_at", 5)
         row = tx.run(
             "MATCH (i:MemoryInventory {id:$id, namespace:$ns}) RETURN i.payload AS payload",
@@ -157,6 +192,7 @@ def status(store, request):
                 "basis": "Unexpired episode leases; see workers for liveness. Expired leases overlap queued/retry_delayed counts.",
             },
             "graph": graph,
+            "corroboration": corroboration,
             "source_inventory": inventory,
             "latest_episode": first("true", "e.ingested_at DESC"),
             "latest_completed_episode": first("e.status='complete'", "e.completed_at DESC"),
