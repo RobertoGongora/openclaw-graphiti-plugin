@@ -44,6 +44,45 @@ def test_inventory_gaps_are_partial_not_zero_backlog(graph, tmp_path):
     assert "Atlas" not in str(result) and str(tmp_path) not in str(result)
 
 
+def test_inventory_accepts_legacy_shell_cursor_without_hiding_rewritten_content(graph, tmp_path):
+    from graph_memory.session_sources import before_shell_results, records
+    from graph_memory.store import digest
+    from tests.test_session_sources import codex
+
+    store, ns = graph
+    path = tmp_path / "session.jsonl"
+    original = (
+        claude("user", "Run the tests.")
+        + codex("custom_tool_call", call_id="c", name="exec", input="make test")
+        + codex("custom_tool_call_output", call_id="c", output="12 passed")
+    )
+    path.write_text(original)
+    fid = feed_records(MemoryService(store), ns, path, "host:" + digest(str(path)))["feed_id"]
+    old_hash = digest([before_shell_results(m.model_dump(mode="json")) for m in records(path)])
+    store.transaction(
+        lambda tx: tx.run(
+            "MATCH (f:MemoryFeed {id:$id}) SET f.prefix_hash=$hash", id=fid, hash=old_hash
+        ).consume()
+    )
+    result = census(store, ns, [tmp_path])
+    assert result["state"] == "available"
+    assert result["files_caught_up"] == 1
+    path.write_text(original + claude("assistant", "Tests pass."))
+    result = census(store, ns, [tmp_path])
+    assert result["unstaged_chunks"] == result["unstaged_episodes"] == 1
+    assert result["gaps"]["prefix_mismatches"] == 0
+    # Inventory must not upgrade the cursor or stage the appended message.
+    cursor = store.read(
+        lambda tx: tx.run(
+            "MATCH (f:MemoryFeed {id:$id}) RETURN f.prefix_hash AS hash, f.message_count AS count",
+            id=fid,
+        ).single()
+    )
+    assert cursor["hash"] == old_hash and cursor["count"] == 3
+    path.write_text(original.replace("12 passed", "12 failed"))
+    assert census(store, ns, [tmp_path])["gaps"]["prefix_mismatches"] == 1
+
+
 def test_inventory_excludes_rewritten_and_changing_sources(graph, tmp_path, monkeypatch):
     store, ns = graph
     from graph_memory import inventory
