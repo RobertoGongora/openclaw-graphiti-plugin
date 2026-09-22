@@ -1,0 +1,53 @@
+{
+  "engine": "828f59b44d34b1f03548dc91f5e038e6eb1f4f48dc91ccded001107f7a1213ee",
+  "golden_suite": "a7a74690e0373022a553f6b95059cb59b186fc3ad5b3276640ea1df4ec8b75ff",
+  "model": "gpt-5.6-terra",
+  "effort": "low",
+  "golden_cases": [
+    {
+      "case": "atlas-plan-versus-production",
+      "passed": true
+    },
+    {
+      "case": "habit-out-of-order",
+      "passed": true
+    },
+    {
+      "case": "instruction-injection-is-data",
+      "passed": true
+    },
+    {
+      "case": "project-decision-history",
+      "passed": true
+    },
+    {
+      "case": "scoped-preference-correction",
+      "passed": true
+    },
+    {
+      "case": "undated-memory-not-current",
+      "passed": true
+    }
+  ],
+  "golden_inputs_unchanged": true,
+  "tests": {
+    "full_passed": 310,
+    "full_skipped": 1,
+    "additional_retrieval_passed": 17,
+    "lint": "passed",
+    "format": "passed",
+    "typecheck": "passed"
+  },
+  "observed_echo_replay": {
+    "source_sessions": 2,
+    "reports_with_traceable_origins": 2,
+    "unvalidated_echoes_rejected": 2,
+    "graph_mutations": 0
+  },
+  "deployment": "not deployed; prepared for review",
+  "limitations": [
+    "Historical echoes are retained; no automatic retraction or bulk re-extraction.",
+    "Golden cases are a smoke test, not a model-variance claim.",
+    "Frozen recall questions are development regression cases; not an independent accuracy benchmark."
+  ]
+}
