@@ -23,14 +23,23 @@ def test_vocabulary_resumes_completed_batches_and_refuses_different_inputs(tmp_p
     corpus.write_text(json.dumps(batches))
     monkeypatch.setattr(
         "sys.argv",
-        ["vocabulary", str(tmp_path), "--corpus", str(corpus), "--output", str(output)],
+        [
+            "vocabulary",
+            str(tmp_path),
+            "--corpus",
+            str(corpus),
+            "--output",
+            str(output),
+            "--details-dir",
+            str(tmp_path / "details"),
+        ],
     )
     monkeypatch.setattr(
         vocabulary, "configured_llm", lambda: SimpleNamespace(model="test", effort="low")
     )
     calls = []
 
-    def interrupted(self, packet):
+    def interrupted(self, packet, progress=None):
         calls.append(packet["transcript"]["source_id"])
         if len(calls) == 2:
             raise KeyboardInterrupt
@@ -64,6 +73,10 @@ def test_vocabulary_resumes_completed_batches_and_refuses_different_inputs(tmp_p
     assert calls == ["0", "1", "1", "2"]
     assert final["complete"] and final["totals"]["model_calls"] == 3
     assert final["totals"]["facts"] == final["relations"]["uses_database"] == 3
+    assert [r["index"] for r in final["batch_results"]] == [0, 1, 2]
+    assert sum(r["totals"]["facts"] for r in final["batch_results"]) == 3
+    details = json.loads((tmp_path / "details/000.json").read_text())
+    assert details["accepted"] and details["extraction"]["facts"][0]["slot"] == "primary"
     assert final["slots"] == {"distinct": 1, "shared": 1, "single_use": 0}
     vocabulary.main()
     assert calls == ["0", "1", "1", "2"]  # Already complete: no further model calls.
@@ -94,11 +107,14 @@ def test_vocabulary_records_failed_batch_before_continuing(tmp_path, monkeypatch
         vocabulary, "configured_llm", lambda: SimpleNamespace(model="test", effort="low")
     )
 
-    def fail(self, packet):
-        raise ValueError("Invalid evidence")
+    def fail(self, packet, progress=None):
+        progress.update(stage="evidence_validation", attempt=1)
+        raise ValueError("Evidence must quote an exact substring of its source message")
 
     monkeypatch.setattr(vocabulary.MemoryService, "propose", fail)
     vocabulary.main()
     report = json.loads(output.read_text())
     assert report["complete"] and report["totals"]["failed:ValueError"] == 1
     assert report["totals"]["seconds"] >= 0
+    assert report["totals"]["model_calls"] == 2
+    assert report["batch_results"][0]["diagnostic"]["code"] == "evidence_quote_mismatch"
