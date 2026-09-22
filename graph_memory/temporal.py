@@ -1,9 +1,29 @@
 """Pure event-time projection. No cached summary can override graph evidence."""
 
 from collections import defaultdict
+from collections.abc import Container
 from datetime import datetime
 
 from .models import EVENT_RELATIONS
+
+
+def shared_slots(facts):
+    """The exclusive roles that actually group something: a slot named by at least
+    two facts of the same subject and relation. A slot used once cannot replace or
+    be replaced, so it is a label, and the fact is grouped by its target instead."""
+    seen, shared = set(), set()
+    for f in facts:
+        if f.get("slot"):
+            key = (f["subject"], f["relation"], f["slot"])
+            (shared if key in seen else seen).add(key)
+    return shared
+
+
+def role(f, shared: Container = frozenset()):
+    slot = f.get("slot")
+    if slot and (f["subject"], f["relation"], slot) in shared:
+        return f["subject"], f["relation"], slot
+    return f["subject"], f["relation"], "target:" + f["target"]
 
 
 def confirmed(fact):
@@ -26,6 +46,7 @@ def project(facts: list[dict], as_of: datetime) -> dict:
     groups = defaultdict(list)
     history, uncertain, events, documented = [], [], [], []
     facts = [confirmed(fact) for fact in facts]
+    shared = shared_slots(facts)
     for fact in facts:
         if fact.get("retracted"):
             continue
@@ -48,8 +69,7 @@ def project(facts: list[dict], as_of: datetime) -> dict:
             continue
         # Planned changes have their own lane and cannot replace deployed state.
         lane = "planned" if fact["status"] == "planned" else "actual"
-        role = fact.get("slot") or "target:" + fact["target"]
-        groups[(fact["subject"], fact["relation"], role, lane)].append(fact)
+        groups[(*role(fact, shared), lane)].append(fact)
     current, planned, conflicts = [], [], []
     for key, members in groups.items():
         winners = []

@@ -69,6 +69,16 @@ NEO4J_URI=bolt://127.0.0.1:27687 uv run python -m evals.graph_baseline \
 morning after the backlog finished under the shell-output and turn look-back
 rules (commit 7ee5f34). Compare later snapshots against it.
 
+## Relation and slot vocabulary
+
+`evals/vocabulary.py` extracts sampled real batches and reports the relation
+mix, the share that falls back to `related_to`, how many slots are emitted and
+how many of those only one fact uses, and the assistant-claim validation rate as
+a regression check. Run it from two worktrees with the same seed to compare
+engines; reports stay under `.local/`, since the sampled batches are real
+sessions. The 2026-09-22 change (three relations, slots only on technology
+choices, single-use slots ignored at read time) was measured this way.
+
 ## Establishing the golden standard
 
 `baselines/candidate.json` records the current candidate, not an automatically

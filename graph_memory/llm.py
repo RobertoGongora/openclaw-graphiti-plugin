@@ -49,12 +49,19 @@ Exact relationship typing: occurred TARGET must have kind=event;
 uses_framework TARGET=framework; uses_language and implemented_in TARGET=language;
 uses_database TARGET=database; uses_service TARGET=service; has_habit TARGET=habit;
 resolved TARGET=issue; learned TARGET=lesson; decided TARGET=decision;
+has_issue TARGET=issue (a project, service or decision has an open or observed problem);
+about TARGET=topic (a claim about a subject area, design point, or document);
+depends_on TARGET=service (a service or project needs another service to work);
 prefers TARGET=topic, language, framework, or service (preference-holder is the subject).
+Use related_to only when no listed relation fits; it is the last resort, not the default.
 The occurred relation always points to an event; never reverse subject and event endpoints.
-The slot field is an exclusive role (e.g. production-primary) only when explicit in the source;
-otherwise null, allowing multiple technologies. Reuse supplied existing_relationships slot keys
-for the same semantic role across sessions; scope different roles separately. A planned migration
-does not displace deployed state. Keep personal preferences separate from project or business scope.
+The slot field is an exclusive role (e.g. production-primary) on uses_framework, uses_language,
+uses_database, uses_service, implemented_in, depends_on, prefers or owned_by, only when the source names that role;
+otherwise null, allowing multiple technologies. A slot is never a tag, a topic, or a label for
+the fact itself, and never appears on an event, issue, topic or decision. Reuse supplied
+existing_relationships slot keys for the same semantic role across sessions; scope different
+roles separately. A planned migration does not displace deployed state. Keep personal
+preferences separate from project or business scope.
 Project resolved issues, lessons, decisions, and activities should be connected to that project.
 Only emit implemented_in if the source establishes the framework/language link. The graph derives
 project-language links from those facts. Omit trivia and output empty arrays if nothing is supported.

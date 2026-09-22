@@ -9,6 +9,7 @@ from pydantic import AwareDatetime, Field, model_validator
 from . import aliases
 from . import models as m
 from .store import normalized
+from .temporal import role, shared_slots
 
 LANES = ("current", "planned", "events", "uncertain", "documented", "conflicts", "history")
 STOP = set(
@@ -63,10 +64,6 @@ def tokens(text):
     return {w for w in re.findall(r"[^\W_]+", normalized(text)) if w not in STOP}
 
 
-def role(f):
-    return f["subject"], f["relation"], f.get("slot") or "target:" + f["target"]
-
-
 def compact_fact(f, lane, copies=1, sessions=1):
     result = {
         "id": f["id"],
@@ -112,6 +109,7 @@ def recall(store, r):
     if r.detail == "full":
         return raw
     terms = tokens(r.question or "") - tokens(r.entity)
+    shared = shared_slots(f for lane in LANES for f in raw[lane])
     # Match across all evidence BEFORE hiding history. A question mentioning the old
     # database must also retrieve the replacement in the same exclusive role.
     scores = {}
@@ -120,7 +118,7 @@ def recall(store, r):
             text = " ".join(
                 str(f.get(k) or "") for k in ("summary", "subject", "target", "relation")
             )
-            scores[role(f)] = max(scores.get(role(f), 0), len(terms & tokens(text)))
+            scores[role(f, shared)] = max(scores.get(role(f, shared), 0), len(terms & tokens(text)))
     best_score = max(scores.values(), default=0)
     groups = {}
     for lane in LANES:
@@ -130,14 +128,14 @@ def recall(store, r):
             # An unverified claim repeated in other words is still one claim: one
             # entry per subject, relation and target, in its latest wording.
             wording = () if lane == "uncertain" else (f.get("valid_at"), normalized(f["summary"]))
-            key = (lane, *role(f), f["target"], f["status"], *wording)
+            key = (lane, *role(f, shared), f["target"], f["status"], *wording)
             groups.setdefault(key, []).append(f)
     ranked = []
     for key, copies in groups.items():
         if key[0] == "uncertain":
             copies.sort(key=lambda f: (f.get("recorded_at") or "", f["id"]), reverse=True)
         f = copies[0]
-        score = scores.get(role(f), 0)
+        score = scores.get(role(f, shared), 0)
         if terms and (score == 0 or score < best_score):
             continue
         ranked.append((key[0], f, copies, score))

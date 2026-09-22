@@ -53,6 +53,9 @@ class Relation(StrEnum):
     learned = "learned"
     decided = "decided"
     worked_on = "worked_on"
+    has_issue = "has_issue"
+    about = "about"
+    depends_on = "depends_on"
     related_to = "related_to"
     prefers = "prefers"
 
@@ -70,9 +73,25 @@ TARGETS = {
     Relation.resolved: {Kind.issue},
     Relation.learned: {Kind.lesson},
     Relation.decided: {Kind.decision},
+    Relation.has_issue: {Kind.issue},
+    Relation.about: {Kind.topic},
+    Relation.depends_on: {Kind.service},
     Relation.prefers: {Kind.topic, Kind.language, Kind.framework, Kind.service},
 }
 EVENT_RELATIONS = {Relation.occurred, Relation.resolved, Relation.learned, Relation.worked_on}
+# Only a choice has an exclusive role to fill: the production-primary database, the
+# language preferred in chat versus in reports, the owner of a project. An event,
+# an issue or a topic has none, so a slot there is a tag the model made up.
+SLOT_RELATIONS = {
+    Relation.uses_framework,
+    Relation.uses_language,
+    Relation.uses_database,
+    Relation.uses_service,
+    Relation.implemented_in,
+    Relation.depends_on,
+    Relation.prefers,
+    Relation.owned_by,
+}
 
 
 class ArtifactTouch(Model):
@@ -221,6 +240,20 @@ class Fact(Model):
     validation_evidence: Annotated[list[Evidence], Field(max_length=20)] = Field(
         default_factory=list
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def slot_only_for_roles(cls, value):
+        """A slot on a relation without exclusive roles is dropped, not rejected: it
+        would only stop every such fact from grouping with the others about its target."""
+        if isinstance(value, dict) and value.get("slot") is not None:
+            try:
+                keep = Relation(value.get("relation")) in SLOT_RELATIONS
+            except ValueError:
+                keep = True  # Let the relation field report its own error.
+            if not keep:
+                value = {k: v for k, v in value.items() if k != "slot"}
+        return value
 
     @classmethod
     def __get_pydantic_json_schema__(cls, core_schema, handler):
