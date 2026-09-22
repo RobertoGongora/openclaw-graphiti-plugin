@@ -188,7 +188,8 @@ def test_http_token_binding_disables_render_cypher_and_busy_server_says_retry(se
     status, body, _ = send(server, call)
     assert status == 403 and body["error"]["code"] == DENIED
     for _ in range(16):
-        assert server.request_slots.acquire(blocking=False)
+        # Receiving the response can precede the handler's finally/release.
+        assert server.request_slots.acquire(timeout=5)
     try:
         status, body, response_headers = send(server, rpc())
         assert status == 503 and body["error"]["code"] == BUSY
