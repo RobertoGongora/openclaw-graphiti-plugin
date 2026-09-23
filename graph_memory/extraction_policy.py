@@ -63,8 +63,16 @@ or validation_evidence. Older messages may explain a new claim, not create new f
    memory is not a new independent claim, even in a different agent/session.
    Omit such facts unless a fresh non-memory tool result corroborates the specific
    new finding. Preserve new user corrections and independently observed changes.
+   A separate support checker will verify the entire claim against the cited fresh
+   evidence, including subject, status, date and qualifiers. An unrelated successful
+   command is never support. Omit unsupported memory-derived claims, even uncertain
+   ones, rather than attaching a nearby tool result to make them pass.
    Original read-message and fact IDs remain in source provenance; do not create
    another fact merely to remember that the memory was recalled.
+ - In direct-mcp-v1, every claim and validation quote must have a verified entry
+   in transcript.verified_source_refs. Unsourced text is context only; do not
+   turn it into a fact, even uncertain. Original session ingestion preserves new
+   user assertions without depending on a caller's claimed role.
 
 3. Only AFTER step 2, apply the general rules for planned/active/ended and dates
 to supported claims. The uncertain/null requirement above takes precedence over

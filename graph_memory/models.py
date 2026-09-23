@@ -182,7 +182,9 @@ class Transcript(Model):
 
         fresh = fresh_results(self)
         return any(
-            m.source_type in CLAIMS and (m.id not in self.memory_origins or fresh)
+            m.source_type in CLAIMS
+            and (m.id not in self.memory_origins or fresh)
+            and (self.source_format != "direct-mcp-v1" or m.id in self.verified_source_refs)
             for m in self.messages
             if not focus or m.id in focus
         )
@@ -337,10 +339,8 @@ class Extraction(Model):
                 raise ValueError("implemented_in links a framework to a language")
         return self
 
-    def validate_evidence(self, transcript: Transcript):
-        def reject(message, location):
-            raise annotate(ValueError(message), location=location)
-
+    def repair_evidence(self, transcript: Transcript):
+        """Normalize quotes for validation and read-only idempotent hash comparison."""
         messages = {m.id: m for m in transcript.messages}
         mismatched = []
         for fact_index, fact in enumerate(self.facts):
@@ -369,6 +369,14 @@ class Extraction(Model):
                 location=mismatched[0],
                 locations=mismatched[:10],
             )
+        return self
+
+    def validate_evidence(self, transcript: Transcript, *, support=None, allow_support_model=True):
+        def reject(message, location):
+            raise annotate(ValueError(message), location=location)
+
+        self.repair_evidence(transcript)
+        messages = {m.id: m for m in transcript.messages}
         # The rules below judge the evidence as repaired: a quote moved to another
         # message is held to that message's role and focus.
         focus = set(transcript.focus_message_ids)
@@ -388,6 +396,13 @@ class Extraction(Model):
                     ["facts", fact_index, "evidence"],
                 )
             if transcript.source_format in {"session-records-v1", "direct-mcp-v1"}:
+                if transcript.source_format == "direct-mcp-v1" and any(
+                    msg.id not in transcript.verified_source_refs for msg in cites
+                ):
+                    reject(
+                        "Direct writes require verified source references for every claim and validation quote; unsourced text is context only, even when uncertain",
+                        ["facts", fact_index, "evidence"],
+                    )
                 cited = [messages[e.message_id] for e in fact.evidence]
                 claims = [m for m in cited if m.source_type in CLAIMS]
                 if not claims or len(claims) != len(cited):
@@ -421,6 +436,12 @@ class Extraction(Model):
                 reject(
                     "Future facts must be planned, not active", ["facts", fact_index, "valid_at"]
                 )
+        from .claim_support import required
+
+        if required(self, transcript):
+            if support is None:
+                raise ValueError("Memory-derived claim requires an independent support checker")
+            support.check(self, transcript, allow_model=allow_support_model)
         return self
 
 
@@ -432,7 +453,7 @@ class Remember(Model):
     transcript: Transcript
     sources: dict[Key, Key] = Field(
         default_factory=dict,
-        description="Optional mapping from submitted message IDs to stored MemoryMessage IDs returned by memory_evidence. The server verifies exact content and inherits source roles/timestamps. Without a verified source, claims remain unvalidated; URLs alone do not validate them.",
+        description="Mapping from submitted message IDs to stored MemoryMessage IDs returned by memory_evidence. The server verifies exact content and inherits source roles/timestamps. Messages without a verified source are retained as context only and cannot produce facts; URLs alone do not validate them.",
     )
 
 

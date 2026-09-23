@@ -14,6 +14,8 @@ ENGINE_FILES = (
     "llm.py",
     "extraction_policy.py",
     "recall_provenance.py",
+    "direct_ingest.py",
+    "claim_support.py",
     "retry.py",
     "diagnostics.py",
     "service.py",

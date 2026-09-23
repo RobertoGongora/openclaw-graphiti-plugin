@@ -43,6 +43,9 @@ class GraphStore:
         )
         self.database = database
         self.engine = engine_fingerprint()
+        from .claim_support import SupportVerifier
+
+        self.support_verifier = SupportVerifier()
         self._journal_local = threading.local()
         # Model work remains concurrent. Journal writes already serialize on the
         # namespace; avoid making this process's transactions contend for it.
@@ -289,6 +292,18 @@ class GraphStore:
             ).consume()
         )
 
+    def discard_cached_extraction(self, namespace, episode_id, expected):
+        self.transaction(
+            lambda tx: tx.run(
+                "MATCH (e:MemoryEpisode {id:$id,namespace:$ns}) "
+                "WHERE e.status <> 'complete' AND e.cached_extraction=$expected "
+                "SET e.cached_extraction=null,e.cached_engine=null,e.cached_model=null",
+                id=episode_id,
+                ns=namespace,
+                expected=expected,
+            ).consume()
+        )
+
     def cache_extraction(self, namespace, episode_id, extraction, model_info):
         """Persist validated model work independently of the canonical graph commit."""
         self.transaction(
@@ -445,16 +460,27 @@ class GraphStore:
         # Validation is repeated against the durable episode inside the transaction.
         extraction_hash = digest(extraction.model_dump(mode="json"))
         committed_at = now().isoformat()
+        if transaction is None:
+            episode = self.episode(namespace, episode_id)
+            if episode["status"] != "complete":
+                extraction.validate_evidence(
+                    Transcript.model_validate_json(episode["payload"]),
+                    support=self.support_verifier,
+                )
 
         def repaired(transcript):
             try:
                 candidate = extraction.model_copy(deep=True)
-                candidate.validate_evidence(transcript)
+                candidate.repair_evidence(transcript)
                 return digest(candidate.model_dump(mode="json"))
             except ValueError:
                 return None
 
         def run(tx):
+            if engine_fingerprint(fresh=True) != self.engine:
+                raise ValueError(
+                    "Engine files changed during this process; restart before committing"
+                )
             self.lock(tx, namespace)
 
             def touch(label, ids):
@@ -478,7 +504,9 @@ class GraphStore:
                         "Episode already committed with different extraction; retract incorrect facts explicitly"
                     )
                 return {"episode_id": episode_id, "status": "complete", "replayed": True}
-            extraction.validate_evidence(transcript)
+            extraction.validate_evidence(
+                transcript, support=self.support_verifier, allow_support_model=False
+            )
             committed_hash = digest(extraction.model_dump(mode="json"))
             identities = {
                 e.key: self.canonical(tx, namespace, e, touch) for e in extraction.entities

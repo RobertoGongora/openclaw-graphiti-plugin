@@ -34,7 +34,7 @@ def prepare(store, request):
             messages.append(
                 m.Message(
                     id=msg.id,
-                    content=msg.content,
+                    content=source["content"],
                     role=source["role"],
                     source_type=source["source_type"],
                     timestamp=source.get("timestamp"),
@@ -55,13 +55,14 @@ def prepare(store, request):
                     id=msg.id,
                     content=msg.content,
                     role="assistant",
-                    source_type="assistant_report",
+                    source_type="context",
                     timestamp=msg.timestamp,
                     gaps=["direct_write_without_verified_source"],
                 )
             )
-    return transcript.model_copy(
-        update={
+    return m.Transcript.model_validate(
+        {
+            **transcript.model_dump(),
             "source_format": "direct-mcp-v1",
             "source_kind": "transcript",
             "verified_source_refs": dict(request.sources),

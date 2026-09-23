@@ -176,3 +176,14 @@ separate known-answer cases for habits, freshness, verification-enabled sessions
 and source conflicts as the corpus grows; never replace expectations with the
 engine's output. Structural assertion fields complement human review of the full
 answer and tool trace.
+
+## Memory-derived claim support
+
+`MEMORY_LLM=codex uv run python -m evals.claim_support --output REPORT` checks
+the independent support model on eight fixed synthetic cases: unrelated output,
+structured evidence, paraphrase, negation, insufficient project scope, wrong
+project, a mock example, and an instruction embedded in evidence. It accesses no graph or live
+memory. Passing is evidence for these cases, not a semantic correctness guarantee.
+The deterministic tests separately cover commit enforcement, cache/source binding,
+checker outages, rejected-cache retries, revision preflight, and direct-write
+source requirements.

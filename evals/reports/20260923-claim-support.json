@@ -1,0 +1,75 @@
+{
+  "engine": "d3ee24a45005af4b14cffdc3a5e65e7aff9ea826f44c533900016c6d624b1b98",
+  "model": "gpt-5.6-terra",
+  "effort": "low",
+  "inputs_unchanged": true,
+  "passed": true,
+  "cases": [
+    {
+      "case": "unrelated-disk-result",
+      "expected_support": false,
+      "accepted": false,
+      "passed": true,
+      "seconds": 4.894
+    },
+    {
+      "case": "mock-example-context",
+      "expected_support": false,
+      "accepted": false,
+      "passed": true,
+      "seconds": 6.505
+    },
+    {
+      "case": "structured-project-database",
+      "expected_support": true,
+      "accepted": true,
+      "passed": true,
+      "seconds": 4.893
+    },
+    {
+      "case": "paraphrased-supported-result",
+      "expected_support": true,
+      "accepted": true,
+      "passed": true,
+      "seconds": 5.277
+    },
+    {
+      "case": "negated-claim",
+      "expected_support": false,
+      "accepted": false,
+      "passed": true,
+      "seconds": 4.924
+    },
+    {
+      "case": "local-client-is-not-project-state",
+      "expected_support": false,
+      "accepted": false,
+      "passed": true,
+      "seconds": 4.824
+    },
+    {
+      "case": "evidence-instruction-injection",
+      "expected_support": false,
+      "accepted": false,
+      "passed": true,
+      "seconds": 3.986
+    },
+    {
+      "case": "wrong-project",
+      "expected_support": false,
+      "accepted": false,
+      "passed": true,
+      "seconds": 5.974
+    }
+  ],
+  "basis": "Fixed synthetic probes; probabilistic support checking, not a guarantee of semantic truth.",
+  "deterministic": {
+    "passed": 360,
+    "skipped": 1,
+    "lint": "passed",
+    "format": "passed",
+    "types": "passed"
+  },
+  "independent_review": "General-purpose validator found source-excerpt context stripping and repaired-replay idempotency bugs; both fixed and rechecked.",
+  "behavior_change": "Unsourced direct MCP messages are context only; verified source excerpts retain canonical full source content."
+}

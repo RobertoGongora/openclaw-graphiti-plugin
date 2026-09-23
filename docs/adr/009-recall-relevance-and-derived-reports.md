@@ -57,16 +57,29 @@ A report based on those reads cannot create another fact without fresh non-memor
 tool evidence for the specific new claim. Pure memory-report batches skip the
 model and complete with zero new facts. The validator enforces the same rule even
 if a caller submits an uncertain extraction or cites old user context. New user
-assertions/corrections and fresh tool-backed findings remain eligible. Model
-instructions must still judge whether the fresh evidence supports that exact
-claim; deterministic checks establish source eligibility, not semantic truth.
+assertions/corrections and fresh tool-backed findings remain eligible. An independent claim-support model call now judges each memory-derived fact
+against only its cited fresh tool evidence (or a new explicit user assertion).
+It checks the whole relationship, summary, scope, status, and date, supports
+paraphrases and structured output, and rejects unsupported or unclear claims.
+The check sees source context, never the recalled answer or extractor reasoning.
+It is probabilistic semantic validation, not a proof of truth.
 
-Two feedback routes remain open, and this change does not close them. A
-memory-derived report can still become an active fact when the model cites a
-fresh but unrelated tool result as validation: the validator checks that the
-evidence is fresh, not that it supports the claim. A direct memory_ingest write
-that repeats a recalled claim without a verified source carries no origin, so it
-is accepted as uncertain. Treat both as open work, not as prevented.
+Checks are batched up to sixteen claims. Process-local approvals bind the complete
+transcript, candidate, and engine; caller JSON cannot provide an approval. The
+store checks again at commit, including cached work and revision promotion.
+Model calls run before write locks; the transaction checks the bound approval.
+Restarted processes recheck support. Provider outages preserve retryable work;
+rejected cached candidates are discarded so the next extraction can correct them.
+
+Direct MCP messages without verified source references are retained as context
+only and cannot create facts, even uncertain ones. The receipt names them in
+context_only_message_ids. This also blocks pending direct writes staged by the
+old engine; it does not remove already committed history. Original session
+intake still learns new user assertions and new assistant observations. Sourced
+direct writes inherit original roles and recall provenance. Verified excerpts
+retain the entire canonical source message, so a caller cannot hide contradictory
+context; the expanded transcript is checked against the normal size limit. The direct-write
+adapter and support-check code both participate in the engine fingerprint.
 
 Direct memory reads, evidence reads, reads through any memory tool the parser
 labels (other memory servers included) and literal nested tools.memory_* calls

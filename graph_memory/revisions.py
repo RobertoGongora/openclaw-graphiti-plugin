@@ -484,6 +484,7 @@ class Revisions:
         # The dream must see the graph as promotion would leave it; that graph
         # exists only inside this transaction, and the model is called after it.
         try:
+            self._verify_support(namespace, revision)
             previews = self._preview(namespace, contexts)
         except Exception as exc:
             self._fail(revision["id"], {}, exc)
@@ -740,6 +741,24 @@ class Revisions:
                 revision=revision_id,
             ).consume()
 
+    def _verify_support(self, namespace, revision):
+        # External model calls must finish before a promotion takes its write lock.
+        # Re-check durable candidates after a process restart; approvals are not
+        # accepted from serialized extraction JSON or an earlier engine.
+        rows = self.store.read(
+            lambda tx: tx.run(
+                "MATCH (:MemoryRevision {id:$id,namespace:$ns})-[:CANDIDATE]->(c) "
+                "MATCH (e:MemoryEpisode {id:c.episode_id,namespace:$ns}) "
+                "RETURN c.extraction AS extraction,e.payload AS payload",
+                id=revision["id"],
+                ns=namespace,
+            ).data()
+        )
+        for row in rows:
+            Extraction.model_validate_json(row["extraction"]).validate_evidence(
+                Transcript.model_validate_json(row["payload"]), support=self.store.support_verifier
+            )
+
     def diff(self, namespace, revision_id):
         revision = self._current(namespace, revision_id)
         if revision["status"] not in ("built", "validated", "promoted"):
@@ -748,6 +767,7 @@ class Revisions:
             # The live facts it was compared with are superseded now.
             diff = revision["diff"]
         else:
+            self._verify_support(namespace, revision)
             diff = self._preview(namespace, lambda tx: self._promote(tx, namespace, revision))
             self._set(revision_id, diff=json.dumps(diff))
         return {"revision_id": revision_id, "candidate": None, "diff": diff}
@@ -802,6 +822,7 @@ class Revisions:
         def run(tx):
             return self._promote(tx, namespace, revision), self._check(tx, namespace, checks)
 
+        self._verify_support(namespace, revision)
         diff, results = self._preview(namespace, run)
         if not all(r["passed"] for r in results):
             return {"passed": False, "checks": results}
@@ -837,6 +858,8 @@ class Revisions:
             or validation["suite"] != suite_fingerprint()
         ):
             raise ValueError("Engine or golden suite changed after validation")
+
+        self._verify_support(namespace, revision)
 
         def run(tx):
             # Taken before the status is read: two promotions cannot both pass it.

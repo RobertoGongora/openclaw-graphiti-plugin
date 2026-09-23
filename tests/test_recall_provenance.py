@@ -84,7 +84,10 @@ def test_fresh_work_and_user_corrections_survive_memory_read():
         valid_at="2026-09-01T00:00:00Z",
         validation_evidence=[{"message_id": "tool", "quote": "Atlas uses MySQL."}],
     )
-    candidate.validate_evidence(t)
+    from graph_memory.claim_support import SupportVerifier
+    from tests.test_claim_support import SupportModel
+
+    candidate.validate_evidence(t, support=SupportVerifier(SupportModel()))
     correction = Message(
         id="user", role="user", source_type="user_assertion", content="Atlas uses MySQL."
     )
@@ -485,6 +488,9 @@ def test_evidence_exposes_stored_read_ids_and_message_nodes_keep_them(graph, tmp
     read = next(m for m in saved.messages if m.source_type == "memory_read")
     fresh = next(m for m in saved.messages if m.content == "mysql  Ver 8.0.36")
     assert saved.can_yield_facts()
+    from tests.test_claim_support import SupportModel
+
+    MemoryService(store, SupportModel())
     committed = store.commit(
         ns,
         episode,

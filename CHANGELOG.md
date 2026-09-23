@@ -29,9 +29,11 @@
   delegated instruction, starts a new turn for origins and for carried context.
   Transcripts without memory reads keep their previous episode IDs and change
   fingerprints, so an upgrade does not re-import unchanged memory-bank files.
-  This narrows the feedback loop without closing it: unrelated fresh evidence
-  can still validate a recalled claim, and an unsourced direct write that repeats
-  one is still stored as uncertain.
+  Memory-derived claims now need an independent model support check against cited
+  fresh evidence; unsupported or unclear claims are rejected at extraction and
+  commit, including cached candidates and revision promotion. This preserves
+  paraphrases but adds model calls and remains probabilistic. Unsourced direct
+  MCP writes are context only and cannot create facts, even uncertain ones.
 - **Cross-session leak in ContextEngine mode**: per-session state was kept on the
   shared engine instance, so `assemble()` for one session could inject another
   session's transcript and lifecycle events. State is now keyed by session id.
