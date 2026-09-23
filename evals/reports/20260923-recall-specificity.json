@@ -1,0 +1,281 @@
+{
+  "cases": [
+    {
+      "case": 1,
+      "scored": true,
+      "expected_records": 1,
+      "answer_records_returned": 1,
+      "baseline_answer_records_returned": 1,
+      "first_answer_rank": 2,
+      "max_answer_rank": 2,
+      "rank_target_met": true,
+      "returned_facts": 8,
+      "matching_unique": 15,
+      "compact_json_bytes": 4415,
+      "full_json_bytes": 15155,
+      "formatting_ms": 2.96,
+      "compact_full_same_ids": true
+    },
+    {
+      "case": 2,
+      "scored": true,
+      "expected_records": 1,
+      "answer_records_returned": 1,
+      "baseline_answer_records_returned": 1,
+      "first_answer_rank": 3,
+      "max_answer_rank": 3,
+      "rank_target_met": true,
+      "returned_facts": 8,
+      "matching_unique": 60,
+      "compact_json_bytes": 4960,
+      "full_json_bytes": 16847,
+      "formatting_ms": 2.81,
+      "compact_full_same_ids": true
+    },
+    {
+      "case": 3,
+      "scored": true,
+      "expected_records": 1,
+      "answer_records_returned": 1,
+      "baseline_answer_records_returned": 1,
+      "first_answer_rank": 3,
+      "max_answer_rank": 3,
+      "rank_target_met": true,
+      "returned_facts": 8,
+      "matching_unique": 87,
+      "compact_json_bytes": 4851,
+      "full_json_bytes": 15967,
+      "formatting_ms": 2.85,
+      "compact_full_same_ids": true
+    },
+    {
+      "case": 4,
+      "scored": true,
+      "expected_records": 1,
+      "answer_records_returned": 1,
+      "baseline_answer_records_returned": 1,
+      "first_answer_rank": 2,
+      "max_answer_rank": 2,
+      "rank_target_met": true,
+      "returned_facts": 8,
+      "matching_unique": 68,
+      "compact_json_bytes": 3885,
+      "full_json_bytes": 13862,
+      "formatting_ms": 29.91,
+      "compact_full_same_ids": true
+    },
+    {
+      "case": 5,
+      "scored": true,
+      "expected_records": 1,
+      "answer_records_returned": 1,
+      "baseline_answer_records_returned": 1,
+      "first_answer_rank": 1,
+      "max_answer_rank": 1,
+      "rank_target_met": true,
+      "returned_facts": 8,
+      "matching_unique": 349,
+      "compact_json_bytes": 5560,
+      "full_json_bytes": 16831,
+      "formatting_ms": 29.85,
+      "compact_full_same_ids": true
+    },
+    {
+      "case": 6,
+      "scored": false,
+      "expected_records": 0,
+      "answer_records_returned": 0,
+      "baseline_answer_records_returned": 0,
+      "first_answer_rank": null,
+      "max_answer_rank": 8,
+      "rank_target_met": null,
+      "returned_facts": 8,
+      "matching_unique": 826,
+      "compact_json_bytes": 5020,
+      "full_json_bytes": 15255,
+      "formatting_ms": 29.87,
+      "compact_full_same_ids": true
+    },
+    {
+      "case": 7,
+      "scored": true,
+      "expected_records": 1,
+      "answer_records_returned": 1,
+      "baseline_answer_records_returned": 1,
+      "first_answer_rank": 1,
+      "max_answer_rank": 1,
+      "rank_target_met": true,
+      "returned_facts": 8,
+      "matching_unique": 116,
+      "compact_json_bytes": 3444,
+      "full_json_bytes": 12164,
+      "formatting_ms": 42.78,
+      "compact_full_same_ids": true
+    },
+    {
+      "case": 8,
+      "scored": true,
+      "expected_records": 1,
+      "answer_records_returned": 1,
+      "baseline_answer_records_returned": 1,
+      "first_answer_rank": 1,
+      "max_answer_rank": 1,
+      "rank_target_met": true,
+      "returned_facts": 8,
+      "matching_unique": 456,
+      "compact_json_bytes": 4614,
+      "full_json_bytes": 15425,
+      "formatting_ms": 42.6,
+      "compact_full_same_ids": true
+    },
+    {
+      "case": 9,
+      "scored": true,
+      "expected_records": 1,
+      "answer_records_returned": 1,
+      "baseline_answer_records_returned": 1,
+      "first_answer_rank": 4,
+      "max_answer_rank": 4,
+      "rank_target_met": true,
+      "returned_facts": 8,
+      "matching_unique": 305,
+      "compact_json_bytes": 4437,
+      "full_json_bytes": 14262,
+      "formatting_ms": 42.42,
+      "compact_full_same_ids": true
+    },
+    {
+      "case": 10,
+      "scored": true,
+      "expected_records": 1,
+      "answer_records_returned": 1,
+      "baseline_answer_records_returned": 1,
+      "first_answer_rank": 3,
+      "max_answer_rank": 3,
+      "rank_target_met": true,
+      "returned_facts": 8,
+      "matching_unique": 34,
+      "compact_json_bytes": 4207,
+      "full_json_bytes": 16133,
+      "formatting_ms": 2.48,
+      "compact_full_same_ids": true
+    },
+    {
+      "case": 11,
+      "scored": true,
+      "expected_records": 1,
+      "answer_records_returned": 1,
+      "baseline_answer_records_returned": 0,
+      "first_answer_rank": 8,
+      "max_answer_rank": 8,
+      "rank_target_met": true,
+      "returned_facts": 8,
+      "matching_unique": 36,
+      "compact_json_bytes": 4273,
+      "full_json_bytes": 14657,
+      "formatting_ms": 2.4,
+      "compact_full_same_ids": true
+    },
+    {
+      "case": 12,
+      "scored": true,
+      "expected_records": 1,
+      "answer_records_returned": 1,
+      "baseline_answer_records_returned": 1,
+      "first_answer_rank": 1,
+      "max_answer_rank": 1,
+      "rank_target_met": true,
+      "returned_facts": 7,
+      "matching_unique": 7,
+      "compact_json_bytes": 3717,
+      "full_json_bytes": 14379,
+      "formatting_ms": 2.36,
+      "compact_full_same_ids": true
+    }
+  ],
+  "limit": 8,
+  "scored_cases": 11,
+  "cases_with_answer_before": 10,
+  "cases_with_answer_after": 11,
+  "rank_targets_met": true,
+  "median_formatting_ms": 16.405,
+  "basis": "Offline selection on identical frozen facts. Development regression cases, not an independent accuracy estimate. Times exclude MCP/database/model work. No answer claim for unscored cases.",
+  "baseline_commit": "3f1ab72be4a02cbbffd49e1f0a35cd28cc55c1bb",
+  "snapshot_sha256": "2340dc626914e63d39a7e3b7ca5229bd86d94de8f0283c87655b6a5e51c3d7b9",
+  "retrieval_sha256": "39e83d10ae04256f7faada3604a7a685ad9632321bb7185f5b5fa942990927fb",
+  "comparisons": [
+    {
+      "case": 1,
+      "before_rank": 2,
+      "after_rank": 2
+    },
+    {
+      "case": 2,
+      "before_rank": 3,
+      "after_rank": 3
+    },
+    {
+      "case": 3,
+      "before_rank": 3,
+      "after_rank": 3
+    },
+    {
+      "case": 4,
+      "before_rank": 2,
+      "after_rank": 2
+    },
+    {
+      "case": 5,
+      "before_rank": 1,
+      "after_rank": 1
+    },
+    {
+      "case": 6,
+      "before_rank": null,
+      "after_rank": null
+    },
+    {
+      "case": 7,
+      "before_rank": 1,
+      "after_rank": 1
+    },
+    {
+      "case": 8,
+      "before_rank": 1,
+      "after_rank": 1
+    },
+    {
+      "case": 9,
+      "before_rank": 4,
+      "after_rank": 4
+    },
+    {
+      "case": 10,
+      "before_rank": 4,
+      "after_rank": 3,
+      "before_formatting_ms_median": 2.32,
+      "before_compact_bytes": 4112,
+      "after_formatting_ms_median": 2.271,
+      "after_compact_bytes": 4207
+    },
+    {
+      "case": 11,
+      "before_rank": 9,
+      "after_rank": 8,
+      "before_formatting_ms_median": 2.302,
+      "before_compact_bytes": 4254,
+      "after_formatting_ms_median": 2.341,
+      "after_compact_bytes": 4273
+    },
+    {
+      "case": 12,
+      "before_rank": 1,
+      "after_rank": 1,
+      "before_formatting_ms_median": 2.318,
+      "before_compact_bytes": 3717,
+      "after_formatting_ms_median": 2.298,
+      "after_compact_bytes": 3717
+    }
+  ],
+  "timing_basis": "In-process formatting only; frozen snapshot already in memory; 101 repetitions for the three Supabase queries. Excludes snapshot copying, database, network and models."
+}

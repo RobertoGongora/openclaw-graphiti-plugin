@@ -40,6 +40,9 @@ unranked, as if no question were given.
 Partial matches remain available through
 pagination instead of being discarded by a highest-score-only filter. Explicit
 database/framework/language questions also match the relation and target kind.
+Those schema roles receive an extra bonus only when the question has no other
+matching topic words. For example, "which database?" benefits from the role;
+"database disk size?" ranks lexical topic matches without the broad role bonus.
 Matching an older value also selects other facts in the same genuine exclusive
 state role, so asking about
 an old database can surface its replacement. A role is a slot that at least two
@@ -115,6 +118,26 @@ file. The fact may be historical or retracted; evidence retrieval does not asser
 that it remains current. Missing IDs/sources are explicit. IDs from another
 namespace are not returned. For historical recall, pass the same `known_at` or
 `at_change` to evidence retrieval.
+
+Each quote includes `source_context.kind`: for example `user_assertion`,
+`assistant_report`, `memory_derived_report`, `documentation_lookup`,
+`shell_output`, or `file_read`. These describe the recorded collection method,
+not independent verification of the claim. Documentation lookup currently
+recognizes Context7's `query-docs` and `get-library-docs`; unknown tools remain
+`tool_output`. Context and memory-read labels take precedence over tool names.
+When its paired tool call is present in the episode, `source_context.tool_call`
+includes its message ID, tool name, and up to 1,200 characters of recorded
+arguments with `arguments_truncated`. Split source records also set that flag.
+Captured artifact metadata and source gaps are preserved without duplicating
+artifact contents. Missing calls are not reconstructed from today's files.
+
+For example, a saved disk-growth note from a shell command reading `CLAUDE.md`
+is shown as `shell_output` alongside the recorded command; an earlier Context7
+result is `documentation_lookup`. A compound command's output is not attributed
+to one particular file unless the source already supplies that attribution.
+Neither label claims the external policy was checked during this recall.
+These details are fetched on demand with `memory_evidence`; compact recall
+does not load episode payloads or call a model to classify sources.
 
 Evidence and entity search are also permitted by retrieval-only MCP servers.
 The public catalog has ten tools: these eight plus `memory_status` and `memory_confirm`, added later.

@@ -109,15 +109,25 @@ non-inferiority; batch evidence and the report preserve the variability and fail
 `python -m evals.recall_regression PRIVATE_SNAPSHOT --output REPORT` evaluates
 question-ranked compact/full views on saved complete projections, without any
 live graph or model access. Inputs contain `cases` with `entity`, `question`,
-`raw`, source-reviewed `expected_ids`, and optional `baseline_ids`. Every case
-needs a question; empty expectations are unscored. Outputs contain only sizes,
-timings and hit counts. Keep private snapshots in `.local/`. The 2026-09-22
+`raw`, source-reviewed `expected_ids`, optional `baseline_ids`, and optional
+`max_answer_rank` (defaults to the result limit, eight). The command exits nonzero
+if any scored case misses its rank budget; an answer somewhere in the graph is
+not enough. Every case needs a question; empty expectations are unscored.
+Outputs contain sizes, timings, hit counts and ranks, without private text or
+IDs. Keep private snapshots in `.local/`. The 2026-09-22
 development comparison is `reports/20260922-recall-ranking.json`; it is not an
 independent accuracy estimate. Compact and full run on the same fake store, so
 their agreement checks the formatting path, not the database projection. Do not
 build expected answers from live recall: the study sessions that produced the
 original echoes are themselves ingested, so review each expected record against
 its source before freezing it.
+
+The [2026-09-23 specificity comparison](reports/20260923-recall-specificity.md)
+adds the source-reviewed Supabase disk-growth case with natural, expanded, and
+short questions. Its original eight scored cases retain their previous answer
+ranks as budgets. The new rank budgets are 3, 8, and 1 respectively. The committed
+synthetic tests also exercise the same failure across databases, frameworks and
+languages; there are no Supabase-specific ranking rules.
 
 ## Establishing the golden standard
 
