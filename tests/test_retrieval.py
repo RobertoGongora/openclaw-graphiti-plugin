@@ -704,3 +704,8 @@ def test_conflict_ids_include_the_unmatched_side_and_stay_within_one_evidence_ca
     capped = retrieve(many, limit=1)
     assert len(capped["conflict_fact_ids"]) == 10
     assert capped["conflict_fact_ids_truncated"] is True
+    # Identical conflicting copies are separate records: the count matches the IDs.
+    copies = raw(conflicts=[fact("x1"), {**fact("x1"), "id": "x2"}, fact("y", target=PG["key"])])
+    grouped = retrieve(copies, question="database")
+    assert grouped["counts"]["conflicts_matching"] == 3
+    assert grouped["conflict_fact_ids"] == ["x1", "x2", "y"]

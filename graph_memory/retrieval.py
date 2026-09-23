@@ -301,7 +301,7 @@ def recall(store, r):
             "returned": len(facts),
             "derived_returned": min(room, len(derived)),
             "derived_available": len(derived),
-            "conflicts_matching": len(disputed),
+            "conflicts_matching": sum(len(copies) for _, _, copies, _ in disputed),
         },
         # Up to ten, the most memory_evidence accepts in one call: the matching
         # conflicting records and the other sides of each disagreement.
