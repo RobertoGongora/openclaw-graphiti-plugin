@@ -23,7 +23,10 @@ MEMORY_FILE = re.compile(
 )
 # The parser labels every memory tool read; a process-memory statistic is not one.
 MEMORY_LABEL = "derived_memory_retrieval_not_fresh_verification"
-PROCESS_MEMORY = re.compile(r"(?i)usage|stat|metric|consumption|pressure|alloc")
+PROCESS_MEMORY = {"usage", "stats", "statistics", "metric", "metrics", "consumption", "pressure"}
+# Only a command or program can call a nested tool; an edit that writes the
+# literal call into a file reads nothing.
+CODE_TOOL = re.compile(r"(?i)exec|bash|shell|python")
 FACT_ID = re.compile(r'\\?"id\\?"\s*:\s*\\?"([a-f0-9]{64})\\?"')
 
 
@@ -80,6 +83,12 @@ def recalled_ids(content):
     return sorted(found)[:200]
 
 
+def process_memory(name):
+    """Whole words of the tool name, so stateful_memory is not a statistic."""
+    words = re.split(r"[_.\-]+", name.lower())
+    return any(w in PROCESS_MEMORY or w.startswith("alloc") for w in words)
+
+
 def memory_read(msg):
     """A read of this or any other memory tool, or of a memory-bank note. The
     parser's memory_read label also covers process-memory statistics and code
@@ -92,7 +101,7 @@ def memory_read(msg):
     if not name:
         return True
     if MEMORY_LABEL in field(msg, "gaps", []):
-        return not PROCESS_MEMORY.search(name)
+        return not process_memory(name)
     return any(
         field(t, "operation") == "read" and MEMORY_FILE.search(field(t, "path") or "")
         for t in field(msg, "touches", [])
@@ -106,7 +115,7 @@ def read_results(messages):
         name = field(msg, "tool_name") or ""
         if field(msg, "source_type") == "tool_call" and (
             MEMORY_CALL.search(name)
-            or NESTED_READ.search(field(msg, "content", ""))
+            or (CODE_TOOL.search(name) and NESTED_READ.search(field(msg, "content", "")))
             or name in DELEGATION
         ):
             if field(msg, "call_id"):

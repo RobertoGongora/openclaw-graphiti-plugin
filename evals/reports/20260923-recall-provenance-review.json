@@ -1,0 +1,162 @@
+{
+  "review": "PR #184 independent validation: three general-purpose validators, two re-verification rounds",
+  "commits": [
+    "900f864",
+    "d434bc1",
+    "final"
+  ],
+  "engine": "79cf8ef74218ea28252547cb94f97a43abc734d16e1820bc4cde3eeefd1f462e",
+  "golden_suite": "3a0e140b1993bd37f7d14615e3f4fc3cbb0fef489319208984c1eb5bea3182e4",
+  "golden_suite_note": "Suite hash covers the eval harness; evals/lookback.py and evals/recall_regression.py changed, the six case fixtures did not.",
+  "model": "gpt-5.6-terra",
+  "effort": "low",
+  "golden_cases": [
+    {
+      "case": "atlas-plan-versus-production",
+      "passed": true
+    },
+    {
+      "case": "habit-out-of-order",
+      "passed": true
+    },
+    {
+      "case": "instruction-injection-is-data",
+      "passed": true
+    },
+    {
+      "case": "project-decision-history",
+      "passed": true
+    },
+    {
+      "case": "scoped-preference-correction",
+      "passed": true
+    },
+    {
+      "case": "undated-memory-not-current",
+      "passed": true
+    }
+  ],
+  "golden_inputs_unchanged": true,
+  "tests": {
+    "full_passed": 342,
+    "full_skipped": 1,
+    "lint": "passed",
+    "format": "passed",
+    "typecheck": "passed"
+  },
+  "frozen_recall_regression": {
+    "snapshot_sha256": "79f14bb956bc954a0385d242036c3354d7c3154aff9ab4e5c68c55f31de23e9f",
+    "scored_cases": 8,
+    "cases_with_answer_before": 4,
+    "cases_with_answer_after": 8,
+    "selection_and_ranks_unchanged_from_e850b4b": true
+  },
+  "confirmed_findings": [
+    {
+      "finding": "empty memory_origins changed every payload digest; unchanged memory-bank files re-staged on upgrade",
+      "severity": "high",
+      "status": "fixed"
+    },
+    {
+      "finding": "reported_at string differs live vs historical for facts without the stored property",
+      "severity": "medium",
+      "status": "fixed"
+    },
+    {
+      "finding": "model view carried up to 200 recalled fact IDs per report",
+      "severity": "medium",
+      "status": "fixed"
+    },
+    {
+      "finding": "chat send_message tools, process-memory tools and code under memory/ tainted reports",
+      "severity": "medium",
+      "status": "fixed"
+    },
+    {
+      "finding": "taint never reset in sub-agent/automated sessions; carried context crossed instructions",
+      "severity": "medium",
+      "status": "fixed"
+    },
+    {
+      "finding": "Claude Code Task/Agent results not recognized as delegation",
+      "severity": "medium",
+      "status": "fixed"
+    },
+    {
+      "finding": "several new tests passed under mutation",
+      "severity": "medium",
+      "status": "fixed"
+    },
+    {
+      "finding": "event time compared with report time in the rank key",
+      "severity": "low",
+      "status": "fixed"
+    },
+    {
+      "finding": "identical legacy copies attributed to the lowest id",
+      "severity": "low",
+      "status": "fixed"
+    },
+    {
+      "finding": "full detail with a question dropped repeat counts",
+      "severity": "low",
+      "status": "fixed"
+    },
+    {
+      "finding": "stop-word-only questions silently unranked",
+      "severity": "low",
+      "status": "exposed via question_terms"
+    },
+    {
+      "finding": "question words the entity name covers after normalization rank nothing",
+      "severity": "low",
+      "status": "documented, unchanged"
+    },
+    {
+      "finding": "evidence exposed local read IDs for session records",
+      "severity": "low",
+      "status": "fixed"
+    },
+    {
+      "finding": "caller timestamps on unverified direct writes ordered reports",
+      "severity": "low",
+      "status": "fixed"
+    },
+    {
+      "finding": "recalled IDs missed lane-keyed and chunked output; fallback collected entity IDs",
+      "severity": "low",
+      "status": "fixed"
+    },
+    {
+      "finding": "deeply nested read output raised RecursionError in intake",
+      "severity": "low",
+      "status": "fixed"
+    },
+    {
+      "finding": "memory_evidence/render/status results reached the model as tool_result",
+      "severity": "low",
+      "status": "fixed"
+    },
+    {
+      "finding": "eval harness crashed on missing question or empty case list",
+      "severity": "low",
+      "status": "fixed"
+    },
+    {
+      "finding": "stat substring excluded stateful memory tools; edits containing a literal nested call tainted the turn",
+      "severity": "low",
+      "status": "fixed after final round, test-covered"
+    }
+  ],
+  "parser_prefix_hash_pinned": "ff2762de96e2080f80d65c09b64c7673e537a767ffeecef4bfdaaa7897be48b3",
+  "deployment": "not deployed; prepared for review",
+  "limitations": [
+    "A fresh but unrelated tool result cited as validation still lets the model promote an echo; deterministic checks establish eligibility, not relevance.",
+    "An unsourced memory_ingest restatement of a recalled fact is still accepted as uncertain.",
+    "status: conflict reflects every matching conflict record, including partial matches outside the returned page; an intent decision for the author.",
+    "Dynamic nested calls (aliases, tools?.x, spaced brackets), servers named memories (mcp__mem0__search_memories) and memory-bank directories not named memory/ are not recognized; isMeta user text ends a turn.",
+    "Recalled fact IDs are capped at 200 in sorted order.",
+    "tests/test_revision_overlay.py counts memory spaces database-wide, so it flakes when another test run shares the disposable database.",
+    "Historical echoes are retained; no automatic retraction or bulk re-extraction."
+  ]
+}

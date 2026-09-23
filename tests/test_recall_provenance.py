@@ -131,6 +131,16 @@ def test_reading_code_that_mentions_a_memory_tool_is_not_a_memory_call():
         ]
     )
     assert not t.memory_origins
+    # Writing the literal nested call into a file is an edit, not a call.
+    edit = json.dumps({"new_string": "await tools.mcp__graph_memory__memory_recall({})"})
+    t = transcript(
+        [
+            message("call", "tool_call", edit, tool_name="Edit", call_id="e"),
+            message("output", "tool_result", "File updated.", call_id="e", tool_name="Edit"),
+            message("report", "assistant_report", "Added the recall call to the test."),
+        ]
+    )
+    assert not t.memory_origins
 
 
 def test_malformed_nested_fact_shape_does_not_break_intake():
@@ -231,6 +241,12 @@ def test_source_cursor_unchanged_and_origins_cross_long_batch_boundary(graph, tm
         ),
         (
             "mcp__memory__read_graph",
+            "memory_read",
+            ["derived_memory_retrieval_not_fresh_verification"],
+            True,
+        ),
+        (
+            "mcp__stateful_memory__get_memory_state",
             "memory_read",
             ["derived_memory_retrieval_not_fresh_verification"],
             True,
