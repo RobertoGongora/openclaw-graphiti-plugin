@@ -323,16 +323,44 @@ def test_uncertain_different_wordings_survive_and_identical_reports_are_not_supp
 
 
 def test_question_full_expands_same_ranked_page_and_retains_raw_view_without_question():
+    backup = dict(summary="Database backup is nightly.", target="backup", slot=None)
     data = raw(
         current=[fact("answer", summary="Database is MySQL.")],
-        uncertain=[fact("noise", summary="Release banner changed.", target="banner", slot=None)],
+        uncertain=[
+            fact("noise", summary="Release banner changed.", target="banner", slot=None),
+            fact("twice", session_id="s1", **backup),
+            fact("copy", session_id="s2", **backup),
+        ],
+        history=[fact("old", summary="Database was Postgres.", target=PG["key"])],
     )
+    calls = []
+
+    def recall_all(*args, **kwargs):
+        calls.append(kwargs)
+        return deepcopy(data)
+
+    store = SimpleNamespace(recall=recall_all)
+    pages = [{}, {"offset": 1}, {"include_history": True}, {"include_history": True, "offset": 2}]
+    for params in [*pages, {"offset": 50}]:
+        view = dict(namespace="test", entity="Atlas", question="database", limit=1, **params)
+        compact = v.recall(store, v.RecallView(**view))
+        full = v.recall(store, v.RecallView(**view, detail="full"))
+        assert [f["id"] for f in full["facts"]] == [f["id"] for f in compact["facts"]]
+        assert full["counts"] == compact["counts"]
+        assert full["next_offset"] == compact["next_offset"]
+        assert full["question_terms"] == compact["question_terms"] == ["database"]
+    # Ranking needs every lane complete; a per-lane cut before ranking could hide the answer.
+    assert all(call["_complete"] for call in calls)
     compact = retrieve(data, question="database", limit=1)
     full = retrieve(data, question="database", detail="full", limit=1)
     assert [f["id"] for f in full["facts"]] == [f["id"] for f in compact["facts"]] == ["answer"]
     assert full["facts"][0]["summary"] == "Database is MySQL."
-    assert full["counts"] == compact["counts"]
+    grouped = next(f for f in retrieve(data, question="backup", detail="full")["facts"])
+    assert grouped["summary"] == backup["summary"] and grouped["lane"] == "uncertain"
+    assert grouped["report_count"] == 2 and grouped["source_sessions"] == 2
     assert retrieve(data, detail="full") == data
+    v.recall(store, v.RecallView(namespace="test", entity="Atlas", detail="full"))
+    assert calls[-1]["_complete"] is False
 
 
 @pytest.mark.integration
@@ -369,25 +397,26 @@ def test_recall_word_normalization_does_not_change_entity_name_search(graph):
 
 def test_report_order_uses_source_time_not_reingestion_and_preserves_detail():
     common = {"status": "uncertain", "valid_at": None, "valid_ts": None, "slot": None}
+    # IDs sort against the expected order, so ID order cannot stand in for report time.
     old = fact(
-        "old",
+        "a-old",
         summary="Deployment is waiting.",
         reported_at="2026-09-01T00:00:00Z",
         recorded_at="2026-09-22T00:00:00Z",
         **common,
     )
     new = fact(
-        "new",
+        "z-new",
         summary="Deployment completed; validation is 16%.",
         reported_at="2026-09-02T00:00:00Z",
         recorded_at="2026-09-03T00:00:00Z",
         **common,
     )
     out = retrieve(raw(uncertain=[old, new]), question="deployment")
-    assert [f["id"] for f in out["facts"]] == ["new", "old"]
+    assert [f["id"] for f in out["facts"]] == ["z-new", "a-old"]
     assert out["facts"][0]["at"] is None
     assert out["facts"][0]["reported_at"] == new["reported_at"]
-    assert retrieve(raw(uncertain=[old, new]), question="validation")["facts"][0]["id"] == "new"
+    assert retrieve(raw(uncertain=[old, new]), question="validation")["facts"][0]["id"] == "z-new"
 
 
 def test_event_role_does_not_transfer_question_score_to_unrelated_summary():
@@ -416,14 +445,14 @@ def test_result_question_retains_measured_outcome_alongside_progress_reports():
     data = raw(
         uncertain=[
             fact(
-                "progress",
+                "a-progress",
                 relation="occurred",
                 slot=None,
                 target="event:vocabulary-evaluation",
                 summary="Extraction vocabulary evaluation results are still pending.",
             ),
             fact(
-                "outcome",
+                "z-outcome",
                 relation="occurred",
                 slot=None,
                 target="event:vocabulary-rollout",
@@ -432,7 +461,8 @@ def test_result_question_retains_measured_outcome_alongside_progress_reports():
         ]
     )
     out = retrieve(data, question="What were the vocabulary evaluation results?", limit=2)
-    assert "outcome" in [f["id"] for f in out["facts"]]
+    # The measured outcome outranks the progress note; ID order would say otherwise.
+    assert [f["id"] for f in out["facts"]] == ["z-outcome", "a-progress"]
 
 
 @pytest.mark.integration
@@ -464,3 +494,148 @@ def test_report_time_live_and_historical_does_not_become_event_time(graph):
     assert live["facts"] == historical["facts"]
     assert live["facts"][0]["reported_at"] == "2026-09-22T12:00:00+00:00"
     assert live["facts"][0]["at"] is None
+
+
+def test_question_terms_expose_unranked_stop_word_questions_and_normalized_forms():
+    data = raw(
+        current=[fact("db", summary="Database is MySQL.")],
+        uncertain=[
+            fact(
+                "deploy",
+                relation="occurred",
+                target="event:deploy",
+                slot=None,
+                summary="Deployed to production yesterday.",
+            )
+        ],
+    )
+    unranked = retrieve(data, question="What is the current status?")
+    assert unranked["question_terms"] == []
+    assert unranked["status"] == "found"
+    assert [f["id"] for f in unranked["facts"]] == [f["id"] for f in retrieve(data)["facts"]]
+    assert "question_terms" not in retrieve(data)
+    ranked = retrieve(data, question="When was the deployment?")
+    assert ranked["question_terms"] == ["deploy"]
+    assert [f["id"] for f in ranked["facts"]] == ["deploy"]
+    study = raw(
+        uncertain=[
+            fact(
+                "ev",
+                relation="occurred",
+                target="event:study",
+                slot=None,
+                summary="Vocabulary evaluation finished.",
+            )
+        ]
+    )
+    assert retrieve(study, question="eval results?")["question_terms"] == ["evaluation", "result"]
+    assert [f["id"] for f in retrieve(study, question="evals")["facts"]] == ["ev"]
+
+
+def test_dated_records_precede_undated_and_report_time_orders_only_undated():
+    common = dict(relation="occurred", slot=None, status="uncertain")
+    dated = fact(
+        "dated",
+        target="event:release",
+        summary="Release shipped.",
+        valid_at="2025-01-01T00:00:00Z",
+        valid_ts=1735689600.0,
+        reported_at="2026-09-22T00:00:00Z",
+        **common,
+    )
+    newer = fact(
+        "a-report",
+        target="event:migration",
+        summary="Migration may be blocked.",
+        valid_at=None,
+        valid_ts=None,
+        reported_at="2026-09-10T00:00:00Z",
+        **common,
+    )
+    older = fact(
+        "z-report",
+        target="event:backup",
+        summary="Backup may be late.",
+        valid_at=None,
+        valid_ts=None,
+        reported_at="2026-09-01T00:00:00Z",
+        **common,
+    )
+    out = retrieve(raw(uncertain=[older, newer, dated]), limit=10)
+    # An old event reported yesterday is not newer than an undated report from last week.
+    assert [f["id"] for f in out["facts"]] == ["dated", "a-report", "z-report"]
+
+
+def test_identical_legacy_copies_show_newest_ingestion_when_no_report_time():
+    shared = dict(
+        relation="occurred",
+        target="event:deploy",
+        slot=None,
+        status="uncertain",
+        valid_at=None,
+        valid_ts=None,
+        summary="Deploy pending.",
+    )
+    copies = [
+        fact("a-old", recorded_at="2026-09-01T00:00:00Z", episode_id="ep-old", **shared),
+        fact("z-new", recorded_at="2026-09-20T00:00:00Z", episode_id="ep-new", **shared),
+    ]
+    out = retrieve(raw(uncertain=copies))
+    assert [f["id"] for f in out["facts"]] == ["z-new"]
+    assert out["facts"][0]["source"] == "ep-new"
+    assert out["facts"][0]["report_count"] == 2
+    # A report time, when present, still wins over ingestion time.
+    reported = [{**copies[0], "reported_at": "2026-09-21T00:00:00Z"}, copies[1]]
+    assert retrieve(raw(uncertain=reported))["facts"][0]["id"] == "a-old"
+
+
+@pytest.mark.integration
+def test_legacy_fact_report_time_matches_between_live_and_historical(graph, monkeypatch):
+    from graph_memory import store as store_module
+    from graph_memory.models import Evidence, Transcript
+    from tests.test_session_sources import extraction
+
+    store, ns = graph
+    t = Transcript(
+        namespace=ns,
+        source_id="legacy",
+        session_id="legacy",
+        source_format="session-records-v1",
+        messages=[
+            {
+                "id": "early",
+                "role": "assistant",
+                "source_type": "assistant_report",
+                "content": "Atlas uses MySQL.",
+                "timestamp": "2026-09-22T08:00:00.250+00:00",
+            },
+            {
+                "id": "late",
+                "role": "assistant",
+                "source_type": "assistant_report",
+                "content": "Atlas uses MySQL.",
+                "timestamp": "2026-09-22T12:00:00+03:00",
+            },
+        ],
+    )
+    receipt = store.stage(t)
+    candidate = extraction("early", status="uncertain")
+    candidate.facts[0].evidence.append(Evidence(message_id="late", quote="Atlas uses MySQL."))
+    with monkeypatch.context() as previous_engine:
+        # A fact committed before reported_at existed stored no such property.
+        previous_engine.setattr(store_module, "latest_report_time", lambda stamps: None)
+        store.commit(ns, receipt["episode_id"], candidate)
+    stored = store.read(
+        lambda tx: tx.run(
+            "MATCH (f:MemoryFact {namespace:$ns}) RETURN f.reported_at AS reported", ns=ns
+        ).single()["reported"]
+    )
+    assert stored is None
+    checkpoint = Journal(store).verify(ns)["sequence"]
+    live = v.recall(store, v.RecallView(namespace=ns, entity="Atlas"))
+    historical = v.recall(store, v.RecallView(namespace=ns, entity="Atlas", at_change=checkpoint))
+    assert live["facts"] == historical["facts"]
+    assert live["facts"][0]["reported_at"] == "2026-09-22T09:00:00+00:00"
+    assert live["facts"][0]["at"] is None
+    full = v.recall(store, v.RecallView(namespace=ns, entity="Atlas", detail="full"))
+    assert full["uncertain"][0]["reported_at"] == "2026-09-22T09:00:00+00:00"

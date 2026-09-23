@@ -20,18 +20,23 @@ Identical facts in the same temporal category are grouped, with support counts.
 Repeated events with different dates remain distinct. Different uncertain
 wordings also remain distinct: a shorter later summary cannot replace a detailed
 earlier report just because they name the same endpoints. Identical uncertain
-reports expose `report_count` and `source_sessions`, not an independent-support
-count. Repetition across sessions can include memory-derived echoes; it is never
-a promotion out of the uncertain category. `reported_at` is the source message's
-time and orders comparable reports; it does not fill a missing event date or prove
-that a later report corrected an earlier one. A fact the user confirmed
+reports expose `report_count` rather than an independent-support count, and
+identical records in any category expose `source_sessions` when they come from
+more than one conversation. Repetition across sessions can include memory-derived
+echoes; it is never a promotion out of the uncertain category. `reported_at` is
+the source message's time and orders comparable reports; it does not fill a
+missing event date or prove that a later report corrected an earlier one. Dated
+records still order by their event time first. A fact the user confirmed
 with `memory_confirm` carries `confirmed_by_user: true`. Summary excerpts are capped
 at 500 characters and explicitly marked when truncated. Plans, uncertain claims,
 undated documents and conflicting claims never become current facts by formatting.
 
 Questions rank individual facts by weighted lexical overlap, with small lexical
 normalizations for deployment/evaluation questions and a preference for measured
-outcomes when asking for results. Partial matches remain available through
+outcomes when asking for results. The response echoes `question_terms`, the
+words that ranked; when a question holds only stop words or the entity's own
+name, the list is empty and the facts are unranked, as if no question were given.
+Partial matches remain available through
 pagination instead of being discarded by a highest-score-only filter. Explicit
 database/framework/language questions also match the relation and target kind.
 Matching an older value also selects other facts in the same genuine exclusive
@@ -48,11 +53,13 @@ nothing, not that the subject has no relevant real-world facts.
 Use `offset` and the returned `next_offset` to retrieve more compact results.
 Every call resolves the graph again. Check the revision between pages, or use
 `known_at`/`at_change` for a fixed historical view. Derived conclusions have their
-own availability counts and support IDs; `detail:"full"` exposes their full lists.
+own availability counts and support IDs; the legacy full view without a question
+exposes their full lists.
 
 With a `question`, `detail:"full"` uses exactly the same ranking, total limit,
 offset, history selection and `facts` envelope as compact, expanding each chosen
-fact to its original record. Detail changes the amount of evidence returned,
+fact to its original record plus the same `report_count`/`support_count` and
+`source_sessions` fields. Detail changes the amount of evidence returned,
 not which question is answered. For the legacy unranked diagnostic projection,
 omit `question` and pass `detail:"full", limit:30`; its limit remains per lane,
 and offset/history filtering do not apply. The same full detail option
@@ -114,6 +121,10 @@ limits, duplicate grouping, pagination, old-value questions, lexical misses,
 explicit excerpts, source quotes, retractions, namespace isolation and historical
 evidence. Integration tests run in the disposable database from
 `compose.test.yaml` (port 37687), not the live imports.
+
+`python -m evals.recall_regression PRIVATE_SNAPSHOT --output REPORT` replays
+question-ranked selection on frozen projections with source-reviewed answer IDs;
+see [evals](../evals/README.md#frozen-recall-regression).
 
 `python -m evals.recall_payloads PRIVATE_SNAPSHOT.json` compares the old 30-per-lane
 response with the default compact response on the same frozen graph records.

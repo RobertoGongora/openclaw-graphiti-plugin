@@ -127,7 +127,9 @@ class Message(Model):
 
 
 class RecallOrigin(Model):
-    # Local source-message IDs (same session), plus memory fact IDs when available.
+    # The read messages a report followed: local message IDs in a session-records
+    # transcript, stored MemoryMessage IDs when a direct MCP write cites a stored
+    # report. Memory fact IDs are included when the read output named them.
     result_ids: Annotated[list[Key], Field(max_length=200)] = Field(default_factory=list)
     fact_ids: Annotated[list[Key], Field(max_length=200)] = Field(default_factory=list)
 
@@ -142,7 +144,11 @@ class Transcript(Model):
     source_updated_at: AwareDatetime | None = None
     source_format: str | None = None
     verified_source_refs: dict[str, Key] = Field(default_factory=dict)
-    memory_origins: dict[Key, RecallOrigin] = Field(default_factory=dict)
+    # Omitted when empty: episode IDs and the daemon's change fingerprints are
+    # digests of this payload, and a transcript without reads must keep its old ones.
+    memory_origins: dict[Key, RecallOrigin] = Field(
+        default_factory=dict, exclude_if=lambda origins: not origins
+    )
     title: Text | None = None
     focus_message_ids: list[Key] = Field(default_factory=list)
     messages: Annotated[list[Message], Field(min_length=1, max_length=500)]
@@ -400,7 +406,7 @@ class Extraction(Model):
                     and not any(m.id in fresh for m in validation)
                 ):
                     reject(
-                        "A memory-derived report is not a new independent claim. Cite fresh corroborating tool evidence or omit the repeated fact; retain original memory fact IDs in source provenance.",
+                        "A memory-derived report is not a new independent claim. Omit the repeated fact unless a fresh tool result in this transcript corroborates this specific claim; then cite that result in validation_evidence. Original memory fact IDs remain in source provenance.",
                         ["facts", fact_index, "evidence"],
                     )
                 primary = any(m.source_type == "user_assertion" for m in claims) or any(

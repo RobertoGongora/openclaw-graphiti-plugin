@@ -11,7 +11,7 @@ from pydantic import AwareDatetime, Field, model_validator
 
 from . import aliases
 from . import models as m
-from .store import normalized
+from .store import digest, normalized
 from .temporal import role, shared_slots
 
 LANES = ("current", "planned", "events", "uncertain", "documented", "conflicts", "history")
@@ -95,6 +95,13 @@ def reported_time(f):
     return datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp() if stamp else 0
 
 
+def recency(f):
+    """Newest event first; undated records follow, newest report first. One
+    record's event time is never compared with another record's report time."""
+    ts = f.get("valid_ts")
+    return (0, -ts, -reported_time(f)) if ts is not None else (1, 0, -reported_time(f))
+
+
 def relevance(raw, terms, shared):
     """Rank individual records. Only exclusive state roles inherit old-value matches."""
     facts = [f for lane in LANES for f in raw[lane]]
@@ -145,6 +152,18 @@ def relevance(raw, terms, shared):
     return {f["id"]: max(scores[f["id"]], roles.get(role(f, shared), 0)) for f in facts}
 
 
+def group_fields(f, lane, copies=1, sessions=1):
+    """Repeat counts shared by compact and full detail: repetition, never proof."""
+    result = {}
+    count = max(copies, len(f.get("corroborating_fact_ids", [])))
+    if count > 1:
+        result["report_count" if lane == "uncertain" else "support_count"] = count
+    if sessions > 1:
+        # Said again in another conversation: a reason to check the claim, not proof.
+        result["source_sessions"] = sessions
+    return result
+
+
 def compact_fact(f, lane, copies=1, sessions=1):
     result = {
         "id": f["id"],
@@ -162,12 +181,7 @@ def compact_fact(f, lane, copies=1, sessions=1):
         result["documented_at"] = f["documented_at"]
     if f.get("reported_at"):
         result["reported_at"] = f["reported_at"]
-    count = max(copies, len(f.get("corroborating_fact_ids", [])))
-    if count > 1:
-        result["report_count" if lane == "uncertain" else "support_count"] = count
-    if sessions > 1:
-        # Said again in another conversation: a reason to check the claim, not proof.
-        result["source_sessions"] = sessions
+    result.update(group_fields(f, lane, copies, sessions))
     return result
 
 
@@ -208,7 +222,10 @@ def recall(store, r):
             groups.setdefault(key, []).append(f)
     ranked = []
     for key, copies in groups.items():
-        copies.sort(key=lambda f: (-reported_time(f), f["id"]))
+        # The copy shown for identical wording: newest report, then newest ingestion
+        # when no report time exists. This chooses attribution, never rank.
+        copies.sort(key=lambda f: f["id"])
+        copies.sort(key=lambda f: (reported_time(f), f.get("recorded_at") or ""), reverse=True)
         f = copies[0]
         score = max(scores[c["id"]] for c in copies)
         if terms and score == 0:
@@ -223,18 +240,14 @@ def recall(store, r):
         "documented": 5,
         "history": 6,
     }
-    ranked.sort(
-        key=lambda x: (
-            -x[3],
-            priority[x[0]],
-            -(x[1].get("valid_ts") or reported_time(x[1])),
-            x[1]["id"],
-        )
-    )
+    ranked.sort(key=lambda x: (-x[3], priority[x[0]], *recency(x[1]), x[1]["id"]))
     selected = ranked[r.offset : r.offset + r.limit]
+
+    def sessions(copies):
+        return len({c.get("session_id") for c in copies})
+
     facts = [
-        compact_fact(f, lane, len(copies), len({c.get("session_id") for c in copies}))
-        for lane, f, copies, _ in selected
+        compact_fact(f, lane, len(copies), sessions(copies)) for lane, f, copies, _ in selected
     ]
     next_offset = r.offset + len(selected)
     # Derived conclusions remain explicitly separate and bounded; they never replace facts.
@@ -255,7 +268,9 @@ def recall(store, r):
     room = max(0, r.limit - len(facts))
     result = {
         "entity": r.entity,
-        **({"question": r.question} if r.question else {}),
+        # The words that ranked. Empty means the question held only stop words or
+        # the entity's own name, and the facts are unranked as if it were omitted.
+        **({"question": r.question, "question_terms": sorted(terms)} if r.question else {}),
         "status": "ambiguous"
         if raw["ambiguous"]
         else "not_found"
@@ -281,7 +296,10 @@ def recall(store, r):
         **metadata(raw),
     }
     if r.detail == "full":
-        result["facts"] = [{**f, "lane": lane} for lane, f, _, _ in selected]
+        result["facts"] = [
+            {**f, "lane": lane, **group_fields(f, lane, len(copies), sessions(copies))}
+            for lane, f, copies, _ in selected
+        ]
     return result
 
 
@@ -370,11 +388,20 @@ def evidence(store, r):
                 message = messages.get(quote["message_id"], {})
                 source_ref = payload.get("verified_source_refs", {}).get(quote["message_id"])
                 if payload.get("source_format") == "session-records-v1" and message:
-                    from .store import digest
-
                     source_ref = digest(
                         [payload["namespace"], payload["session_id"], quote["message_id"]]
                     )
+                origin = payload.get("memory_origins", {}).get(quote["message_id"])
+                if origin and payload.get("source_format") == "session-records-v1":
+                    # Stored message IDs, the same form as source_message_id and
+                    # as MemoryMessage.memory_read_refs.
+                    origin = {
+                        **origin,
+                        "result_ids": [
+                            digest([payload["namespace"], payload["session_id"], rid])
+                            for rid in origin.get("result_ids", [])
+                        ],
+                    }
                 output.append(
                     {
                         **quote,
@@ -392,11 +419,7 @@ def evidence(store, r):
                             if k in message
                         },
                         "message_available": bool(message),
-                        **(
-                            {"memory_origin": payload["memory_origins"][quote["message_id"]]}
-                            if quote["message_id"] in payload.get("memory_origins", {})
-                            else {}
-                        ),
+                        **({"memory_origin": origin} if origin else {}),
                     }
                 )
             return output

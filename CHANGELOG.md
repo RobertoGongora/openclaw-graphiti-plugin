@@ -11,7 +11,18 @@
   Pure recall-report batches complete without another model extraction.
 - Comparable reports use source-message time rather than ingestion time; repeated
   uncertain reports no longer advertise their count as independent support.
-
+  Compact recall renames `sessions` to `source_sessions` and, for uncertain
+  records only, `support_count` to `report_count`; full detail with a question
+  carries the same fields, and every question response lists `question_terms`.
+  Facts committed before `reported_at` existed derive it from their evidence
+  messages in one UTC form for live and historical reads alike.
+- Memory-derived reports are recognized by exact tool names: memory graph tools,
+  Codex `spawn_agent`/`wait_agent`/`send_message`/`followup_task` and Claude Code
+  `Task`/`Agent` results, plus reads of memory-bank notes. Code under a `memory/`
+  directory or a chat tool whose name contains `send_message` does not count.
+  Every user-role message, including a delegated instruction, starts a new turn.
+  Transcripts without memory reads keep their previous episode IDs and change
+  fingerprints, so an upgrade does not re-import unchanged memory-bank files.
 - **Cross-session leak in ContextEngine mode**: per-session state was kept on the
   shared engine instance, so `assemble()` for one session could inject another
   session's transcript and lifecycle events. State is now keyed by session id.

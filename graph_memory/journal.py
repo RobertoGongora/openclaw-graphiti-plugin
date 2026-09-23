@@ -8,6 +8,7 @@ from collections import Counter
 from datetime import UTC, datetime
 
 from .models import now
+from .recall_provenance import latest_report_time
 from .source_graph import LABELS as SOURCE_LABELS
 from .store import digest, normalized
 from .temporal import project
@@ -927,8 +928,6 @@ class Journal:
         ids = {e["id"] for e in selected}
 
         def grounded(f):
-            from .recall_provenance import latest_report_time
-
             s = state["MemoryEntity"].get(f["subject_id"])
             t = state["MemoryEntity"].get(f["target_id"])
             e = state["MemoryEpisode"].get(f["episode_id"])

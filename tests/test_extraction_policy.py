@@ -98,3 +98,70 @@ def test_reduced_view_and_committed_fact_keep_original_evidence(graph):
     )
     saved = json.loads(store.episode(ns, eid)["payload"])
     assert saved["messages"][1]["content"] == "Opaque original tool output: Postgres"
+
+
+def test_model_view_keeps_read_ids_in_batch_and_labels_memory_results():
+    import json
+
+    fid = "f" * 64
+    tool = "mcp__graph_memory__memory_evidence"
+    payload = {
+        "transcript": {
+            "source_format": "session-records-v1",
+            "memory_origins": {
+                "report": {"result_ids": ["elsewhere", "quotes"], "fact_ids": [fid]}
+            },
+            "messages": [
+                {
+                    "id": "call",
+                    "role": "assistant",
+                    "source_type": "tool_call",
+                    "content": "{}",
+                    "call_id": "c",
+                    "tool_name": tool,
+                },
+                {
+                    "id": "quotes",
+                    "role": "tool",
+                    "source_type": "tool_result",
+                    "content": "quotes",
+                    "call_id": "c",
+                    "tool_name": tool,
+                },
+                {
+                    "id": "agent",
+                    "role": "tool",
+                    "source_type": "tool_result",
+                    "content": "Sub-agent report",
+                    "call_id": "d",
+                    "tool_name": "Agent",
+                },
+                {
+                    "id": "fresh",
+                    "role": "tool",
+                    "source_type": "tool_result",
+                    "content": "MySQL 8.0.36",
+                    "call_id": "e",
+                    "tool_name": "exec_command",
+                },
+                {
+                    "id": "report",
+                    "role": "assistant",
+                    "source_type": "assistant_report",
+                    "content": "Atlas uses MySQL.",
+                },
+            ],
+        },
+        "existing_entities": [],
+        "existing_relationships": [],
+    }
+    before = deepcopy(payload)
+    view = extraction_payload(payload)
+    assert payload == before
+    # Which reports repeat memory, and which reads in this batch they follow.
+    assert view["transcript"]["memory_origins"] == {"report": {"result_ids": ["quotes"]}}
+    assert fid not in json.dumps(view)
+    kinds = {m["id"]: m["source_type"] for m in view["transcript"]["messages"]}
+    # The validator will not accept these as corroboration; the model sees the same label.
+    assert kinds["quotes"] == "memory_read" and kinds["agent"] == "memory_read"
+    assert kinds["fresh"] == "tool_result" and kinds["report"] == "assistant_report"

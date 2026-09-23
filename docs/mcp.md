@@ -132,7 +132,8 @@ See [rendering](rendering.md) for whole-graph and custom-Cypher examples.
 Recall/latest now default to [compact JSON with evidence on demand](compact-recall.md).
 The catalog contains ten tools, including the read-only `memory_evidence`.
 The scoped server supplies namespace automatically. Supply an entity name in `entity` and optionally a question to select relevant
-facts. `detail:"full"` retains access to the legacy record format.
+facts. `detail:"full"` expands the same ranked selection to original records;
+without a question it is the legacy per-lane record projection.
 
 
 `memory_confirm` records that the user vouches for an uncertain fact. It takes

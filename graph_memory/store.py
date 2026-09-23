@@ -10,6 +10,7 @@ from datetime import datetime
 from neo4j import WRITE_ACCESS, GraphDatabase
 
 from .models import Extraction, Transcript, now
+from .recall_provenance import latest_report_time
 from .temporal import project
 from .version import engine_fingerprint
 
@@ -489,7 +490,14 @@ class GraphStore:
             fact_ids = []
             documented = transcript.source_updated_at or transcript.source_created_at
             messages = {m.id: m for m in transcript.messages}
-            from .recall_provenance import latest_report_time
+
+            def trusted(mid):
+                # A direct MCP write may date its own unverified messages. Only a
+                # verified source message's time can order reports.
+                return (
+                    transcript.source_format != "direct-mcp-v1"
+                    or mid in transcript.verified_source_refs
+                )
 
             for fact in extraction.facts:
                 raw = fact.model_dump(mode="json")
@@ -542,7 +550,7 @@ class GraphStore:
                     "reported_at": latest_report_time(
                         stamp.isoformat()
                         for e in fact.evidence
-                        if (stamp := messages[e.message_id].timestamp)
+                        if trusted(e.message_id) and (stamp := messages[e.message_id].timestamp)
                     ),
                     "retracted": False,
                 }
@@ -611,7 +619,7 @@ class GraphStore:
         # A fact counts only when its endpoints and its evidence exist; one missing
         # either is excluded, never shown as established. Reading repairs nothing:
         # restoring edges is the repair command's job, and a recall must not write.
-        return tx.run(
+        rows = tx.run(
             "MATCH (f:MemoryFact {namespace:$ns}) "
             "WHERE (f.subject_id IN $ids OR ($relation IS NULL AND f.target_id IN $ids)) "
             "AND ($relation IS NULL OR f.relation=$relation) "
@@ -620,12 +628,18 @@ class GraphStore:
             "WHERE s.id=f.subject_id AND t.id=f.target_id AND e.id=f.episode_id "
             "CALL { WITH f UNWIND coalesce(f.message_refs,[]) AS mid "
             "OPTIONAL MATCH (m:MemoryMessage {id:mid,namespace:$ns}) "
-            "RETURN toString(max(datetime(m.timestamp))) AS reported } "
-            "RETURN f {.*,reported_at:coalesce(f.reported_at,reported),subject_name:s.name,subject_kind:s.kind,target_name:t.name,target_kind:t.kind} AS fact",
+            "RETURN collect(m.timestamp) AS stamps } "
+            "RETURN f {.*,subject_name:s.name,subject_kind:s.kind,target_name:t.name,target_kind:t.kind} AS fact,stamps",
             ns=namespace,
             ids=ids,
             relation=relation,
         ).data()
+        for row in rows:
+            # One canonical UTC form, the same one the journal derives: a fact
+            # committed before reported_at existed takes its evidence messages' time.
+            fact = row["fact"]
+            fact["reported_at"] = fact.get("reported_at") or latest_report_time(row.pop("stamps"))
+        return rows
 
     def recall(
         self,

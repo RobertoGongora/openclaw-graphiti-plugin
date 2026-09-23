@@ -33,7 +33,12 @@ Source-message time orders otherwise comparable reports; ingestion time does
 not. Expose that time separately as reported_at without changing the event-time
 projection, manufacturing dates, deleting old evidence, or declaring uncertain
 corrections verified. Explicitly contradictory reports still need verification
-or an explicit correction/retraction; chronology alone is not proof.
+or an explicit correction/retraction; chronology alone is not proof. Dated records
+order by event time before report time; the two are never compared with each
+other. A direct MCP write only contributes report time through verified source
+messages, never through a timestamp the caller chose for an unverified message.
+Live and historical reads derive a missing reported_at from evidence messages in
+the same UTC form.
 
 Keep main-agent and sub-agent transcripts. Agent identity is not a proxy for
 novelty: sub-agents can discover independently observed facts, and the main agent
@@ -53,10 +58,21 @@ instructions must still judge whether the fresh evidence supports that exact
 claim; deterministic checks establish source eligibility, not semantic truth.
 
 Direct memory reads, evidence reads and literal nested tools.memory_* calls are
-recognized. Opaque/dynamic programs and memory paraphrases whose origin is absent
-from the source cannot always be recognized. Do not claim complete semantic
-novelty detection. Origin IDs are bounded; unparseable result content still marks
-the report as memory-derived, but may lack original fact IDs.
+recognized, as are delegation results by exact tool name: Codex spawn_agent,
+wait_agent, send_message and followup_task, and Claude Code Task and Agent. A
+memory-bank note is a .md or .txt file under a memory directory; code whose path
+contains the word memory, or a chat tool whose name contains send_message, does
+not taint a report, even where the parser's broader labels hold such output back
+from validation. Every user-role message starts a turn, including a delegated or
+automated instruction, so a sub-agent's later finding is not tainted by an
+earlier read. Opaque/dynamic programs and memory paraphrases whose origin is
+absent from the source cannot always be recognized. Do not claim complete
+semantic novelty detection. Origin IDs are bounded; unparseable result content
+still marks the report as memory-derived, but may lack original fact IDs. The
+model view carries only the read IDs present in the batch and labels memory and
+delegation results as memory reads; the recalled fact IDs stay in the stored
+payload. A transcript without reads serializes exactly as before, so episode IDs
+and the daemon's change fingerprints do not change on upgrade.
 
 ## Existing knowledge and validation
 

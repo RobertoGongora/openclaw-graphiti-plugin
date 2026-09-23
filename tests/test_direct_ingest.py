@@ -150,3 +150,42 @@ def test_stored_source_roundtrip_through_evidence_and_direct_write(graph):
     committed = store.commit(ns, receipt["episode_id"], extraction("m"))
     result = evidence(store, EvidenceRequest(namespace=ns, fact_ids=committed["fact_ids"]))
     assert result["facts"][0]["claims"][0]["source_message_id"] == ref
+    # The verified source's time, inherited from the stored message, orders the report.
+    assert result["facts"][0]["fact"]["reported_at"] == "2026-09-16T10:00:00+00:00"
+
+
+def test_sourced_report_keeps_its_memory_origin_and_cannot_repeat_the_memory():
+    source = dict(
+        id="stored",
+        namespace="test",
+        content="Atlas uses MySQL.",
+        role="assistant",
+        source_type="assistant_report",
+        timestamp="2026-09-15T10:00:00Z",
+        memory_read_refs=["b" * 64],
+        recalled_fact_ids=["c" * 64],
+    )
+    t = prepare(Store([source]), request(sources={"m": "stored"}))
+    assert t.memory_origins["m"].result_ids == ["b" * 64]
+    assert t.memory_origins["m"].fact_ids == ["c" * 64]
+    assert not t.can_yield_facts()
+    with pytest.raises(ValueError, match="memory-derived report"):
+        extraction("m", status="uncertain").validate_evidence(t)
+    assert t.model_dump(mode="json")["memory_origins"]["m"]["result_ids"] == ["b" * 64]
+
+
+def test_unsourced_direct_message_time_does_not_order_reports(graph):
+    from datetime import UTC, datetime
+
+    from graph_memory.retrieval import EvidenceRequest, evidence
+    from graph_memory.service import MemoryService
+
+    store, ns = graph
+    r = request()
+    r.transcript.namespace = ns
+    r.transcript.messages[0].timestamp = datetime(2099, 1, 1, tzinfo=UTC)
+    receipt = MemoryService(store).remember(r)
+    committed = store.commit(ns, receipt["episode_id"], extraction("m", status="uncertain"))
+    result = evidence(store, EvidenceRequest(namespace=ns, fact_ids=committed["fact_ids"]))
+    # A caller may date its own unverified claim; that date cannot rank it first.
+    assert result["facts"][0]["fact"].get("reported_at") is None

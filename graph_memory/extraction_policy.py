@@ -6,13 +6,29 @@ from copy import deepcopy
 def extraction_payload(payload):
     """Keep full durable evidence; omit ineligible opaque text only from model input."""
     reduced = deepcopy(payload)
-    if reduced["transcript"].get("source_format") not in {"session-records-v1", "direct-mcp-v1"}:
+    transcript = reduced["transcript"]
+    if transcript.get("source_format") not in {"session-records-v1", "direct-mcp-v1"}:
         return reduced
-    for message in reduced["transcript"]["messages"]:
+    from .recall_provenance import read_results
+
+    reads = read_results(transcript["messages"])
+    for message in transcript["messages"]:
         if message.get("source_type") == "context":
             message["content"] = (
                 "[Context text omitted: not eligible claim or validation evidence.]"
             )
+        elif message.get("id") in reads and message.get("source_type") == "tool_result":
+            # Memory and delegation results never corroborate a claim. Label them
+            # for the model the way the validator judges them, not on a retry.
+            message["source_type"] = "memory_read"
+    if transcript.get("memory_origins"):
+        # The model needs which reports repeat memory and which reads they follow.
+        # The recalled fact IDs are provenance for the stored payload, not input.
+        present = {message.get("id") for message in transcript["messages"]}
+        transcript["memory_origins"] = {
+            mid: {"result_ids": [rid for rid in origin.get("result_ids", []) if rid in present]}
+            for mid, origin in transcript["memory_origins"].items()
+        }
     return reduced
 
 

@@ -2,6 +2,11 @@
 
 Status: implemented and validated, 2026-09-17.
 
+**Updated 2026-09-23.** ADR 009 changes one decision below: with a `question`,
+`detail:"full"` now shares compact's ranking, limit, offset and history choice
+and expands the selected records. The legacy per-lane projection remains the
+full view without a question.
+
 Memory lookup latency is only part of the calling agent's cost. The old MCP
 response returned entire records in up to seven temporal categories, including
 repeated provenance. Frozen examples produced 175–202 KB of JSON before the MCP
