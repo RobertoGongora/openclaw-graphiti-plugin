@@ -14,6 +14,9 @@
   Compact recall renames `sessions` to `source_sessions` and, for uncertain
   records only, `support_count` to `report_count`; full detail with a question
   carries the same fields, and every question response lists `question_terms`.
+  `status:"conflict"` now requires a disagreement that matches the question as
+  strongly as the best result; weaker matches appear in `counts.conflicts_matching`
+  and `conflict_fact_ids`, which also lists the other side of each disagreement.
   Facts committed before `reported_at` existed derive it from their evidence
   messages in one UTC form for live and historical reads alike.
 - Memory-derived reports follow reads of any memory tool the parser labels,

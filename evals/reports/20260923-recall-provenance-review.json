@@ -3,6 +3,7 @@
   "commits": [
     "900f864",
     "d434bc1",
+    "b56c1ac",
     "final"
   ],
   "engine": "79cf8ef74218ea28252547cb94f97a43abc734d16e1820bc4cde3eeefd1f462e",
@@ -146,6 +147,11 @@
       "finding": "stat substring excluded stateful memory tools; edits containing a literal nested call tainted the turn",
       "severity": "low",
       "status": "fixed after final round, test-covered"
+    },
+    {
+      "finding": "status conflict fired on partial-match conflicts absent from the page",
+      "severity": "low",
+      "status": "fixed after author decision: strongest-match status plus conflicts_matching and conflict_fact_ids"
     }
   ],
   "parser_prefix_hash_pinned": "ff2762de96e2080f80d65c09b64c7673e537a767ffeecef4bfdaaa7897be48b3",
@@ -153,7 +159,6 @@
   "limitations": [
     "A fresh but unrelated tool result cited as validation still lets the model promote an echo; deterministic checks establish eligibility, not relevance.",
     "An unsourced memory_ingest restatement of a recalled fact is still accepted as uncertain.",
-    "status: conflict reflects every matching conflict record, including partial matches outside the returned page; an intent decision for the author.",
     "Dynamic nested calls (aliases, tools?.x, spaced brackets), servers named memories (mcp__mem0__search_memories) and memory-bank directories not named memory/ are not recognized; isMeta user text ends a turn.",
     "Recalled fact IDs are capped at 200 in sorted order.",
     "tests/test_revision_overlay.py counts memory spaces database-wide, so it flakes when another test run shares the disposable database.",

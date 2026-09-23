@@ -266,6 +266,17 @@ def recall(store, r):
                 }
             )
     room = max(0, r.limit - len(facts))
+    # A disagreement is the answer only when it matches as strongly as the best
+    # result; conflicts sort first among equals, so they then lead page one. A
+    # weaker partial match is still reported, with every side's ID to verify.
+    disputed = [x for x in ranked if x[0] == "conflicts"]
+    strongest = bool(disputed) and max(x[3] for x in disputed) == ranked[0][3]
+    sides = []
+    for _, f, copies, _ in disputed:
+        dispute = role(f, shared)
+        sides += [c["id"] for c in copies]
+        sides += [c["id"] for c in raw["conflicts"] if role(c, shared) == dispute]
+    sides = list(dict.fromkeys(sides))
     result = {
         "entity": r.entity,
         # The words that ranked. Empty means the question held only stop words or
@@ -276,7 +287,7 @@ def recall(store, r):
         else "not_found"
         if not raw["entities"]
         else "conflict"
-        if any(x[0] == "conflicts" for x in ranked)
+        if strongest
         else "found"
         if ranked or derived
         else "no_matching_facts",
@@ -290,7 +301,18 @@ def recall(store, r):
             "returned": len(facts),
             "derived_returned": min(room, len(derived)),
             "derived_available": len(derived),
+            "conflicts_matching": len(disputed),
         },
+        # Up to ten, the most memory_evidence accepts in one call: the matching
+        # conflicting records and the other sides of each disagreement.
+        **(
+            {
+                "conflict_fact_ids": sides[:10],
+                "conflict_fact_ids_truncated": len(sides) > 10,
+            }
+            if sides
+            else {}
+        ),
         "next_offset": next_offset if next_offset < len(ranked) else None,
         "evidence_tool": "memory_evidence",
         **metadata(raw),

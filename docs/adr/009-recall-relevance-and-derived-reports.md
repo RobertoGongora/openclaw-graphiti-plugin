@@ -24,6 +24,10 @@ Full without a question retains the legacy diagnostic lane view. There is no
 retrieval-time model call. Rank individual facts rather than broad report roles,
 keep partial matches available, and inherit relevance only within real exclusive
 state roles so an old database name still surfaces its replacement/conflict.
+Because partial matches stay, the conflict status needs a threshold: it reports a
+disagreement only when one matches as strongly as the best result, so the page
+never claims a dispute it does not show. Weaker matching disagreements remain
+visible as a count and as evidence-ready IDs, both sides included.
 Weighted lexical matching remains imperfect; measured-outcome and schema-concept
 features are transparent heuristics, not semantic understanding.
 

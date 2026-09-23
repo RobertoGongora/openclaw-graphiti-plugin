@@ -48,7 +48,13 @@ label, and the fact is grouped by its target instead. This relies on the existin
 and relationship identities; it cannot repair misclassified or missing facts.
 Historical rows are hidden by default; `include_history:true` makes them eligible.
 Conflicts, source backlog counts, entity ambiguity, omitted-result counts and
-snapshot revision remain visible. `no_matching_facts` means selection found
+snapshot revision remain visible. `status:"conflict"` means a disagreement
+matches the question as strongly as the best result, so it leads the first page.
+A weaker partial match does not change the status, but is never hidden:
+`counts.conflicts_matching` counts the matching conflicting records, and
+`conflict_fact_ids` lists them with the other side of each disagreement, up to
+ten, ready for one `memory_evidence` call. Without a question every record ties,
+so any conflict sets the status. `no_matching_facts` means selection found
 nothing, not that the subject has no relevant real-world facts.
 
 Use `offset` and the returned `next_offset` to retrieve more compact results.

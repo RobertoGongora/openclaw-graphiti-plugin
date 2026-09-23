@@ -654,3 +654,53 @@ def test_legacy_fact_report_time_matches_between_live_and_historical(graph, monk
     assert live["facts"][0]["at"] is None
     full = v.recall(store, v.RecallView(namespace=ns, entity="Atlas", detail="full"))
     assert full["uncertain"][0]["reported_at"] == "2026-09-22T09:00:00+00:00"
+
+
+def test_weak_conflict_match_is_reported_without_claiming_the_answer_is_disputed():
+    data = raw(
+        conflicts=[
+            fact("c1", summary="Atlas uses MySQL for release sessions."),
+            fact("c2", target=PG["key"], summary="Atlas uses Postgres."),
+        ],
+        events=[
+            fact(
+                "ev",
+                relation="occurred",
+                target="event:release",
+                slot=None,
+                summary="Release 2.3 shipped to production after QA signoff.",
+            )
+        ],
+    )
+    out = retrieve(data, question="When did release 2.3 ship to production?", limit=1)
+    # Page one is the release event; the database dispute only shares the word release.
+    assert [f["id"] for f in out["facts"]] == ["ev"]
+    assert out["status"] == "found"
+    assert out["counts"]["conflicts_matching"] == 2
+    assert set(out["conflict_fact_ids"]) == {"c1", "c2"}
+    assert out["conflict_fact_ids_truncated"] is False
+    # A question aimed at the disagreement itself still reports it, first on the page.
+    direct = retrieve(data, question="Which database, MySQL or Postgres?", limit=1)
+    assert direct["status"] == "conflict"
+    assert direct["facts"][0]["lane"] == "conflicts"
+    # Without a question every record ties, so any disagreement is the answer.
+    assert retrieve(data)["status"] == "conflict"
+    assert "conflict_fact_ids" not in retrieve(raw(current=[fact("x")]))
+
+
+def test_conflict_ids_include_the_unmatched_side_and_stay_within_one_evidence_call():
+    shared = dict(relation="about", slot="owner", status="active")
+    data = raw(
+        conflicts=[
+            fact("topic-a", target="topic:billing", summary="Billing owns invoices.", **shared),
+            fact("topic-b", target="topic:finance", summary="Finance owns it.", **shared),
+        ],
+        current=[fact("db", summary="Atlas uses MySQL.")],
+    )
+    out = retrieve(data, question="invoices")
+    # Only one side matches the question; the other side comes along to be checked.
+    assert out["conflict_fact_ids"] == ["topic-a", "topic-b"]
+    many = raw(conflicts=[fact(f"c{i:02}", target=f"database:{i}") for i in range(12)])
+    capped = retrieve(many, limit=1)
+    assert len(capped["conflict_fact_ids"]) == 10
+    assert capped["conflict_fact_ids_truncated"] is True
