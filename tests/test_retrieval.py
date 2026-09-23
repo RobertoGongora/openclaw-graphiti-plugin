@@ -180,6 +180,7 @@ def test_mcp_compact_and_exact_evidence_historical_namespace_retraction(graph):
     assert detail["claims"][0]["quote"] == "Atlas uses MySQL."
     assert detail["claims"][0]["role"] == "user"
     assert detail["claims"][0]["message_available"]
+    assert detail["claims"][0]["source_context"] == {"kind": "user_assertion"}
     assert detail["validation"] == []
     assert detail["source"]["id"] == receipt["episode_id"]
     assert v.evidence(store, v.EvidenceRequest(namespace="other", fact_ids=[fid]))[
@@ -189,6 +190,7 @@ def test_mcp_compact_and_exact_evidence_historical_namespace_retraction(graph):
     assert call("memory_evidence", fact_ids=[fid])["facts"][0]["fact"]["retracted"]
     past = call("memory_evidence", fact_ids=[fid], at_change=checkpoint)
     assert not past["facts"][0]["fact"]["retracted"]
+    assert past["facts"][0]["claims"] == detail["claims"]
     assert call("memory_recall", query="Atlas")["facts"] == []
     assert call("memory_recall", query="Atlas", at_change=checkpoint)["facts"][0]["id"] == fid
     assert len(json.dumps(result)) < len(json.dumps(full))
@@ -709,3 +711,217 @@ def test_conflict_ids_include_the_unmatched_side_and_stay_within_one_evidence_ca
     grouped = retrieve(copies, question="database")
     assert grouped["counts"]["conflicts_matching"] == 3
     assert grouped["conflict_fact_ids"] == ["x1", "x2", "y"]
+
+
+@pytest.mark.parametrize(
+    ("concept", "topic", "answer"),
+    [
+        ("database", "disk", "Disk capacity expands automatically."),
+        ("framework", "routing", "Routing uses a filesystem convention."),
+        ("language", "concurrency", "Concurrency uses cooperative tasks."),
+    ],
+)
+def test_schema_bonus_preserves_broad_questions_without_burying_specific_topics(
+    concept, topic, answer
+):
+    data = raw(
+        current=[
+            fact(
+                "stack",
+                relation=f"uses_{concept}",
+                target=f"{concept}:component",
+                target_kind=concept,
+                summary="Atlas uses Component.",
+            ),
+            fact(
+                "answer",
+                relation="about",
+                target=f"topic:{topic}",
+                slot=None,
+                summary=answer,
+            ),
+        ],
+        uncertain=[
+            fact(
+                "discussion",
+                relation="about",
+                target="topic:notes",
+                slot=None,
+                summary=f"A {concept} review was discussed.",
+            )
+        ],
+    )
+    assert retrieve(data, question=f"Which {concept} is there?")["facts"][0]["id"] == "stack"
+    question = f"How does the {concept} treat {topic}?"
+    compact = retrieve(data, question=question)
+    assert compact["facts"][0]["id"] == "answer"
+    assert "stack" in {f["id"] for f in compact["facts"]}  # Still a partial match.
+    assert [f["id"] for f in retrieve(data, question=question, detail="full")["facts"]] == [
+        f["id"] for f in compact["facts"]
+    ]
+    assert "there" not in v.tokens("is there")
+    assert "there" not in v.ENTITY_STOP  # Entity lookup keeps its existing semantics.
+
+
+def test_evidence_exposes_recorded_calls_without_guessing_which_file_supported_quote():
+    command = "cat project/CLAUDE.md; cat project/AGENTS.md"
+    messages = [
+        dict(id="report", role="assistant", source_type="assistant_report", content="Disks grow."),
+        dict(
+            id="call",
+            role="assistant",
+            source_type="tool_call",
+            tool_name="Bash",
+            call_id="shell",
+            content=json.dumps({"command": command}),
+        ),
+        dict(
+            id="file",
+            role="tool",
+            source_type="tool_result",
+            tool_name="Bash",
+            call_id="shell",
+            content="Disks grow.",
+            gaps=["shell_output_not_attributed_to_files"],
+        ),
+        dict(
+            id="docs",
+            role="tool",
+            source_type="tool_result",
+            tool_name="mcp__context7__query-docs",
+            content="Disk capacity expands.",
+        ),
+    ]
+    stored = fact(
+        "answer",
+        evidence=json.dumps([dict(message_id="report", quote="Disks grow.")]),
+        validation_evidence=json.dumps(
+            [
+                dict(message_id="file", quote="Disks grow."),
+                dict(message_id="docs", quote="Disk capacity expands."),
+                dict(message_id="missing", quote="Missing historical source."),
+            ]
+        ),
+    )
+    episode = dict(id="episode", payload=json.dumps({"messages": messages}))
+    tx = SimpleNamespace(
+        run=lambda *a, **kw: SimpleNamespace(data=lambda: [dict(fact=stored, episode=episode)])
+    )
+    out = v.evidence(
+        SimpleNamespace(transaction=lambda f: f(tx)),
+        v.EvidenceRequest(namespace="test", fact_ids=["answer"]),
+    )
+    item = out["facts"][0]
+    assert item["claims"][0]["source_context"]["kind"] == "assistant_report"
+    shell, docs, missing = item["validation"]
+    assert shell["source_context"] == {
+        "kind": "shell_output",
+        "tool_call": dict(
+            message_id="call",
+            tool_name="Bash",
+            arguments=json.dumps({"command": command}),
+            arguments_truncated=False,
+        ),
+        "gaps": ["shell_output_not_attributed_to_files"],
+    }
+    assert docs["source_context"] == {"kind": "documentation_lookup"}
+    assert missing["source_context"] == {"kind": "unavailable"}
+    assert not missing["message_available"]
+    assert "not live verification" in out["scope"]
+    assert item["fact"]["status"] == stored["status"]
+
+
+def test_source_context_preserves_memory_origin_and_bounds_recorded_call_arguments():
+    message = dict(role="assistant", source_type="assistant_report")
+    call = dict(id="call", tool_name="Read", content="x" * 1300)
+    out = v.source_context(message, call, {"result_ids": ["read"]})
+    assert out["kind"] == "memory_derived_report"
+    assert out["tool_call"]["arguments_truncated"]
+    assert len(out["tool_call"]["arguments"]) == 1200
+    split_call = {**call, "content": "short last fragment", "gaps": ["record_split_into_chunks"]}
+    assert v.source_context(message, split_call, None)["tool_call"]["arguments_truncated"]
+    # Context carried from an earlier batch is still context, even when the
+    # original tool name is a recognized documentation tool.
+    assert v.source_context(
+        dict(role="tool", source_type="context", tool_name="mcp__context7__query-docs"), None, None
+    ) == {"kind": "context"}
+
+
+def test_frozen_recall_eval_enforces_rank_budget_and_leaves_unscored_cases_unscored():
+    from evals.recall_regression import evaluate
+
+    case = dict(
+        entity="Atlas",
+        question="disk",
+        expected_ids=["answer"],
+        raw=raw(
+            current=[
+                fact("answer", relation="about", target="topic:disk", summary="Disk grows."),
+            ]
+        ),
+        max_answer_rank=1,
+    )
+    assert evaluate([case])["rank_targets_met"]
+    second = {**case, "question": "disk size", "raw": deepcopy(case["raw"])}
+    second["raw"]["current"].append(
+        fact("first", relation="about", target="topic:size", summary="Disk size was checked.")
+    )
+    ranked = evaluate([second])
+    assert ranked["cases"][0]["answer_records_returned"] == 1
+    assert ranked["cases"][0]["first_answer_rank"] == 2
+    assert not ranked["rank_targets_met"]
+    missing = {**case, "expected_ids": ["missing"]}
+    assert not evaluate([missing])["rank_targets_met"]
+    unscored = evaluate([{**case, "expected_ids": []}])
+    assert unscored["scored_cases"] == 0
+    assert unscored["cases"][0]["rank_target_met"] is None
+    with pytest.raises(ValueError, match="max_answer_rank"):
+        evaluate([{**case, "max_answer_rank": 9}], limit=8)
+
+
+def test_supabase_disk_growth_is_near_top_for_original_natural_question():
+    subject = "service:supabase"
+    data = raw(
+        current=[
+            fact(
+                "growth",
+                subject=subject,
+                relation="about",
+                target="topic:disk-autoscaling",
+                slot=None,
+                summary="Supabase disk autoscales; headroom is not a planning concern.",
+            ),
+            *[
+                fact(
+                    f"database-{i}",
+                    subject=subject,
+                    target=f"database:postgres-{i}",
+                    target_kind="database",
+                    summary=f"Postgres instance {i} runs in the stack.",
+                )
+                for i in range(8)
+            ],
+        ],
+        uncertain=[
+            fact(
+                "probe",
+                subject=subject,
+                relation="worked_on",
+                target=subject,
+                slot=None,
+                summary="Assistant checked how to read the real Supabase disk size.",
+            )
+        ],
+    )
+    store = SimpleNamespace(recall=lambda *a, **kw: deepcopy(data))
+    request = v.RecallView(
+        namespace="test",
+        entity="Supabase",
+        question="How does Supabase treat database disk size?",
+        limit=3,
+    )
+    result = v.recall(store, request)
+    assert "growth" in [f["id"] for f in result["facts"]]
+    assert [
+        f["id"] for f in v.recall(store, request.model_copy(update={"detail": "full"}))["facts"]
+    ] == [f["id"] for f in result["facts"]]

@@ -3,6 +3,14 @@
 
 ### Fixed
 
+- Specific recall questions no longer give broad database/framework/language
+  roles an extra ranking bonus when topic words match the stored facts. Broad
+  stack questions keep that bonus. Frozen recall evals now enforce answer-rank
+  budgets, including the Supabase disk-growth regression.
+- Evidence quotes now describe recorded source kinds and include bounded paired
+  tool-call arguments, artifact metadata and source gaps when available. These
+  distinguish documentation lookups from saved reports and shell output without
+  treating any source label as fresh verification.
 - Question-based full memory recall now ranks and pages the same facts as compact
   recall. Partial matches and distinct uncertain reports remain available instead
   of being discarded in favor of one wording or the highest keyword score.

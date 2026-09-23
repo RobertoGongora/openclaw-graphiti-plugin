@@ -25,6 +25,8 @@ STOP.update(
 STOP.update(
     "reports report conflicting status changed change finish finished before after between date".split()
 )
+STOP.add("there")
+SCHEMA_CONCEPTS = {"database", "framework", "language"}
 
 
 class RecallView(m.HistoricalScope):
@@ -133,13 +135,18 @@ def relevance(raw, terms, shared):
             ws.add("result")
             measured.add(f["id"])
     frequency = Counter(w for ws in words.values() for w in ws)
+    # A schema role helps answer "which database?", but is only background
+    # context in "database disk size?". Keep lexical matches in both cases;
+    # reserve the role bonus for queries without any matching topic words.
+    schema_question = not ((terms & frequency.keys()) - SCHEMA_CONCEPTS)
     scores = {
         fid: sum(1 + math.log(1 + len(words) / frequency[t]) for t in sorted(terms & ws))
         for fid, ws in words.items()
     }
     for f in facts:
         concepts = tokens(f.get("relation", "")) | {f.get("target_kind", "")}
-        scores[f["id"]] += 6 * len(terms & concepts & {"database", "framework", "language"})
+        if schema_question:
+            scores[f["id"]] += 6 * len(terms & concepts & SCHEMA_CONCEPTS)
         if "result" in terms and f["id"] in measured:
             scores[f["id"]] += 4
     roles = {}
@@ -356,6 +363,56 @@ def latest(store, r):
     return out
 
 
+def source_context(message, call, origin):
+    """Describe recorded collection methods, never the truth of a cited claim.
+
+    An opaque shell result stays opaque: expose its recorded command rather
+    than guessing which file (or remote system) produced a particular quote.
+    """
+    source_type = message.get("source_type")
+    tool = message.get("tool_name") or ""
+    role = message.get("role")
+    if not message:
+        kind = "unavailable"
+    elif origin:
+        kind = "memory_derived_report"
+    elif source_type in {"context", "memory_read", "memory_write", "tool_call"}:
+        kind = source_type
+    elif role == "user":
+        kind = "user_assertion"
+    elif role == "assistant":
+        kind = "assistant_report"
+    elif role == "tool":
+        if tool in {"mcp__context7__query-docs", "mcp__context7__get-library-docs"}:
+            kind = "documentation_lookup"
+        elif tool in {"Bash", "exec_command", "functions.exec_command", "shell_command"}:
+            kind = "shell_output"
+        elif tool in {"Read", "read_file"}:
+            kind = "file_read"
+        else:
+            kind = "tool_output"
+    else:
+        kind = "recorded_context"
+    result = {"kind": kind}
+    if call:
+        content = call.get("content", "")
+        result["tool_call"] = {
+            "message_id": call["id"],
+            "tool_name": call.get("tool_name"),
+            "arguments": content[:1200],
+            "arguments_truncated": len(content) > 1200
+            or "record_split_into_chunks" in call.get("gaps", []),
+        }
+    if message.get("touches"):
+        result["artifacts"] = [
+            {k: t[k] for k in ("path", "operation", "captured", "gap") if k in t}
+            for t in message["touches"]
+        ]
+    if message.get("gaps"):
+        result["gaps"] = message["gaps"]
+    return result
+
+
 def evidence(store, r):
     """Fetch exact evidence by namespace-bound IDs, including retracted claims.
 
@@ -403,8 +460,14 @@ def evidence(store, r):
         if source is not None:
             source["source_uri"] = payload.get("source_uri")
         messages = {msg["id"]: msg for msg in payload.get("messages", [])}
+        calls = {}
+        for msg in messages.values():
+            if msg.get("call_id") and msg.get("source_type") == "tool_call":
+                # Keep the earliest available fragment, not the tail of a long
+                # call. Split source records are explicitly marked incomplete.
+                calls.setdefault(msg["call_id"], msg)
 
-        def quotes(field, f=f, messages=messages, payload=payload):
+        def quotes(field, f=f, messages=messages, payload=payload, calls=calls):
             output = []
             for quote in json.loads(f.get(field) or "[]"):
                 message = messages.get(quote["message_id"], {})
@@ -441,6 +504,9 @@ def evidence(store, r):
                             if k in message
                         },
                         "message_available": bool(message),
+                        "source_context": source_context(
+                            message, calls.get(message.get("call_id")), origin
+                        ),
                         **({"memory_origin": origin} if origin else {}),
                     }
                 )
@@ -460,7 +526,7 @@ def evidence(store, r):
     return {
         "facts": items,
         "missing_fact_ids": [fid for fid in wanted if fid not in found],
-        "scope": "stored evidence; use recall/latest for current state",
+        "scope": "stored evidence; source_context describes recorded sources, not live verification; use recall/latest for current state",
         **({"knowledge_history": history} if history is not None else {}),
     }
 

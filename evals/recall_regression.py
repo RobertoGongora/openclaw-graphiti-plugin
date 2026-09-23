@@ -1,6 +1,6 @@
 """Evaluate frozen recall projections offline. Never reads or writes a live graph.
 
-Input: {cases:[{entity, question, raw, expected_ids, baseline_ids?}]}.
+Input: {cases:[{entity, question, raw, expected_ids, baseline_ids?, max_answer_rank?}]}.
 Expected IDs are source-reviewed answer records, not model-generated expectations.
 Empty expected_ids means unscored, not an assertion that no answer exists.
 Reports omit private questions, fact text and IDs; keep the input private.
@@ -36,6 +36,14 @@ def evaluate(cases, limit=8):
             raise ValueError(f"Case {index}: detail changed answer selection")
         expected = set(case.get("expected_ids", []))
         hits = expected & set(ids)
+        first_answer_rank = next((i for i, fid in enumerate(ids, 1) if fid in expected), None)
+        max_rank = case.get("max_answer_rank", limit)
+        if (
+            not isinstance(max_rank, int)
+            or isinstance(max_rank, bool)
+            or not 1 <= max_rank <= limit
+        ):
+            raise ValueError(f"Case {index}: max_answer_rank must be between 1 and {limit}")
         rows.append(
             {
                 "case": index,
@@ -45,9 +53,11 @@ def evaluate(cases, limit=8):
                 "baseline_answer_records_returned": len(
                     expected & set(case.get("baseline_ids", []))
                 ),
-                "first_answer_rank": next(
-                    (i for i, fid in enumerate(ids, 1) if fid in expected), None
-                ),
+                "first_answer_rank": first_answer_rank,
+                "max_answer_rank": max_rank,
+                "rank_target_met": first_answer_rank is not None and first_answer_rank <= max_rank
+                if expected
+                else None,
                 "returned_facts": len(ids),
                 "matching_unique": compact["counts"]["matching_unique"],
                 "compact_json_bytes": len(json.dumps(compact).encode()),
@@ -62,6 +72,7 @@ def evaluate(cases, limit=8):
         "scored_cases": sum(r["scored"] for r in rows),
         "cases_with_answer_before": sum(r["baseline_answer_records_returned"] > 0 for r in rows),
         "cases_with_answer_after": sum(r["answer_records_returned"] > 0 for r in rows),
+        "rank_targets_met": all(r["rank_target_met"] for r in rows if r["scored"]),
         "median_formatting_ms": statistics.median(r["formatting_ms"] for r in rows)
         if rows
         else None,
@@ -79,6 +90,8 @@ def main():
     report["snapshot_sha256"] = hashlib.sha256(raw).hexdigest()
     args.output.write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps({k: v for k, v in report.items() if k != "cases"}))
+    if not report["rank_targets_met"]:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
