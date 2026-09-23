@@ -56,12 +56,17 @@ def transcript(path, count, old, lookback):
             for m in messages
         ]
     end, selected = batch(messages, count, lookback)
+    from graph_memory.recall_provenance import report_origins
+
+    # Whole-session origins, as the feed computes them, so the eval sees what production sends.
+    origins = report_origins(messages)
     return Transcript(
         namespace="eval:lookback",
         session_id=path.stem,
         source_id=f"lookback:{path.stem}:{count}",
         source_format=FORMAT,
         messages=selected,
+        memory_origins={m.id: origins[m.id] for m in selected if m.id in origins},
         focus_message_ids=[m.id for m in messages[count:end]],
     )
 

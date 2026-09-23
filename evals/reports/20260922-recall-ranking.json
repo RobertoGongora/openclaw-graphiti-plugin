@@ -9,9 +9,9 @@
       "first_answer_rank": 2,
       "returned_facts": 8,
       "matching_unique": 15,
-      "compact_json_bytes": 4350,
-      "full_json_bytes": 15090,
-      "formatting_ms": 3.5,
+      "compact_json_bytes": 4390,
+      "full_json_bytes": 15130,
+      "formatting_ms": 3.56,
       "compact_full_same_ids": true
     },
     {
@@ -23,9 +23,9 @@
       "first_answer_rank": 3,
       "returned_facts": 8,
       "matching_unique": 60,
-      "compact_json_bytes": 4843,
-      "full_json_bytes": 16730,
-      "formatting_ms": 2.83,
+      "compact_json_bytes": 4935,
+      "full_json_bytes": 16822,
+      "formatting_ms": 2.94,
       "compact_full_same_ids": true
     },
     {
@@ -37,9 +37,9 @@
       "first_answer_rank": 3,
       "returned_facts": 8,
       "matching_unique": 87,
-      "compact_json_bytes": 4731,
-      "full_json_bytes": 15847,
-      "formatting_ms": 2.93,
+      "compact_json_bytes": 4826,
+      "full_json_bytes": 15942,
+      "formatting_ms": 2.89,
       "compact_full_same_ids": true
     },
     {
@@ -51,9 +51,9 @@
       "first_answer_rank": 2,
       "returned_facts": 8,
       "matching_unique": 77,
-      "compact_json_bytes": 3828,
-      "full_json_bytes": 13805,
-      "formatting_ms": 30.89,
+      "compact_json_bytes": 3869,
+      "full_json_bytes": 13846,
+      "formatting_ms": 31.9,
       "compact_full_same_ids": true
     },
     {
@@ -65,9 +65,9 @@
       "first_answer_rank": 1,
       "returned_facts": 8,
       "matching_unique": 349,
-      "compact_json_bytes": 4827,
-      "full_json_bytes": 16098,
-      "formatting_ms": 30.4,
+      "compact_json_bytes": 4933,
+      "full_json_bytes": 16204,
+      "formatting_ms": 31.2,
       "compact_full_same_ids": true
     },
     {
@@ -79,9 +79,9 @@
       "first_answer_rank": null,
       "returned_facts": 8,
       "matching_unique": 826,
-      "compact_json_bytes": 3871,
-      "full_json_bytes": 13268,
-      "formatting_ms": 37.38,
+      "compact_json_bytes": 3959,
+      "full_json_bytes": 13356,
+      "formatting_ms": 31.51,
       "compact_full_same_ids": true
     },
     {
@@ -93,9 +93,9 @@
       "first_answer_rank": 1,
       "returned_facts": 8,
       "matching_unique": 116,
-      "compact_json_bytes": 3374,
-      "full_json_bytes": 12094,
-      "formatting_ms": 43.6,
+      "compact_json_bytes": 3419,
+      "full_json_bytes": 12139,
+      "formatting_ms": 44.32,
       "compact_full_same_ids": true
     },
     {
@@ -107,9 +107,9 @@
       "first_answer_rank": 1,
       "returned_facts": 8,
       "matching_unique": 456,
-      "compact_json_bytes": 4503,
-      "full_json_bytes": 15314,
-      "formatting_ms": 45.37,
+      "compact_json_bytes": 4589,
+      "full_json_bytes": 15400,
+      "formatting_ms": 47.04,
       "compact_full_same_ids": true
     },
     {
@@ -121,9 +121,9 @@
       "first_answer_rank": 4,
       "returned_facts": 8,
       "matching_unique": 305,
-      "compact_json_bytes": 4174,
-      "full_json_bytes": 13999,
-      "formatting_ms": 45.08,
+      "compact_json_bytes": 4218,
+      "full_json_bytes": 14043,
+      "formatting_ms": 47.65,
       "compact_full_same_ids": true
     }
   ],
@@ -131,7 +131,7 @@
   "scored_cases": 8,
   "cases_with_answer_before": 4,
   "cases_with_answer_after": 8,
-  "median_formatting_ms": 30.89,
+  "median_formatting_ms": 31.51,
   "basis": "Offline selection on identical frozen facts. Development regression cases, not an independent accuracy estimate. Times exclude MCP/database/model work. No answer claim for unscored cases.",
   "snapshot_sha256": "79f14bb956bc954a0385d242036c3354d7c3154aff9ab4e5c68c55f31de23e9f"
 }

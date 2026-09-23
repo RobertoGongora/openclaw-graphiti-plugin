@@ -222,6 +222,19 @@ def test_source_cursor_unchanged_and_origins_cross_long_batch_boundary(graph, tm
             False,
         ),
         ("mcp__graph_memory__memory_status", "tool_result", [], True),
+        ("memory_search", "memory_read", ["derived_memory_retrieval_not_fresh_verification"], True),
+        (
+            "mcp__graphiti__search_memory_facts",
+            "memory_read",
+            ["derived_memory_retrieval_not_fresh_verification"],
+            True,
+        ),
+        (
+            "mcp__memory__read_graph",
+            "memory_read",
+            ["derived_memory_retrieval_not_fresh_verification"],
+            True,
+        ),
         ("spawn_agent", "context", ["delegated_agent_report_not_execution_evidence"], True),
         ("Agent", "tool_result", [], True),
         ("Task", "tool_result", [], True),
@@ -269,6 +282,8 @@ def test_only_exact_delegation_and_memory_tools_taint_the_next_report(name, kind
     "path, taints",
     [
         ("/Users/rob/.claude/projects/-Users-rob-app/memory/atlas.md", True),
+        ("/Users/rob/.claude/projects/-Users-rob-app/memory/topics/atlas.md", True),
+        ("/Users/rob/notes/memories/atlas.txt", True),
         ("/repo/MEMORY.md", True),
         ("/repo/src/memory/allocator.c", False),
     ],
@@ -345,13 +360,21 @@ def test_deeply_nested_read_output_does_not_break_intake():
 
 
 def test_recalled_ids_from_lane_keyed_full_views_and_chunked_output():
-    fid = "d" * 64
+    fid, entity = "d" * 64, "e" * 64
     full_view = json.dumps(
-        {"current": [{"id": fid, "summary": "Atlas uses MySQL."}], "uncertain": []}
+        {
+            "entities": [{"id": entity, "key": "project:atlas", "kind": "project"}],
+            "current": [{"id": fid, "relation": "uses_database", "summary": "Atlas uses MySQL."}],
+            "uncertain": [],
+        }
     )
     assert recalled_ids(full_view) == [fid]
+    # The same view as an MCP text content block, escaped inside the outer JSON.
+    wrapped = json.dumps({"content": [{"type": "text", "text": full_view}]})
+    assert recalled_ids(wrapped) == [fid]
     chunk = '"summary": "Atlas uses MySQL."}, {"id": "' + fid + '", "summary": "Atlas'
     assert recalled_ids(chunk) == [fid]
+    assert recalled_ids(wrapped[wrapped.index("current") :]) == [fid]
     assert recalled_ids("no identifiers here") == []
 
 
@@ -475,3 +498,86 @@ def test_evidence_exposes_stored_read_ids_and_message_nodes_keep_them(graph, tmp
         store, v.EvidenceRequest(namespace=ns, fact_ids=committed["fact_ids"], at_change=checkpoint)
     )
     assert historical["facts"][0]["claims"] == found["facts"][0]["claims"]
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        "await tools['mcp__graph_memory__memory_recall']({entity:'Atlas'})",
+        'await tools["graph_memory"].memory_recall({entity:"Atlas"})',
+    ],
+)
+def test_bracket_form_nested_memory_calls_are_recognized(call):
+    t = transcript(
+        [
+            message("call", "tool_call", call, call_id="c", tool_name="functions.exec"),
+            message(
+                "read", "tool_result", "Atlas uses MySQL.", call_id="c", tool_name="functions.exec"
+            ),
+            message("report", "assistant_report", "Atlas uses MySQL."),
+        ],
+        focus_message_ids=["report"],
+    )
+    assert t.memory_origins["report"].result_ids == ["read"]
+    assert not t.can_yield_facts()
+
+
+def test_carried_batch_context_stops_at_a_delegated_or_automated_instruction(tmp_path):
+    """A later batch carries the turn's tool results as context. An earlier
+    turn's memory read must not be carried across an instruction the parser holds
+    back as context, or the batch validator would taint the new finding again."""
+    from graph_memory.session_sources import batch
+
+    session_meta = (
+        json.dumps(
+            {
+                "type": "session_meta",
+                "timestamp": "2026-09-16T10:00:00Z",
+                "payload": {"source": "exec", "cwd": "/repo"},
+            }
+        )
+        + "\n"
+    )
+    p = tmp_path / "session.jsonl"
+    p.write_text(
+        session_meta
+        + codex("message", role="user", content="Task one: what does memory say?")
+        + codex(
+            "function_call", call_id="m", name="mcp__graph_memory__memory_evidence", arguments="{}"
+        )
+        + codex("function_call_output", call_id="m", output="Atlas uses MySQL.")
+        + codex("message", role="assistant", content="Memory says Atlas uses MySQL.")
+        + codex("message", role="user", content="Task two: inspect the cache.")
+        + "".join(
+            codex("function_call", call_id=f"x{i}", name="exec_command", arguments="{}")
+            + codex("function_call_output", call_id=f"x{i}", output=f"redis_version:7.2.{i}")
+            for i in range(6)
+        )
+        + codex("message", role="assistant", content="Atlas uses Redis 7.2 for caching.")
+    )
+    messages = list(records(p))
+    instructions = [m for m in messages if m.role == "user"]
+    assert all("automated_prompt_not_direct_user_assertion" in m.gaps for m in instructions)
+    # An evidence read keeps the parser's tool_result label; it is a read all the same.
+    read = next(m for m in messages if m.role == "tool" and "memory_evidence" in m.tool_name)
+    echo, finding = [m for m in messages if m.source_type == "assistant_report"]
+    origins = report_origins(messages)
+    assert origins[echo.id]["result_ids"] == [read.id]
+    assert finding.id not in origins
+    end, selected = batch(messages, len(messages) - 1)
+    assert instructions[1].id not in {m.id for m in selected}
+    assert read.id not in {m.id for m in selected}
+    t = Transcript(
+        namespace="test",
+        source_id="source",
+        session_id="session",
+        source_format="session-records-v1",
+        messages=selected,
+        memory_origins={m.id: origins[m.id] for m in selected if m.id in origins},
+        focus_message_ids=[m.id for m in messages[len(messages) - 1 : end]],
+    )
+    assert finding.id not in t.memory_origins
+    assert t.can_yield_facts()
+    extraction(
+        finding.id, quote="Atlas uses Redis 7.2 for caching.", status="uncertain"
+    ).validate_evidence(t)

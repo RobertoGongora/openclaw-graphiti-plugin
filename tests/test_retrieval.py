@@ -530,6 +530,21 @@ def test_question_terms_expose_unranked_stop_word_questions_and_normalized_forms
     )
     assert retrieve(study, question="eval results?")["question_terms"] == ["evaluation", "result"]
     assert [f["id"] for f in retrieve(study, question="evals")["facts"]] == ["ev"]
+    # The entity's own name ranks nothing: every fact of the entity would match it.
+    assert retrieve(data, question="Atlas")["question_terms"] == []
+    measured = raw(
+        uncertain=[
+            fact(
+                "rate",
+                relation="occurred",
+                target="event:rollout",
+                slot=None,
+                summary="Validation rate is 16%.",
+            )
+        ]
+    )
+    # A measured validation figure answers an evaluation question without the word.
+    assert [f["id"] for f in retrieve(measured, question="evaluation")["facts"]] == ["rate"]
 
 
 def test_dated_records_precede_undated_and_report_time_orders_only_undated():

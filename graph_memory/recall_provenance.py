@@ -5,18 +5,26 @@ import re
 from datetime import UTC, datetime
 
 MEMORY_CALL = re.compile(r"memory_(?:recall|latest|evidence|search_entities|render|status)\b")
+# Literal nested calls in Codex code mode: tools.x.memory_recall(, tools['x.memory_recall'](
+# and tools['x'].memory_recall(. Dynamic dispatch is not recognized.
 NESTED_READ = re.compile(
-    r"\btools\.[\w.]*memory_(?:recall|latest|evidence|search_entities|render|status)\s*\("
+    r"\btools(?:\.[\w.]*|\[['\"][\w.]*|\[['\"][\w.]*['\"]\]\.[\w.]*)"
+    r"memory_(?:recall|latest|evidence|search_entities|render|status)\b\w*(?:['\"]\])?\s*\("
 )
 # Exact tool names only: Codex multi-agent tools and Claude Code sub-agent tools.
 # A chat tool whose name merely contains send_message is not delegation.
 DELEGATION = frozenset(
     {"spawn_agent", "wait_agent", "send_message", "followup_task", "Task", "Agent"}
 )
-# The memory bank is notes under a memory directory. A source file whose path
-# happens to contain the word is code, not memory.
-MEMORY_FILE = re.compile(r"(?i)(?:^|/)memor(?:y|ies)/[^/]+\.(?:md|txt)$|(?:^|/)memory\.md$")
-FACT_ID = re.compile(r'"id"\s*:\s*"([a-f0-9]{64})"')
+# The memory bank is notes anywhere under a memory directory. A source file whose
+# path happens to contain the word is code, not memory.
+MEMORY_FILE = re.compile(
+    r"(?i)(?:^|/)memor(?:y|ies)/(?:[^/]+/)*[^/]+\.(?:md|txt)$|(?:^|/)memory\.md$"
+)
+# The parser labels every memory tool read; a process-memory statistic is not one.
+MEMORY_LABEL = "derived_memory_retrieval_not_fresh_verification"
+PROCESS_MEMORY = re.compile(r"(?i)usage|stat|metric|consumption|pressure|alloc")
+FACT_ID = re.compile(r'\\?"id\\?"\s*:\s*\\?"([a-f0-9]{64})\\?"')
 
 
 def field(msg, name, default=None):
@@ -43,6 +51,14 @@ def recalled_ids(content):
                     fid = fact.get("id") or (nested.get("id") if isinstance(nested, dict) else None)
                     if isinstance(fid, str) and re.fullmatch(r"[a-f0-9]{64}", fid):
                         found.add(fid)
+            # A record in a lane of the full view; an entity has a kind, not a relation.
+            fid = value.get("id")
+            if (
+                isinstance(fid, str)
+                and re.fullmatch(r"[a-f0-9]{64}", fid)
+                and ("relation" in value or "lane" in value)
+            ):
+                found.add(fid)
             for child in value.values():
                 visit(child, depth + 1)
         elif isinstance(value, list):
@@ -65,16 +81,19 @@ def recalled_ids(content):
 
 
 def memory_read(msg):
-    """A read of the memory graph or of a memory-bank note, by explicit tool name
-    or file. The parser's wider memory_read label, which also covers tools that
-    merely mention memory and code under a memory directory, does not taint a
-    report by itself; a caller-labelled read with no tool name to judge it by does."""
+    """A read of this or any other memory tool, or of a memory-bank note. The
+    parser's memory_read label also covers process-memory statistics and code
+    under a memory directory; those do not taint the report that follows."""
     name = field(msg, "tool_name") or ""
     if MEMORY_CALL.search(name):
         return True
     if field(msg, "source_type") != "memory_read":
         return False
-    return not name or any(
+    if not name:
+        return True
+    if MEMORY_LABEL in field(msg, "gaps", []):
+        return not PROCESS_MEMORY.search(name)
+    return any(
         field(t, "operation") == "read" and MEMORY_FILE.search(field(t, "path") or "")
         for t in field(msg, "touches", [])
     )

@@ -57,15 +57,18 @@ assertions/corrections and fresh tool-backed findings remain eligible. Model
 instructions must still judge whether the fresh evidence supports that exact
 claim; deterministic checks establish source eligibility, not semantic truth.
 
-Direct memory reads, evidence reads and literal nested tools.memory_* calls are
-recognized, as are delegation results by exact tool name: Codex spawn_agent,
+Direct memory reads, evidence reads, reads through any memory tool the parser
+labels (other memory servers included) and literal nested tools.memory_* calls
+are recognized, as are delegation results by exact tool name: Codex spawn_agent,
 wait_agent, send_message and followup_task, and Claude Code Task and Agent. A
-memory-bank note is a .md or .txt file under a memory directory; code whose path
-contains the word memory, or a chat tool whose name contains send_message, does
-not taint a report, even where the parser's broader labels hold such output back
-from validation. Every user-role message starts a turn, including a delegated or
-automated instruction, so a sub-agent's later finding is not tainted by an
-earlier read. Opaque/dynamic programs and memory paraphrases whose origin is
+memory-bank note is a .md or .txt file at any depth under a memory directory;
+code whose path contains the word memory, a process-memory statistics tool, or a
+chat tool whose name contains send_message does not taint a report, even where
+the parser's broader labels hold such output back from validation. Every
+user-role message starts a turn, including a delegated or automated instruction,
+both for origins and for the tool results carried as batch context, so a
+sub-agent's later finding is not tainted by an earlier read. Opaque/dynamic
+programs and memory paraphrases whose origin is
 absent from the source cannot always be recognized. Do not claim complete
 semantic novelty detection. Origin IDs are bounded; unparseable result content
 still marks the report as memory-derived, but may lack original fact IDs. The
@@ -91,4 +94,6 @@ never consult or write to the live graph, so evaluation output cannot alter thei
 inputs. Keep private text out of committed reports. The nine development questions
 include eight source-reviewed answer records and one unscored missing-rationale
 question; improvements on these cases are regression evidence, not an independent
-accuracy estimate. Follow up with unseen questions after deployment.
+accuracy estimate. Follow up with unseen questions after deployment, with expected
+answers reviewed against their sources, never taken from live recall: the study
+sessions that ask the questions are themselves ingested.

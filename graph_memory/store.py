@@ -637,8 +637,8 @@ class GraphStore:
         for row in rows:
             # One canonical UTC form, the same one the journal derives: a fact
             # committed before reported_at existed takes its evidence messages' time.
-            fact = row["fact"]
-            fact["reported_at"] = fact.get("reported_at") or latest_report_time(row.pop("stamps"))
+            fact, stamps = row["fact"], row.pop("stamps")
+            fact["reported_at"] = fact.get("reported_at") or latest_report_time(stamps)
         return rows
 
     def recall(

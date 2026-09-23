@@ -34,8 +34,9 @@ undated documents and conflicting claims never become current facts by formattin
 Questions rank individual facts by weighted lexical overlap, with small lexical
 normalizations for deployment/evaluation questions and a preference for measured
 outcomes when asking for results. The response echoes `question_terms`, the
-words that ranked; when a question holds only stop words or the entity's own
-name, the list is empty and the facts are unranked, as if no question were given.
+words that ranked; when a question holds only stop words or words the entity's
+own name already covers after normalization, the list is empty and the facts are
+unranked, as if no question were given.
 Partial matches remain available through
 pagination instead of being discarded by a highest-score-only filter. Explicit
 database/framework/language questions also match the relation and target kind.

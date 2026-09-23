@@ -378,7 +378,9 @@ def turn_results(messages, count, held, room):
     calls = {m.call_id: m for m in messages[:count] if m.source_type == "tool_call" and m.call_id}
     carried = []
     for m in reversed(messages[max(0, count - LOOKBACK_MESSAGES) : count]):
-        if m.source_type == "user_assertion":
+        # Any user-role message ends the turn, including a delegated or automated
+        # instruction; an earlier turn's memory reads are not this turn's context.
+        if m.role == "user":
             break
         if m.source_type != "tool_result" or m.tool_failed is True or m.id in held:
             continue

@@ -16,11 +16,13 @@
   carries the same fields, and every question response lists `question_terms`.
   Facts committed before `reported_at` existed derive it from their evidence
   messages in one UTC form for live and historical reads alike.
-- Memory-derived reports are recognized by exact tool names: memory graph tools,
-  Codex `spawn_agent`/`wait_agent`/`send_message`/`followup_task` and Claude Code
-  `Task`/`Agent` results, plus reads of memory-bank notes. Code under a `memory/`
-  directory or a chat tool whose name contains `send_message` does not count.
-  Every user-role message, including a delegated instruction, starts a new turn.
+- Memory-derived reports follow reads of any memory tool the parser labels,
+  memory-bank notes at any depth under a `memory/` directory, and delegation by
+  exact tool name: Codex `spawn_agent`/`wait_agent`/`send_message`/`followup_task`
+  and Claude Code `Task`/`Agent` results. Chat tools whose names contain
+  `send_message`, process-memory statistics tools, and code under a `memory/`
+  directory do not taint the next report. Every user-role message, including a
+  delegated instruction, starts a new turn for origins and for carried context.
   Transcripts without memory reads keep their previous episode IDs and change
   fingerprints, so an upgrade does not re-import unchanged memory-bank files.
 - **Cross-session leak in ContextEngine mode**: per-session state was kept on the
