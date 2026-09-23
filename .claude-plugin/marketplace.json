@@ -1,0 +1,14 @@
+{
+  "name": "graph-memory",
+  "owner": {
+    "name": "Rob"
+  },
+  "description": "Graph Memory plugin for Claude Code.",
+  "plugins": [
+    {
+      "name": "graph-memory",
+      "source": "./plugins/graph-memory",
+      "description": "Graph Memory MCP and memory skill for Claude Code."
+    }
+  ]
+}

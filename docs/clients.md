@@ -144,3 +144,22 @@ verified unchanged apart from the new registration.
 
 Private configuration backup and verification evidence are under
 `~/.local/share/graph-memory/deployment/codex-registration/`.
+
+## Claude Code plugin
+
+`plugins/graph-memory/` also carries a Claude Code manifest
+(`.claude-plugin/plugin.json`), and the repository root is a Claude Code
+marketplace (`.claude-plugin/marketplace.json`). Claude Code reads the same
+`.mcp.json` and `skills/memory/SKILL.md` as Codex, so both clients get one
+connection and one set of instructions.
+
+```sh
+claude plugin marketplace add /path/to/this/checkout
+claude plugin install graph-memory@graph-memory --scope user
+```
+
+Turn native memory off with `"autoMemoryEnabled": false` in
+`~/.claude/settings.json`. Do not add the transcript hooks when the transcript
+worker already mounts `~/.claude/projects`: choose one intake route per
+transcript directory. The installed plugin is cached, so reinstall after
+changing its files. Start a new session to load it.
