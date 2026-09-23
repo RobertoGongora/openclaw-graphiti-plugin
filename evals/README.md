@@ -104,6 +104,21 @@ failures are 1/8 versus 0/8, totaling 4/80 for each engine. The primary metrics
 support rollout after CI and backup. This bounded study does not prove statistical
 non-inferiority; batch evidence and the report preserve the variability and failures.
 
+## Frozen recall regression
+
+`python -m evals.recall_regression PRIVATE_SNAPSHOT --output REPORT` evaluates
+question-ranked compact/full views on saved complete projections, without any
+live graph or model access. Inputs contain `cases` with `entity`, `question`,
+`raw`, source-reviewed `expected_ids`, and optional `baseline_ids`. Every case
+needs a question; empty expectations are unscored. Outputs contain only sizes,
+timings and hit counts. Keep private snapshots in `.local/`. The 2026-09-22
+development comparison is `reports/20260922-recall-ranking.json`; it is not an
+independent accuracy estimate. Compact and full run on the same fake store, so
+their agreement checks the formatting path, not the database projection. Do not
+build expected answers from live recall: the study sessions that produced the
+original echoes are themselves ingested, so review each expected record against
+its source before freezing it.
+
 ## Establishing the golden standard
 
 `baselines/candidate.json` records the current candidate, not an automatically
@@ -161,3 +176,14 @@ separate known-answer cases for habits, freshness, verification-enabled sessions
 and source conflicts as the corpus grows; never replace expectations with the
 engine's output. Structural assertion fields complement human review of the full
 answer and tool trace.
+
+## Memory-derived claim support
+
+`MEMORY_LLM=codex uv run python -m evals.claim_support --output REPORT` checks
+the independent support model on eight fixed synthetic cases: unrelated output,
+structured evidence, paraphrase, negation, insufficient project scope, wrong
+project, a mock example, and an instruction embedded in evidence. It accesses no graph or live
+memory. Passing is evidence for these cases, not a semantic correctness guarantee.
+The deterministic tests separately cover commit enforcement, cache/source binding,
+checker outages, rejected-cache retries, revision preflight, and direct-write
+source requirements.

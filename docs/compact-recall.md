@@ -17,35 +17,59 @@ If vocabulary does not match, omit the question or use a more specific term.
 The default response contains at most five facts/derived conclusions total.
 Each fact has its ID, text, temporal category, date and source episode ID.
 Identical facts in the same temporal category are grouped, with support counts.
-Repeated events with different dates remain distinct. An uncertain claim is
-grouped more loosely: every unverified fact with the same subject, relation and
-target is one entry, shown in its latest wording, with `support_count` and, when
-it was said in more than one conversation, `sessions`. Repetition across sessions
-is a reason to check the claim (see `memory_status.corroboration`), never a
-promotion out of the uncertain category. A fact the user confirmed
+Repeated events with different dates remain distinct. Different uncertain
+wordings also remain distinct: a shorter later summary cannot replace a detailed
+earlier report just because they name the same endpoints. Identical uncertain
+reports expose `report_count` rather than an independent-support count, and
+identical records in any category expose `source_sessions` when they come from
+more than one conversation. Repetition across sessions can include memory-derived
+echoes; it is never a promotion out of the uncertain category. `reported_at` is
+the source message's time and orders comparable reports; it does not fill a
+missing event date or prove that a later report corrected an earlier one. Dated
+records still order by their event time first. A fact the user confirmed
 with `memory_confirm` carries `confirmed_by_user: true`. Summary excerpts are capped
 at 500 characters and explicitly marked when truncated. Plans, uncertain claims,
 undated documents and conflicting claims never become current facts by formatting.
 
-Questions select the strongest token matches. Matching an older value also
-selects other facts in the same subject/relation/exclusive role, so asking about
+Questions rank individual facts by weighted lexical overlap, with small lexical
+normalizations for deployment/evaluation questions and a preference for measured
+outcomes when asking for results. The response echoes `question_terms`, the
+words that ranked; when a question holds only stop words or words the entity's
+own name already covers after normalization, the list is empty and the facts are
+unranked, as if no question were given.
+Partial matches remain available through
+pagination instead of being discarded by a highest-score-only filter. Explicit
+database/framework/language questions also match the relation and target kind.
+Matching an older value also selects other facts in the same genuine exclusive
+state role, so asking about
 an old database can surface its replacement. A role is a slot that at least two
 facts of that subject and relation share; a slot only one fact carries is a
 label, and the fact is grouped by its target instead. This relies on the existing entity
 and relationship identities; it cannot repair misclassified or missing facts.
 Historical rows are hidden by default; `include_history:true` makes them eligible.
 Conflicts, source backlog counts, entity ambiguity, omitted-result counts and
-snapshot revision remain visible. `no_matching_facts` means selection found
+snapshot revision remain visible. `status:"conflict"` means a disagreement
+matches the question as strongly as the best result, so it leads the first page.
+A weaker partial match does not change the status, but is never hidden:
+`counts.conflicts_matching` counts the matching conflicting records, and
+`conflict_fact_ids` lists them with the other side of each disagreement, up to
+ten, ready for one `memory_evidence` call. Without a question every record ties,
+so any conflict sets the status. `no_matching_facts` means selection found
 nothing, not that the subject has no relevant real-world facts.
 
 Use `offset` and the returned `next_offset` to retrieve more compact results.
 Every call resolves the graph again. Check the revision between pages, or use
 `known_at`/`at_change` for a fixed historical view. Derived conclusions have their
-own availability counts and support IDs; `detail:"full"` exposes their full lists.
+own availability counts and support IDs; the legacy full view without a question
+exposes their full lists.
 
-For original records, call `memory_recall` with `detail:"full", limit:30`.
-This is the legacy entity projection: compact-only `question`, `offset` and
-`include_history` do not filter this diagnostic view. The same full detail option
+With a `question`, `detail:"full"` uses exactly the same ranking, total limit,
+offset, history selection and `facts` envelope as compact, expanding each chosen
+fact to its original record plus the same `report_count`/`support_count` and
+`source_sessions` fields. Detail changes the amount of evidence returned,
+not which question is answered. For the legacy unranked diagnostic projection,
+omit `question` and pass `detail:"full", limit:30`; its limit remains per lane,
+and offset/history filtering do not apply. The same full detail option
 is available on `memory_latest`. Latest retains ties/conflicts/uncertainty before
 applying its response limit; truncation cannot manufacture a single winner.
 
@@ -104,6 +128,10 @@ limits, duplicate grouping, pagination, old-value questions, lexical misses,
 explicit excerpts, source quotes, retractions, namespace isolation and historical
 evidence. Integration tests run in the disposable database from
 `compose.test.yaml` (port 37687), not the live imports.
+
+`python -m evals.recall_regression PRIVATE_SNAPSHOT --output REPORT` replays
+question-ranked selection on frozen projections with source-reviewed answer IDs;
+see [evals](../evals/README.md#frozen-recall-regression).
 
 `python -m evals.recall_payloads PRIVATE_SNAPSHOT.json` compares the old 30-per-lane
 response with the default compact response on the same frozen graph records.

@@ -20,6 +20,7 @@ def prepare(store, request):
         )
         sources = {row["source"]["id"]: row["source"] for row in rows}
     messages = []
+    origins = {}
     for msg in transcript.messages:
         ref = request.sources.get(msg.id)
         if ref:
@@ -33,7 +34,7 @@ def prepare(store, request):
             messages.append(
                 m.Message(
                     id=msg.id,
-                    content=msg.content,
+                    content=source["content"],
                     role=source["role"],
                     source_type=source["source_type"],
                     timestamp=source.get("timestamp"),
@@ -43,23 +44,30 @@ def prepare(store, request):
                     gaps=source.get("gaps", []),
                 )
             )
+            if source.get("memory_read_refs"):
+                origins[msg.id] = m.RecallOrigin(
+                    result_ids=source["memory_read_refs"],
+                    fact_ids=source.get("recalled_fact_ids", []),
+                )
         else:
             messages.append(
                 m.Message(
                     id=msg.id,
                     content=msg.content,
                     role="assistant",
-                    source_type="assistant_report",
+                    source_type="context",
                     timestamp=msg.timestamp,
                     gaps=["direct_write_without_verified_source"],
                 )
             )
-    return transcript.model_copy(
-        update={
+    return m.Transcript.model_validate(
+        {
+            **transcript.model_dump(),
             "source_format": "direct-mcp-v1",
             "source_kind": "transcript",
             "verified_source_refs": dict(request.sources),
             "messages": messages,
+            "memory_origins": origins,
             "source_created_at": None,
             "source_updated_at": None,
         }

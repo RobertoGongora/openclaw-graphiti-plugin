@@ -1,19 +1,29 @@
 """Bounded MCP views over the unchanged temporal projection; no model or graph writes."""
 
 import json
+import math
 import re
+from collections import Counter
+from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, Field, model_validator
 
 from . import aliases
 from . import models as m
-from .store import normalized
+from .store import digest, normalized
 from .temporal import role, shared_slots
 
 LANES = ("current", "planned", "events", "uncertain", "documented", "conflicts", "history")
 STOP = set(
     "a an the what which when where who why how is are was were do does did of for to in on at about me my our it its and or with has have tell please currently now we you i us use uses using used show give know".split()
+)
+ENTITY_STOP = frozenset(STOP)
+STOP.update(
+    "exact latest last current evidence confirm confirms confirmed support supported".split()
+)
+STOP.update(
+    "reports report conflicting status changed change finish finished before after between date".split()
 )
 
 
@@ -60,8 +70,98 @@ class EvidenceRequest(m.HistoricalScope):
     fact_ids: Annotated[list[m.Key], Field(min_length=1, max_length=10)]
 
 
-def tokens(text):
-    return {w for w in re.findall(r"[^\W_]+", normalized(text)) if w not in STOP}
+def tokens(text: str) -> set[str]:
+    # Small morphological normalization, not a domain synonym dictionary.
+    forms: dict[str, str] = {
+        "deployed": "deploy",
+        "deployment": "deploy",
+        "deploying": "deploy",
+        "evaluations": "evaluation",
+        "eval": "evaluation",
+        "evals": "evaluation",
+        "results": "result",
+        "benchmarks": "benchmark",
+    }
+    return {
+        forms[w] if w in forms else w
+        for w in re.findall(r"[^\W_]+", normalized(text))
+        if w not in STOP
+    }
+
+
+def reported_time(f):
+    # A report's timestamp orders reports; it never supplies a missing event date.
+    stamp = f.get("reported_at")
+    return datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp() if stamp else 0
+
+
+def recency(f):
+    """Newest event first; undated records follow, newest report first. One
+    record's event time is never compared with another record's report time."""
+    ts = f.get("valid_ts")
+    return (0, -ts, -reported_time(f)) if ts is not None else (1, 0, -reported_time(f))
+
+
+def relevance(raw, terms, shared):
+    """Rank individual records. Only exclusive state roles inherit old-value matches."""
+    facts = [f for lane in LANES for f in raw[lane]]
+    words = {
+        f["id"]: tokens(
+            " ".join(
+                str(f.get(k) or "")
+                for k in (
+                    "summary",
+                    "subject",
+                    "target",
+                    "relation",
+                    "slot",
+                    "subject_name",
+                    "target_name",
+                )
+            )
+        )
+        for f in facts
+    }
+    # Evaluation questions often name the study, while its result states the
+    # measured validation/benchmark numbers instead of repeating the question.
+    measured = set()
+    for f in facts:
+        ws = words[f["id"]]
+        if {"validation", "benchmark"} & ws:
+            ws.add("evaluation")
+        if re.search(r"\d(?:\.\d+)?\s*%|\b\d+\s+(?:passed|failed)\b", f["summary"]):
+            ws.add("result")
+            measured.add(f["id"])
+    frequency = Counter(w for ws in words.values() for w in ws)
+    scores = {
+        fid: sum(1 + math.log(1 + len(words) / frequency[t]) for t in sorted(terms & ws))
+        for fid, ws in words.items()
+    }
+    for f in facts:
+        concepts = tokens(f.get("relation", "")) | {f.get("target_kind", "")}
+        scores[f["id"]] += 6 * len(terms & concepts & {"database", "framework", "language"})
+        if "result" in terms and f["id"] in measured:
+            scores[f["id"]] += 4
+    roles = {}
+    for f in facts:
+        if (f["subject"], f["relation"], f.get("slot")) in shared and f[
+            "relation"
+        ] in m.SLOT_RELATIONS:
+            key = role(f, shared)
+            roles[key] = max(roles.get(key, 0), scores[f["id"]])
+    return {f["id"]: max(scores[f["id"]], roles.get(role(f, shared), 0)) for f in facts}
+
+
+def group_fields(f, lane, copies=1, sessions=1):
+    """Repeat counts shared by compact and full detail: repetition, never proof."""
+    result = {}
+    count = max(copies, len(f.get("corroborating_fact_ids", [])))
+    if count > 1:
+        result["report_count" if lane == "uncertain" else "support_count"] = count
+    if sessions > 1:
+        # Said again in another conversation: a reason to check the claim, not proof.
+        result["source_sessions"] = sessions
+    return result
 
 
 def compact_fact(f, lane, copies=1, sessions=1):
@@ -79,12 +179,9 @@ def compact_fact(f, lane, copies=1, sessions=1):
         result["confirmed_by_user"] = True
     if f.get("documented_at") and not f.get("valid_at"):
         result["documented_at"] = f["documented_at"]
-    count = max(copies, len(f.get("corroborating_fact_ids", [])))
-    if count > 1:
-        result["support_count"] = count
-    if sessions > 1:
-        # Said again in another conversation: a reason to check the claim, not proof.
-        result["sessions"] = sessions
+    if f.get("reported_at"):
+        result["reported_at"] = f["reported_at"]
+    result.update(group_fields(f, lane, copies, sessions))
     return result
 
 
@@ -102,41 +199,36 @@ def recall(store, r):
         r.entity,
         r.as_of,
         r.limit,
-        _complete=r.detail == "compact",
+        _complete=r.detail == "compact" or bool(r.question),
         known_at=r.known_at,
         at_change=r.at_change,
     )
-    if r.detail == "full":
+    if r.detail == "full" and not r.question:
         return raw
     terms = tokens(r.question or "") - tokens(r.entity)
     shared = shared_slots(f for lane in LANES for f in raw[lane])
     # Match across all evidence BEFORE hiding history. A question mentioning the old
     # database must also retrieve the replacement in the same exclusive role.
-    scores = {}
-    for lane in LANES:
-        for f in raw[lane]:
-            text = " ".join(
-                str(f.get(k) or "") for k in ("summary", "subject", "target", "relation")
-            )
-            scores[role(f, shared)] = max(scores.get(role(f, shared), 0), len(terms & tokens(text)))
-    best_score = max(scores.values(), default=0)
+    scores = relevance(raw, terms, shared)
     groups = {}
     for lane in LANES:
         if lane == "history" and not r.include_history:
             continue
         for f in raw[lane]:
-            # An unverified claim repeated in other words is still one claim: one
-            # entry per subject, relation and target, in its latest wording.
-            wording = () if lane == "uncertain" else (f.get("valid_at"), normalized(f["summary"]))
+            # Preserve distinct wording: shared endpoints do not make a later
+            # summary equivalent to an earlier detailed report or correction.
+            wording = (f.get("valid_at"), normalized(f["summary"]))
             key = (lane, *role(f, shared), f["target"], f["status"], *wording)
             groups.setdefault(key, []).append(f)
     ranked = []
     for key, copies in groups.items():
-        if key[0] == "uncertain":
-            copies.sort(key=lambda f: (f.get("recorded_at") or "", f["id"]), reverse=True)
+        # The copy shown for identical wording: newest report, then newest ingestion
+        # when no report time exists. This chooses attribution, never rank.
+        copies.sort(key=lambda f: f["id"])
+        copies.sort(key=lambda f: (reported_time(f), f.get("recorded_at") or ""), reverse=True)
         f = copies[0]
-        score = scores.get(role(f, shared), 0)
-        if terms and (score == 0 or score < best_score):
+        score = max(scores[c["id"]] for c in copies)
+        if terms and score == 0:
             continue
         ranked.append((key[0], f, copies, score))
     priority = {
@@ -148,11 +240,14 @@ def recall(store, r):
         "documented": 5,
         "history": 6,
     }
-    ranked.sort(key=lambda x: (-x[3], priority[x[0]], -(x[1].get("valid_ts") or 0), x[1]["id"]))
+    ranked.sort(key=lambda x: (-x[3], priority[x[0]], *recency(x[1]), x[1]["id"]))
     selected = ranked[r.offset : r.offset + r.limit]
+
+    def sessions(copies):
+        return len({c.get("session_id") for c in copies})
+
     facts = [
-        compact_fact(f, lane, len(copies), len({c.get("session_id") for c in copies}))
-        for lane, f, copies, _ in selected
+        compact_fact(f, lane, len(copies), sessions(copies)) for lane, f, copies, _ in selected
     ]
     next_offset = r.offset + len(selected)
     # Derived conclusions remain explicitly separate and bounded; they never replace facts.
@@ -171,15 +266,28 @@ def recall(store, r):
                 }
             )
     room = max(0, r.limit - len(facts))
-    return {
+    # A disagreement is the answer only when it matches as strongly as the best
+    # result; conflicts sort first among equals, so they then lead page one. A
+    # weaker partial match is still reported, with every side's ID to verify.
+    disputed = [x for x in ranked if x[0] == "conflicts"]
+    strongest = bool(disputed) and max(x[3] for x in disputed) == ranked[0][3]
+    sides = []
+    for _, f, copies, _ in disputed:
+        dispute = role(f, shared)
+        sides += [c["id"] for c in copies]
+        sides += [c["id"] for c in raw["conflicts"] if role(c, shared) == dispute]
+    sides = list(dict.fromkeys(sides))
+    result = {
         "entity": r.entity,
-        **({"question": r.question} if r.question else {}),
+        # The words that ranked. Empty means the question held only stop words or
+        # the entity's own name, and the facts are unranked as if it were omitted.
+        **({"question": r.question, "question_terms": sorted(terms)} if r.question else {}),
         "status": "ambiguous"
         if raw["ambiguous"]
         else "not_found"
         if not raw["entities"]
         else "conflict"
-        if any(x[0] == "conflicts" for x in ranked)
+        if strongest
         else "found"
         if ranked or derived
         else "no_matching_facts",
@@ -193,11 +301,28 @@ def recall(store, r):
             "returned": len(facts),
             "derived_returned": min(room, len(derived)),
             "derived_available": len(derived),
+            "conflicts_matching": sum(len(copies) for _, _, copies, _ in disputed),
         },
+        # Up to ten, the most memory_evidence accepts in one call: the matching
+        # conflicting records and the other sides of each disagreement.
+        **(
+            {
+                "conflict_fact_ids": sides[:10],
+                "conflict_fact_ids_truncated": len(sides) > 10,
+            }
+            if sides
+            else {}
+        ),
         "next_offset": next_offset if next_offset < len(ranked) else None,
         "evidence_tool": "memory_evidence",
         **metadata(raw),
     }
+    if r.detail == "full":
+        result["facts"] = [
+            {**f, "lane": lane, **group_fields(f, lane, len(copies), sessions(copies))}
+            for lane, f, copies, _ in selected
+        ]
+    return result
 
 
 def latest(store, r):
@@ -285,11 +410,20 @@ def evidence(store, r):
                 message = messages.get(quote["message_id"], {})
                 source_ref = payload.get("verified_source_refs", {}).get(quote["message_id"])
                 if payload.get("source_format") == "session-records-v1" and message:
-                    from .store import digest
-
                     source_ref = digest(
                         [payload["namespace"], payload["session_id"], quote["message_id"]]
                     )
+                origin = payload.get("memory_origins", {}).get(quote["message_id"])
+                if origin and payload.get("source_format") == "session-records-v1":
+                    # Stored message IDs, the same form as source_message_id and
+                    # as MemoryMessage.memory_read_refs.
+                    origin = {
+                        **origin,
+                        "result_ids": [
+                            digest([payload["namespace"], payload["session_id"], rid])
+                            for rid in origin.get("result_ids", [])
+                        ],
+                    }
                 output.append(
                     {
                         **quote,
@@ -307,6 +441,7 @@ def evidence(store, r):
                             if k in message
                         },
                         "message_available": bool(message),
+                        **({"memory_origin": origin} if origin else {}),
                     }
                 )
             return output
@@ -332,7 +467,7 @@ def evidence(store, r):
 
 def search_entities(store, r):
     needle = normalized(r.query)
-    terms = sorted(tokens(r.query)) or [needle]
+    terms = sorted(set(re.findall(r"[^\W_]+", needle)) - ENTITY_STOP) or [needle]
     history = None
     if r.known_at is not None or r.at_change is not None:
         from .journal import Journal

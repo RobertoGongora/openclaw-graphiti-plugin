@@ -16,7 +16,12 @@ from .version import engine_fingerprint
 
 class MemoryService:
     def __init__(self, store, llm=None):
+        from .claim_support import SupportVerifier
+
         self.store, self.llm = store, llm
+        self.support_verifier = getattr(store, "support_verifier", None) or SupportVerifier(llm)
+        if llm is not None:
+            self.support_verifier.llm = llm
 
     def ingest(self, request: m.Ingest):
         receipt = self.store.stage(request.transcript)
@@ -39,7 +44,11 @@ class MemoryService:
         from .direct_ingest import prepare
 
         transcript = prepare(self.store, request)
-        return self.ingest(m.Ingest(transcript=transcript))
+        receipt = self.ingest(m.Ingest(transcript=transcript))
+        context_only = [
+            m.id for m in transcript.messages if m.id not in transcript.verified_source_refs
+        ]
+        return {**receipt, **({"context_only_message_ids": context_only} if context_only else {})}
 
     def prepare(self, request: m.EpisodeRequest):
         episode = self.store.episode(request.namespace, request.episode_id)
@@ -69,7 +78,7 @@ class MemoryService:
         transcript = m.Transcript.model_validate(packet["transcript"])
         payload = extraction_payload(
             {
-                "transcript": packet["transcript"],
+                "transcript": transcript.model_dump(mode="json"),
                 "existing_entities": packet["existing_entities"],
                 "existing_relationships": packet["existing_relationships"],
             }
@@ -77,6 +86,7 @@ class MemoryService:
         if packet.get("previous_rejection"):
             payload["previous_rejection"] = packet["previous_rejection"]
         lap("prepare")
+        support_calls = self.support_verifier.calls
         for attempt in range(2):
             progress.update(stage="model_output", attempt=attempt, extraction=None)
             try:
@@ -85,9 +95,9 @@ class MemoryService:
                 lap("model")
             progress.update(stage="evidence_validation", extraction=extraction)
             try:
-                extraction.validate_evidence(transcript)
+                extraction.validate_evidence(transcript, support=self.support_verifier)
                 lap("validation")
-                return extraction, attempt + 1
+                return extraction, attempt + 1 + self.support_verifier.calls - support_calls
             except ValueError as exc:
                 lap("validation")
                 if attempt:
@@ -164,14 +174,30 @@ class MemoryService:
                 progress["stage"] = "cached_validation"
                 extraction = m.Extraction.model_validate_json(episode["cached_extraction"])
                 progress["extraction"] = extraction
-                extraction.validate_evidence(m.Transcript.model_validate_json(episode["payload"]))
+                support_calls = self.support_verifier.calls
+                try:
+                    extraction.validate_evidence(
+                        m.Transcript.model_validate_json(episode["payload"]),
+                        support=self.support_verifier,
+                    )
+                except ValueError:
+                    self.store.discard_cached_extraction(
+                        request.namespace, request.episode_id, episode["cached_extraction"]
+                    )
+                    progress["stage"] = "evidence_validation"
+                    raise
                 lap("prepare")
                 progress["stage"] = "commit"
                 receipt = self.store.commit(
                     request.namespace, request.episode_id, extraction, model_info=model_info
                 )
                 lap("commit")
-                return {**receipt, "timings": timings, "model_calls": 0, "cached": True}
+                return {
+                    **receipt,
+                    "timings": timings,
+                    "model_calls": self.support_verifier.calls - support_calls,
+                    "cached": True,
+                }
             if not m.Transcript.model_validate_json(episode["payload"]).can_yield_facts():
                 # Nothing in these messages can carry a fact; asking the model
                 # would only spend a call to be told so.

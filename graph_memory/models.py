@@ -126,6 +126,14 @@ class Message(Model):
     gaps: list[str] = Field(default_factory=list)
 
 
+class RecallOrigin(Model):
+    # The read messages a report followed: local message IDs in a session-records
+    # transcript, stored MemoryMessage IDs when a direct MCP write cites a stored
+    # report. Memory fact IDs are included when the read output named them.
+    result_ids: Annotated[list[Key], Field(max_length=200)] = Field(default_factory=list)
+    fact_ids: Annotated[list[Key], Field(max_length=200)] = Field(default_factory=list)
+
+
 class Transcript(Model):
     namespace: Key
     source_id: Key
@@ -136,6 +144,11 @@ class Transcript(Model):
     source_updated_at: AwareDatetime | None = None
     source_format: str | None = None
     verified_source_refs: dict[str, Key] = Field(default_factory=dict)
+    # Omitted when empty: episode IDs and the daemon's change fingerprints are
+    # digests of this payload, and a transcript without reads must keep its old ones.
+    memory_origins: dict[Key, RecallOrigin] = Field(
+        default_factory=dict, exclude_if=lambda origins: not origins
+    )
     title: Text | None = None
     focus_message_ids: list[Key] = Field(default_factory=list)
     messages: Annotated[list[Message], Field(min_length=1, max_length=500)]
@@ -148,6 +161,14 @@ class Transcript(Model):
             raise ValueError("Focus messages must exist in the transcript")
         if sum(len(m.content) for m in self.messages) > 500_000:
             raise ValueError("Split transcripts into chunks of at most 500000 characters")
+        if not set(self.memory_origins) <= {m.id for m in self.messages}:
+            raise ValueError("Memory origins must identify messages in the transcript")
+        if self.source_format in {"session-records-v1", "direct-mcp-v1"}:
+            from .recall_provenance import report_origins
+
+            for mid, origin in report_origins(self.messages).items():
+                if mid not in self.memory_origins:
+                    self.memory_origins[mid] = RecallOrigin(**origin)
         return self
 
     def can_yield_facts(self):
@@ -157,7 +178,16 @@ class Transcript(Model):
         if self.source_format not in {"session-records-v1", "direct-mcp-v1"}:
             return True
         focus = set(self.focus_message_ids)
-        return any(m.source_type in CLAIMS for m in self.messages if not focus or m.id in focus)
+        from .recall_provenance import fresh_results
+
+        fresh = fresh_results(self)
+        return any(
+            m.source_type in CLAIMS
+            and (m.id not in self.memory_origins or fresh)
+            and (self.source_format != "direct-mcp-v1" or m.id in self.verified_source_refs)
+            for m in self.messages
+            if not focus or m.id in focus
+        )
 
 
 class Entity(Model):
@@ -309,10 +339,8 @@ class Extraction(Model):
                 raise ValueError("implemented_in links a framework to a language")
         return self
 
-    def validate_evidence(self, transcript: Transcript):
-        def reject(message, location):
-            raise annotate(ValueError(message), location=location)
-
+    def repair_evidence(self, transcript: Transcript):
+        """Normalize quotes for validation and read-only idempotent hash comparison."""
         messages = {m.id: m for m in transcript.messages}
         mismatched = []
         for fact_index, fact in enumerate(self.facts):
@@ -341,9 +369,20 @@ class Extraction(Model):
                 location=mismatched[0],
                 locations=mismatched[:10],
             )
+        return self
+
+    def validate_evidence(self, transcript: Transcript, *, support=None, allow_support_model=True):
+        def reject(message, location):
+            raise annotate(ValueError(message), location=location)
+
+        self.repair_evidence(transcript)
+        messages = {m.id: m for m in transcript.messages}
         # The rules below judge the evidence as repaired: a quote moved to another
         # message is held to that message's role and focus.
         focus = set(transcript.focus_message_ids)
+        from .recall_provenance import fresh_results
+
+        fresh = fresh_results(transcript)
         for fact_index, fact in enumerate(self.facts):
             cites = [messages[e.message_id] for e in [*fact.evidence, *fact.validation_evidence]]
             # A feed fact states a new claim: the same rule that decides whether the
@@ -357,6 +396,13 @@ class Extraction(Model):
                     ["facts", fact_index, "evidence"],
                 )
             if transcript.source_format in {"session-records-v1", "direct-mcp-v1"}:
+                if transcript.source_format == "direct-mcp-v1" and any(
+                    msg.id not in transcript.verified_source_refs for msg in cites
+                ):
+                    reject(
+                        "Direct writes require verified source references for every claim and validation quote; unsourced text is context only, even when uncertain",
+                        ["facts", fact_index, "evidence"],
+                    )
                 cited = [messages[e.message_id] for e in fact.evidence]
                 claims = [m for m in cited if m.source_type in CLAIMS]
                 if not claims or len(claims) != len(cited):
@@ -365,8 +411,21 @@ class Extraction(Model):
                         ["facts", fact_index, "evidence"],
                     )
                 validation = [messages[e.message_id] for e in fact.validation_evidence]
+                independent_user = any(
+                    m.source_type == "user_assertion" and (not focus or m.id in focus)
+                    for m in claims
+                )
+                if (
+                    any(m.id in transcript.memory_origins for m in claims)
+                    and not independent_user
+                    and not any(m.id in fresh for m in validation)
+                ):
+                    reject(
+                        "A memory-derived report is not a new independent claim. Omit the repeated fact unless a fresh tool result in this transcript corroborates this specific claim; then cite that result in validation_evidence. Original memory fact IDs remain in source provenance.",
+                        ["facts", fact_index, "evidence"],
+                    )
                 primary = any(m.source_type == "user_assertion" for m in claims) or any(
-                    m.source_type == "tool_result" and m.tool_failed is not True for m in validation
+                    m.id in fresh for m in validation
                 )
                 if not primary and (fact.status != "uncertain" or fact.valid_at is not None):
                     reject(
@@ -377,6 +436,12 @@ class Extraction(Model):
                 reject(
                     "Future facts must be planned, not active", ["facts", fact_index, "valid_at"]
                 )
+        from .claim_support import required
+
+        if required(self, transcript):
+            if support is None:
+                raise ValueError("Memory-derived claim requires an independent support checker")
+            support.check(self, transcript, allow_model=allow_support_model)
         return self
 
 
@@ -388,7 +453,7 @@ class Remember(Model):
     transcript: Transcript
     sources: dict[Key, Key] = Field(
         default_factory=dict,
-        description="Optional mapping from submitted message IDs to stored MemoryMessage IDs returned by memory_evidence. The server verifies exact content and inherits source roles/timestamps. Without a verified source, claims remain unvalidated; URLs alone do not validate them.",
+        description="Mapping from submitted message IDs to stored MemoryMessage IDs returned by memory_evidence. The server verifies exact content and inherits source roles/timestamps. Messages without a verified source are retained as context only and cannot produce facts; URLs alone do not validate them.",
     )
 
 

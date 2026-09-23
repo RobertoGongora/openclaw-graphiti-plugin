@@ -10,6 +10,7 @@ from datetime import datetime
 from neo4j import WRITE_ACCESS, GraphDatabase
 
 from .models import Extraction, Transcript, now
+from .recall_provenance import latest_report_time
 from .temporal import project
 from .version import engine_fingerprint
 
@@ -42,6 +43,9 @@ class GraphStore:
         )
         self.database = database
         self.engine = engine_fingerprint()
+        from .claim_support import SupportVerifier
+
+        self.support_verifier = SupportVerifier()
         self._journal_local = threading.local()
         # Model work remains concurrent. Journal writes already serialize on the
         # namespace; avoid making this process's transactions contend for it.
@@ -288,6 +292,18 @@ class GraphStore:
             ).consume()
         )
 
+    def discard_cached_extraction(self, namespace, episode_id, expected):
+        self.transaction(
+            lambda tx: tx.run(
+                "MATCH (e:MemoryEpisode {id:$id,namespace:$ns}) "
+                "WHERE e.status <> 'complete' AND e.cached_extraction=$expected "
+                "SET e.cached_extraction=null,e.cached_engine=null,e.cached_model=null",
+                id=episode_id,
+                ns=namespace,
+                expected=expected,
+            ).consume()
+        )
+
     def cache_extraction(self, namespace, episode_id, extraction, model_info):
         """Persist validated model work independently of the canonical graph commit."""
         self.transaction(
@@ -444,16 +460,27 @@ class GraphStore:
         # Validation is repeated against the durable episode inside the transaction.
         extraction_hash = digest(extraction.model_dump(mode="json"))
         committed_at = now().isoformat()
+        if transaction is None:
+            episode = self.episode(namespace, episode_id)
+            if episode["status"] != "complete":
+                extraction.validate_evidence(
+                    Transcript.model_validate_json(episode["payload"]),
+                    support=self.support_verifier,
+                )
 
         def repaired(transcript):
             try:
                 candidate = extraction.model_copy(deep=True)
-                candidate.validate_evidence(transcript)
+                candidate.repair_evidence(transcript)
                 return digest(candidate.model_dump(mode="json"))
             except ValueError:
                 return None
 
         def run(tx):
+            if engine_fingerprint(fresh=True) != self.engine:
+                raise ValueError(
+                    "Engine files changed during this process; restart before committing"
+                )
             self.lock(tx, namespace)
 
             def touch(label, ids):
@@ -477,7 +504,9 @@ class GraphStore:
                         "Episode already committed with different extraction; retract incorrect facts explicitly"
                     )
                 return {"episode_id": episode_id, "status": "complete", "replayed": True}
-            extraction.validate_evidence(transcript)
+            extraction.validate_evidence(
+                transcript, support=self.support_verifier, allow_support_model=False
+            )
             committed_hash = digest(extraction.model_dump(mode="json"))
             identities = {
                 e.key: self.canonical(tx, namespace, e, touch) for e in extraction.entities
@@ -488,6 +517,16 @@ class GraphStore:
             )
             fact_ids = []
             documented = transcript.source_updated_at or transcript.source_created_at
+            messages = {m.id: m for m in transcript.messages}
+
+            def trusted(mid):
+                # A direct MCP write may date its own unverified messages. Only a
+                # verified source message's time can order reports.
+                return (
+                    transcript.source_format != "direct-mcp-v1"
+                    or mid in transcript.verified_source_refs
+                )
+
             for fact in extraction.facts:
                 raw = fact.model_dump(mode="json")
                 fid = digest([episode_id, raw])
@@ -536,6 +575,11 @@ class GraphStore:
                     "session_id": transcript.session_id,
                     "source_kind": transcript.source_kind,
                     "recorded_at": committed_at,
+                    "reported_at": latest_report_time(
+                        stamp.isoformat()
+                        for e in fact.evidence
+                        if trusted(e.message_id) and (stamp := messages[e.message_id].timestamp)
+                    ),
                     "retracted": False,
                 }
                 tx.run(
@@ -603,18 +647,27 @@ class GraphStore:
         # A fact counts only when its endpoints and its evidence exist; one missing
         # either is excluded, never shown as established. Reading repairs nothing:
         # restoring edges is the repair command's job, and a recall must not write.
-        return tx.run(
+        rows = tx.run(
             "MATCH (f:MemoryFact {namespace:$ns}) "
             "WHERE (f.subject_id IN $ids OR ($relation IS NULL AND f.target_id IN $ids)) "
             "AND ($relation IS NULL OR f.relation=$relation) "
             "MATCH (s:MemoryEntity {namespace:$ns}),(t:MemoryEntity {namespace:$ns}),"
             "(e:MemoryEpisode {namespace:$ns,status:'complete'}) "
             "WHERE s.id=f.subject_id AND t.id=f.target_id AND e.id=f.episode_id "
-            "RETURN f {.*,subject_name:s.name,subject_kind:s.kind,target_name:t.name,target_kind:t.kind} AS fact",
+            "CALL { WITH f UNWIND coalesce(f.message_refs,[]) AS mid "
+            "OPTIONAL MATCH (m:MemoryMessage {id:mid,namespace:$ns}) "
+            "RETURN collect(m.timestamp) AS stamps } "
+            "RETURN f {.*,subject_name:s.name,subject_kind:s.kind,target_name:t.name,target_kind:t.kind} AS fact,stamps",
             ns=namespace,
             ids=ids,
             relation=relation,
         ).data()
+        for row in rows:
+            # One canonical UTC form, the same one the journal derives: a fact
+            # committed before reported_at existed takes its evidence messages' time.
+            fact, stamps = row["fact"], row.pop("stamps")
+            fact["reported_at"] = fact.get("reported_at") or latest_report_time(stamps)
+        return rows
 
     def recall(
         self,

@@ -378,7 +378,9 @@ def turn_results(messages, count, held, room):
     calls = {m.call_id: m for m in messages[:count] if m.source_type == "tool_call" and m.call_id}
     carried = []
     for m in reversed(messages[max(0, count - LOOKBACK_MESSAGES) : count]):
-        if m.source_type == "user_assertion":
+        # Any user-role message ends the turn, including a delegated or automated
+        # instruction; an earlier turn's memory reads are not this turn's context.
+        if m.role == "user":
             break
         if m.source_type != "tool_result" or m.tool_failed is True or m.id in held:
             continue
@@ -445,6 +447,9 @@ def feed_records(
     """
     path = path.expanduser().resolve(strict=True)
     messages = list(records(path))
+    from .recall_provenance import report_origins
+
+    origins = report_origins(messages)
     fid = feed_id or digest([FORMAT, namespace, str(path), session_id])
     title_message = next(
         (
@@ -481,6 +486,7 @@ def feed_records(
                 source_format=FORMAT,
                 title=title,
                 messages=selected,
+                memory_origins={m.id: origins[m.id] for m in selected if m.id in origins},
                 focus_message_ids=[m.id for m in messages[count:end]],
             )
             receipts.append(service.store.stage(t, transaction=tx))

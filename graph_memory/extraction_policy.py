@@ -6,13 +6,29 @@ from copy import deepcopy
 def extraction_payload(payload):
     """Keep full durable evidence; omit ineligible opaque text only from model input."""
     reduced = deepcopy(payload)
-    if reduced["transcript"].get("source_format") not in {"session-records-v1", "direct-mcp-v1"}:
+    transcript = reduced["transcript"]
+    if transcript.get("source_format") not in {"session-records-v1", "direct-mcp-v1"}:
         return reduced
-    for message in reduced["transcript"]["messages"]:
+    from .recall_provenance import read_results
+
+    reads = read_results(transcript["messages"])
+    for message in transcript["messages"]:
         if message.get("source_type") == "context":
             message["content"] = (
                 "[Context text omitted: not eligible claim or validation evidence.]"
             )
+        elif message.get("id") in reads and message.get("source_type") == "tool_result":
+            # Memory and delegation results never corroborate a claim. Label them
+            # for the model the way the validator judges them, not on a retry.
+            message["source_type"] = "memory_read"
+    if transcript.get("memory_origins"):
+        # The model needs which reports repeat memory and which reads they follow.
+        # The recalled fact IDs are provenance for the stored payload, not input.
+        present = {message.get("id") for message in transcript["messages"]}
+        transcript["memory_origins"] = {
+            mid: {"result_ids": [rid for rid in origin.get("result_ids", []) if rid in present]}
+            for mid, origin in transcript["memory_origins"].items()
+        }
     return reduced
 
 
@@ -42,6 +58,21 @@ or validation_evidence. Older messages may explain a new claim, not create new f
    convincing command output. Do not cite those types as validation_evidence.
  - Tool results may only corroborate conversational claims, never originate facts.
    With no durable conversational claim, return empty entities and facts.
+ - transcript.memory_origins identifies assistant reports made from recalled
+   memory or delegated summaries. Repeating, paraphrasing or analyzing an existing
+   memory is not a new independent claim, even in a different agent/session.
+   Omit such facts unless a fresh non-memory tool result corroborates the specific
+   new finding. Preserve new user corrections and independently observed changes.
+   A separate support checker will verify the entire claim against the cited fresh
+   evidence, including subject, status, date and qualifiers. An unrelated successful
+   command is never support. Omit unsupported memory-derived claims, even uncertain
+   ones, rather than attaching a nearby tool result to make them pass.
+   Original read-message and fact IDs remain in source provenance; do not create
+   another fact merely to remember that the memory was recalled.
+ - In direct-mcp-v1, every claim and validation quote must have a verified entry
+   in transcript.verified_source_refs. Unsourced text is context only; do not
+   turn it into a fact, even uncertain. Original session ingestion preserves new
+   user assertions without depending on a caller's claimed role.
 
 3. Only AFTER step 2, apply the general rules for planned/active/ended and dates
 to supported claims. The uncertain/null requirement above takes precedence over

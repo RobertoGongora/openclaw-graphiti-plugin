@@ -8,6 +8,11 @@ from pydantic import ValidationError
 # Exact engine-owned messages only. Pydantic's msg/input/ctx can contain private
 # model output, so arbitrary exception text must never reach the error stream.
 REASONS = {
+    "Independent support check did not establish this memory-derived claim; omit it or cite fresh evidence supporting the whole claim": "claim_support_rejected",
+    "Support checker must return exactly one decision for every requested claim": "claim_support_invalid_response",
+    "Memory-derived claims require a configured support checker": "support_checker_unavailable",
+    "Memory-derived claim requires a current independent support check before commit": "claim_support_missing",
+    "Direct writes require verified source references for every claim and validation quote; unsourced text is context only, even when uncertain": "direct_source_unverified",
     "Facts must cite a conversational claim in evidence; tool outputs belong only in validation_evidence, and memory artifacts are context only": "invalid_claim_source",
     "An unvalidated assistant claim requires status=uncertain and valid_at=null. To validate it, cite an exact corroborating tool-result quote in validation_evidence AND keep the assistant quote in evidence. Memory reads/writes cannot validate it.": "unvalidated_assistant_claim",
     "Evidence must quote an exact substring of its source message": "evidence_quote_mismatch",

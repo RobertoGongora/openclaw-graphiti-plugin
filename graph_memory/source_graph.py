@@ -67,6 +67,11 @@ def save(tx, transcript, episode_id, declare=None):
             "tool_failed": m.tool_failed,
             "gaps": m.gaps,
         }
+        if origin := transcript.memory_origins.get(m.id):
+            props["memory_read_refs"] = [
+                digest([ns, transcript.session_id, mid]) for mid in origin.result_ids
+            ]
+            props["recalled_fact_ids"] = origin.fact_ids
         old = tx.run(
             "MATCH (m:MemoryMessage {id:$id}) RETURN m.content AS content", id=mid
         ).single()

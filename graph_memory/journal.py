@@ -8,6 +8,7 @@ from collections import Counter
 from datetime import UTC, datetime
 
 from .models import now
+from .recall_provenance import latest_report_time
 from .source_graph import LABELS as SOURCE_LABELS
 from .store import digest, normalized
 from .temporal import project
@@ -933,6 +934,12 @@ class Journal:
             if s and t and e and e["status"] == "complete":
                 return {
                     **f,
+                    "reported_at": f.get("reported_at")
+                    or latest_report_time(
+                        state["MemoryMessage"][mid]["timestamp"]
+                        for mid in f.get("message_refs", [])
+                        if state["MemoryMessage"].get(mid, {}).get("timestamp")
+                    ),
                     "subject_name": s["name"],
                     "subject_kind": s["kind"],
                     "target_name": t["name"],
