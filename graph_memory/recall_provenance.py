@@ -28,6 +28,9 @@ PROCESS_MEMORY = {"usage", "stats", "statistics", "metric", "metrics", "consumpt
 # literal call into a file reads nothing.
 CODE_TOOL = re.compile(r"(?i)exec|bash|shell|python")
 FACT_ID = re.compile(r'\\?"id\\?"\s*:\s*\\?"([a-f0-9]{64})\\?"')
+# Keys that only a fact record carries: relation, lane, summary. Entities have none.
+FACT_KEY = re.compile(r'\\?"(?:relation|lane|summary)\\?"\s*:')
+ENTITY_KEY = re.compile(r'\\?"kind\\?"\s*:')
 
 
 def field(msg, name, default=None):
@@ -43,6 +46,7 @@ def latest_report_time(stamps):
 def recalled_ids(content):
     """Best-effort IDs from structured responses; unknown formats still taint the report."""
     found = set()
+    parsed = [False]
 
     def visit(value, depth=0):
         if depth > 8:
@@ -69,17 +73,23 @@ def recalled_ids(content):
                 visit(child, depth + 1)
         elif isinstance(value, str) and value.lstrip().startswith(("{", "[")):
             try:
-                visit(json.loads(value), depth + 1)
+                decoded = json.loads(value)
             except (ValueError, RecursionError):
-                pass
+                return
+            parsed[0] = True
+            visit(decoded, depth + 1)
 
     visit(content)
-    if not found:
+    if not found and not parsed[0]:
         for line in content.splitlines():
             visit(line)
-    if not found:
-        # Lane-keyed full views and output split into chunks still name their facts.
-        found.update(FACT_ID.findall(content))
+    if not found and not parsed[0]:
+        # Output split into chunks is not valid JSON, but its fact records still
+        # name themselves. Take an ID only from a fact-shaped fragment: a valid
+        # response without facts has none to report, and an entity is not a fact.
+        for fragment in re.split(r"[{}]", content):
+            if FACT_KEY.search(fragment) and not ENTITY_KEY.search(fragment):
+                found.update(FACT_ID.findall(fragment))
     return sorted(found)[:200]
 
 

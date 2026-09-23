@@ -392,6 +392,14 @@ def test_recalled_ids_from_lane_keyed_full_views_and_chunked_output():
     assert recalled_ids(chunk) == [fid]
     assert recalled_ids(wrapped[wrapped.index("current") :]) == [fid]
     assert recalled_ids("no identifiers here") == []
+    # A valid response without facts names no recalled fact, only its entity.
+    empty = json.dumps({"entities": [{"id": entity, "key": "project:atlas", "kind": "project"}]})
+    assert recalled_ids(empty) == []
+    no_facts = json.dumps({**json.loads(full_view), "current": []})
+    assert recalled_ids(no_facts) == []
+    assert recalled_ids(json.dumps({"content": [{"type": "text", "text": no_facts}]})) == []
+    # A chunk that cuts through the entity list still yields only the fact.
+    assert recalled_ids(full_view[5:]) == [fid]
 
 
 def test_transcript_without_reads_serializes_as_before_so_episode_ids_survive_upgrade():

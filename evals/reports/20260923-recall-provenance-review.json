@@ -4,9 +4,11 @@
     "900f864",
     "d434bc1",
     "b56c1ac",
+    "b1a4c52",
+    "ac69a85",
     "final"
   ],
-  "engine": "79cf8ef74218ea28252547cb94f97a43abc734d16e1820bc4cde3eeefd1f462e",
+  "engine": "808db66d4418fcea63cd3c653fb7f822e3c03e1f006ea96a5632bcac047c9b7f",
   "golden_suite": "3a0e140b1993bd37f7d14615e3f4fc3cbb0fef489319208984c1eb5bea3182e4",
   "golden_suite_note": "Suite hash covers the eval harness; evals/lookback.py and evals/recall_regression.py changed, the six case fixtures did not.",
   "model": "gpt-5.6-terra",
@@ -39,7 +41,7 @@
   ],
   "golden_inputs_unchanged": true,
   "tests": {
-    "full_passed": 342,
+    "full_passed": 344,
     "full_skipped": 1,
     "lint": "passed",
     "format": "passed",
@@ -152,13 +154,18 @@
       "finding": "status conflict fired on partial-match conflicts absent from the page",
       "severity": "low",
       "status": "fixed after author decision: strongest-match status plus conflicts_matching and conflict_fact_ids"
+    },
+    {
+      "finding": "text fallback took entity IDs as recalled fact IDs when a valid response had no facts",
+      "severity": "low",
+      "status": "fixed after the author's re-check"
     }
   ],
   "parser_prefix_hash_pinned": "ff2762de96e2080f80d65c09b64c7673e537a767ffeecef4bfdaaa7897be48b3",
   "deployment": "not deployed; prepared for review",
   "limitations": [
-    "A fresh but unrelated tool result cited as validation still lets the model promote an echo; deterministic checks establish eligibility, not relevance.",
-    "An unsourced memory_ingest restatement of a recalled fact is still accepted as uncertain.",
+    "Open feedback route: a memory-derived report becomes active when the model cites a fresh but unrelated tool result; the validator checks freshness, not support. Reproduced by the author with 'Disk usage is 20%'.",
+    "Open feedback route: an unsourced memory_ingest write repeating a recalled claim carries no origin and is stored as uncertain.",
     "Dynamic nested calls (aliases, tools?.x, spaced brackets), servers named memories (mcp__mem0__search_memories) and memory-bank directories not named memory/ are not recognized; isMeta user text ends a turn.",
     "Recalled fact IDs are capped at 200 in sorted order.",
     "tests/test_revision_overlay.py counts memory spaces database-wide, so it flakes when another test run shares the disposable database.",

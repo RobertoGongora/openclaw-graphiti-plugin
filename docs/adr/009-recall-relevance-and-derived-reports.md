@@ -61,11 +61,19 @@ assertions/corrections and fresh tool-backed findings remain eligible. Model
 instructions must still judge whether the fresh evidence supports that exact
 claim; deterministic checks establish source eligibility, not semantic truth.
 
+Two feedback routes remain open, and this change does not close them. A
+memory-derived report can still become an active fact when the model cites a
+fresh but unrelated tool result as validation: the validator checks that the
+evidence is fresh, not that it supports the claim. A direct memory_ingest write
+that repeats a recalled claim without a verified source carries no origin, so it
+is accepted as uncertain. Treat both as open work, not as prevented.
+
 Direct memory reads, evidence reads, reads through any memory tool the parser
 labels (other memory servers included) and literal nested tools.memory_* calls
 are recognized, as are delegation results by exact tool name: Codex spawn_agent,
 wait_agent, send_message and followup_task, and Claude Code Task and Agent. A
-memory-bank note is a .md or .txt file at any depth under a memory directory;
+memory-bank note is a .md or .txt file at any depth under a memory/ or
+memories/ directory, or a MEMORY.md file;
 code whose path contains the word memory, a process-memory statistics tool, or a
 chat tool whose name contains send_message does not taint a report, even where
 the parser's broader labels hold such output back from validation. Every
@@ -75,7 +83,9 @@ sub-agent's later finding is not tainted by an earlier read. Opaque/dynamic
 programs and memory paraphrases whose origin is
 absent from the source cannot always be recognized. Do not claim complete
 semantic novelty detection. Origin IDs are bounded; unparseable result content
-still marks the report as memory-derived, but may lack original fact IDs. The
+still marks the report as memory-derived, but may lack original fact IDs. A
+valid response without facts yields no fact IDs; the text fallback for chunked
+output takes IDs only from fact-shaped fragments, never from entities. The
 model view carries only the read IDs present in the batch and labels memory and
 delegation results as memory reads; the recalled fact IDs stay in the stored
 payload. A transcript without reads serializes exactly as before, so episode IDs

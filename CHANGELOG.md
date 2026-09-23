@@ -20,7 +20,8 @@
   Facts committed before `reported_at` existed derive it from their evidence
   messages in one UTC form for live and historical reads alike.
 - Memory-derived reports follow reads of any memory tool the parser labels,
-  memory-bank notes at any depth under a `memory/` directory, and delegation by
+  memory-bank notes at any depth under a `memory/` or `memories/` directory or
+  named `MEMORY.md`, and delegation by
   exact tool name: Codex `spawn_agent`/`wait_agent`/`send_message`/`followup_task`
   and Claude Code `Task`/`Agent` results. Chat tools whose names contain
   `send_message`, process-memory statistics tools, and code under a `memory/`
@@ -28,6 +29,9 @@
   delegated instruction, starts a new turn for origins and for carried context.
   Transcripts without memory reads keep their previous episode IDs and change
   fingerprints, so an upgrade does not re-import unchanged memory-bank files.
+  This narrows the feedback loop without closing it: unrelated fresh evidence
+  can still validate a recalled claim, and an unsourced direct write that repeats
+  one is still stored as uncertain.
 - **Cross-session leak in ContextEngine mode**: per-session state was kept on the
   shared engine instance, so `assemble()` for one session could inject another
   session's transcript and lifecycle events. State is now keyed by session id.
