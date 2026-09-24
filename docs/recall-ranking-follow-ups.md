@@ -2,7 +2,7 @@
 
 ## Related decisions can be stored but missed by entity recall
 
-Status: bounded implementation on the ranking feature branch, not deployed.
+Status: bounded implementation deployed in release-candidate at `b4636ac`.
 Observed and frozen on 2026-09-24. The original deferral now appears within five
 facts for the three tested Colima decision/plan questions. Ordinary targeted
 lookups remain unchanged in the regression set. Broader semantic discovery is
@@ -46,7 +46,7 @@ An unsourced `memory_ingest` write is retained as context only and cannot origin
 
 When using direct writes with existing evidence, supply the verified source-message references and exact source content; do not invent a user message, source role, or timestamp for an agent-written paraphrase.
 
-Implemented on the feature branch: shared skill/native instructions now explain
+Implemented and deployed in `b4636ac`: shared skill/native instructions explain
 this distinction, and context-only receipts include guidance. A completed
 context-only episode still explicitly reports `available_for_recall: false`.
 

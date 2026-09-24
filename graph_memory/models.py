@@ -531,6 +531,13 @@ class Retract(Scope):
     reason: Text
 
 
+class AllowAlternatives(Scope):
+    fact_ids: Annotated[list[Key], Field(min_length=2, max_length=10)]
+    reason: Text = Field(
+        description="The user's correction or original evidence establishing that these values can coexist; not merely a desire to hide conflicts."
+    )
+
+
 class Confirm(Scope):
     fact_id: Key
     note: Text = Field(description="Why this is known to be true, in the user's words.")
@@ -551,9 +558,17 @@ class Insight(Model):
     confidence: Annotated[float, Field(ge=0, le=1)]
 
 
+class ClaimReview(Model):
+    fact_id: Key
+    verdict: Literal["supported", "contradicted", "insufficient"]
+    evidence_ids: Annotated[list[Key], Field(max_length=8)]
+    reason: Annotated[str, Field(min_length=1, max_length=1000)]
+
+
 class DreamOutput(Model):
     insights: Annotated[list[Insight], Field(max_length=50)]
     observations: Annotated[list[Text], Field(max_length=50)]
+    claim_reviews: Annotated[list[ClaimReview], Field(max_length=10)] = Field(default_factory=list)
 
 
 class DreamCreate(Scope):
@@ -561,6 +576,10 @@ class DreamCreate(Scope):
     episode_ids: Annotated[list[Key], Field(min_length=1, max_length=100)]
     instructions: Annotated[str, Field(max_length=4096)] = (
         "Find durable patterns, conflicts, and useful connections."
+    )
+    review_uncertain: bool = Field(
+        default=False,
+        description="Review at most ten uncertain claims against original supplied sources. Produces evidence-linked recommendations only; never confirms or promotes facts.",
     )
 
 

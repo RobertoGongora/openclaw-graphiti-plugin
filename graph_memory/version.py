@@ -16,6 +16,7 @@ ENGINE_FILES = (
     "recall_provenance.py",
     "direct_ingest.py",
     "claim_support.py",
+    "dream_review.py",
     "retry.py",
     "diagnostics.py",
     "service.py",

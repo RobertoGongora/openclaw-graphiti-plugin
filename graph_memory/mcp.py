@@ -8,11 +8,13 @@ import re
 import sys
 import threading
 import uuid
+from contextlib import nullcontext
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from pydantic import ValidationError
 
 from . import __version__
+from .admission import HistoryBusy, historical_read
 
 VERSION = "2026-07-28"
 LEGACY_VERSIONS = ("2025-03-26", "2025-06-18", "2025-11-25")
@@ -244,7 +246,14 @@ class Protocol:
                 return 503, error(request_id, BUSY, "Rendering is busy; retry shortly")
             try:
                 schema, handler, _ = self.tools[name]
-                output = handler(schema.model_validate(arguments))
+                request = schema.model_validate(arguments)
+                historical = (
+                    getattr(request, "known_at", None) is not None
+                    or getattr(request, "at_change", None) is not None
+                )
+                # Hold through projection/formatting, not just reconstruction.
+                with historical_read() if historical else nullcontext():
+                    output = handler(request)
                 rendered_image = output.pop("image", None) if name == "memory_render" else None
                 result = {
                     "content": [{"type": "text", "text": json.dumps(output)}],
@@ -253,6 +262,12 @@ class Protocol:
                 }
                 if rendered_image is not None:
                     result["content"].append({"type": "image", **rendered_image})
+            except HistoryBusy:
+                return 503, error(
+                    request_id,
+                    BUSY,
+                    "Historical memory is busy; retry sequentially shortly. Live queries remain available.",
+                )
             except ValidationError as exc:
                 # Omit input values, which can include private transcript content.
                 detail = [

@@ -56,10 +56,10 @@ class RecallView(m.HistoricalScope):
 
 class EntitySearch(m.HistoricalScope):
     query: m.Text = Field(
-        description="Short entity name or alias, e.g. Ketch or T3 Code. Every word must match that entity's names. For a topic or full question, use memory_search instead."
+        description="Nonempty short entity name or alias (at least one character), e.g. Ketch or T3 Code. Empty listing is not supported. Every word must match that entity's names. For a topic or full question, use memory_search instead."
     )
     kind: m.Kind | None = None
-    limit: Annotated[int, Field(ge=1, le=20)] = 5
+    limit: Annotated[int, Field(ge=1, le=20, description="Number of entities, 1–20.")] = 5
     offset: Annotated[int, Field(ge=0, le=100_000)] = 0
 
 
@@ -68,7 +68,7 @@ class QuestionSearch(m.HistoricalScope):
         description="A topic or natural-language question to search across remembered facts, without choosing an entity."
     )
     as_of: AwareDatetime | None = None
-    limit: Annotated[int, Field(ge=1, le=20)] = 5
+    limit: Annotated[int, Field(ge=1, le=20, description="Number of facts, 1–20.")] = 5
     offset: Annotated[int, Field(ge=0, le=100_000)] = 0
     include_history: bool = False
 
@@ -79,7 +79,20 @@ class LatestView(m.Latest):
 
 
 class EvidenceRequest(m.HistoricalScope):
-    fact_ids: Annotated[list[m.Key], Field(min_length=1, max_length=10)]
+    fact_ids: Annotated[list[m.Key], Field(min_length=1, max_length=10)] = Field(
+        description="Batch of 1–10 fact IDs from recall/search."
+    )
+    detail: Literal["index", "compact", "full"] = Field(
+        default="full",
+        description="index: short claim/source inventory; compact: bounded quote excerpts and provenance; full: exact quotes and all stored metadata. Use full before sourced writes or when excerpts omit needed context.",
+    )
+
+
+class EvidenceView(EvidenceRequest):
+    # Internal callers retain the original full-evidence contract.
+    detail: Literal["index", "compact", "full"] = Field(
+        default="compact", description=EvidenceRequest.model_fields["detail"].description
+    )
 
 
 def tokens(text: str) -> set[str]:
@@ -578,6 +591,78 @@ def source_context(message, call, origin):
     return result
 
 
+def evidence_excerpt(item, detail):
+    """A bounded navigation view; exact quotes remain available by fact ID."""
+    source = item["fact"]
+    summary = source.get("summary", "")
+    fact = {
+        k: source[k]
+        for k in (
+            "id",
+            "subject",
+            "relation",
+            "target",
+            "status",
+            "retracted",
+            "valid_at",
+            "confirmed_at",
+            "confirmed_by",
+        )
+        if k in source
+    }
+    fact.update(summary=summary[:240], summary_truncated=len(summary) > 240)
+    out = {
+        "fact": fact,
+        "source": {"id": item["source"]["id"]} if item["source"] else None,
+        "source_available": item["source_available"],
+        "counts": {k: len(item[k]) for k in ("claims", "validation")},
+    }
+    if detail == "index":
+        sources = {}
+        for quote in item["claims"] + item["validation"]:
+            key = quote.get("source_message_id") or quote["message_id"]
+            sources[key] = {
+                "id": key,
+                "role": quote.get("role"),
+                "kind": quote["source_context"]["kind"],
+            }
+        out["sources"] = list(sources.values())[:6]
+        out["sources_truncated"] = len(sources) > 6
+        return out
+    for lane in ("claims", "validation"):
+        out[lane] = []
+        for quote in item[lane][:3]:
+            text = quote["quote"]
+            q = {
+                k: quote[k]
+                for k in (
+                    "message_id",
+                    "source_message_id",
+                    "role",
+                    "timestamp",
+                    "source_type",
+                    "tool_name",
+                    "tool_failed",
+                    "message_available",
+                )
+                if k in quote
+            }
+            q.update(
+                source_context={"kind": quote["source_context"]["kind"]},
+                quote_truncated=len(text) > 400,
+            )
+            # A partial quote must never masquerade as the exact source text
+            # required by a sourced write or a validation judgment.
+            q["quote_excerpt" if len(text) > 400 else "quote"] = text[:400]
+            if quote["source_context"].get("gaps"):
+                q["has_source_gaps"] = True
+            if quote.get("memory_origin"):
+                q["memory_derived"] = True
+            out[lane].append(q)
+        out[lane + "_truncated"] = len(item[lane]) > 3
+    return out
+
+
 def evidence(store, r):
     """Fetch exact evidence by namespace-bound IDs, including retracted claims.
 
@@ -589,10 +674,26 @@ def evidence(store, r):
     if r.known_at is not None or r.at_change is not None:
         from .journal import Journal
 
-        snap = Journal(store).snapshot(r.namespace, known_at=r.known_at, sequence=r.at_change)
+        journal = Journal(store)
+        wanted_set = set(wanted)
+        snap = journal.snapshot(
+            r.namespace,
+            known_at=r.known_at,
+            sequence=r.at_change,
+            select=lambda label, node: label == "MemoryFact" and node["id"] in wanted_set,
+        )
         state = snap["state"]
         records = [state["MemoryFact"][fid] for fid in wanted if fid in state["MemoryFact"]]
-        episodes = state["MemoryEpisode"]
+        episode_ids = {f["episode_id"] for f in records}
+        episodes = (
+            journal.snapshot(
+                r.namespace,
+                sequence=snap["sequence"],
+                select=lambda label, node: label == "MemoryEpisode" and node["id"] in episode_ids,
+            )["state"]["MemoryEpisode"]
+            if episode_ids
+            else {}
+        )
         history = {k: v for k, v in snap.items() if k != "state"}
     else:
 
@@ -688,9 +789,26 @@ def evidence(store, r):
                 "source_available": ep is not None,
             }
         )
+    if r.detail != "full":
+        items = [evidence_excerpt(item, r.detail) for item in items]
     return {
         "facts": items,
         "missing_fact_ids": [fid for fid in wanted if fid not in found],
+        **(
+            {
+                "detail": r.detail,
+                "expand": {
+                    "tool": "memory_evidence",
+                    "arguments": {
+                        "fact_ids": wanted,
+                        "detail": "full",
+                        **({"at_change": history["sequence"]} if history else {}),
+                    },
+                },
+            }
+            if r.detail != "full"
+            else {}
+        ),
         "scope": "stored evidence; source_context describes recorded sources, not live verification; use recall/latest for current state",
         **({"knowledge_history": history} if history is not None else {}),
     }
@@ -703,7 +821,12 @@ def search_entities(store, r):
     if r.known_at is not None or r.at_change is not None:
         from .journal import Journal
 
-        snapshot = Journal(store).snapshot(r.namespace, known_at=r.known_at, sequence=r.at_change)
+        snapshot = Journal(store).snapshot(
+            r.namespace,
+            known_at=r.known_at,
+            sequence=r.at_change,
+            select=lambda label, node: label == "MemoryEntity",
+        )
         candidates = list(snapshot["state"]["MemoryEntity"].values())
         paged = None
         history = {k: v for k, v in snapshot.items() if k != "state"}

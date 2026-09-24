@@ -3,6 +3,19 @@
 
 ### Fixed
 
+- Historical MCP calls share admission control across session processes; bounded
+  entity/evidence reconstruction retains fewer nodes without skipping journal
+  integrity checks. Busy callers can retry without losing their connection.
+- Evidence supports compact excerpts and a short source index, with full batched
+  expansion. Truncation is explicit and exact-source writes still require full evidence.
+- Source-reviewed compatible alternatives can have erroneous exclusive slots
+  cleared without deleting claims or evidence. Extraction guidance distinguishes
+  alternatives from exclusive roles; no blanket conflict suppression is applied.
+- Canonical entity keys take precedence over copied aliases, and kind-qualified
+  lookups stay within that entity kind, including historical recall.
+- Optional dreaming reviews uncertain claims against original source evidence,
+  retaining recommendations separately from facts and user confirmations.
+
 - Recall ranking now gives bounded preferences to named subjects and relevant
   stored validation, normalizes common word forms, and limits the advantage of
   long retellings without penalizing short factual statements.

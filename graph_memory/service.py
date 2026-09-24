@@ -128,6 +128,9 @@ class MemoryService:
         for attempt in range(2):
             output = self.llm.generate(DREAM_INSTRUCTIONS, payload, m.DreamOutput)
             try:
+                from .dream_review import validate
+
+                validate(snapshot.get("claim_review_inputs", []), output.claim_reviews)
                 for insight in output.insights:
                     if not set(insight.supporting_fact_ids) <= facts.keys():
                         raise ValueError("Dream cites facts outside its current evidence snapshot")
@@ -288,6 +291,13 @@ class MemoryService:
             "transcripts": [json.loads(e["payload"]) for e in episodes],
             "instructions": request.instructions,
         }
+        if request.review_uncertain:
+            from .dream_review import packet
+
+            snapshot["claim_review_inputs"] = packet(context, snapshot["transcripts"])
+            snapshot["claim_review_policy"] = (
+                "Recommendations only; no automatic fact promotion or user confirmation."
+            )
 
         def run(tx):
             revision = self.store.lock(tx, request.namespace)
@@ -447,6 +457,8 @@ class MemoryService:
                 "dream_id": request.dream_id,
                 "status": "applied",
                 "insights": len(output.insights),
+                "claim_reviews": len(output.claim_reviews),
+                "reviewed_facts_unchanged": True,
             }
 
         return self.store.transaction(
@@ -498,7 +510,7 @@ class MemoryService:
             "memory_evidence": (
                 retrieval.EvidenceRequest,
                 lambda r: retrieval.evidence(self.store, r),
-                "Use when you need to verify a recalled fact or inspect the evidence behind it.",
+                "Inspect evidence for 1–10 fact IDs in a batch. Compact excerpts by default; index lists short claims and source IDs, full returns exact quotes and metadata. Use full for source verification when compact context is insufficient and before sourced writes.",
             ),
             "memory_recall": (
                 m.Recall,
@@ -543,6 +555,11 @@ class MemoryService:
                 m.Confirm,
                 lambda r: self.store.confirm(r.namespace, r.fact_id, r.note, r.valid_at),
                 "Use when the user states that an uncertain remembered fact is true. Never confirm on your own judgement.",
+            ),
+            "memory_allow_alternatives": (
+                m.AllowAlternatives,
+                lambda r: self.store.allow_alternatives(r.namespace, r.fact_ids, r.reason),
+                "Correct 2–10 facts wrongly grouped as an exclusive choice when original evidence or the user establishes compatible alternatives. Removes only their exclusive slots, preserving claims, evidence and history. Do not use merely to suppress a genuine conflict.",
             ),
             "memory_merge": (
                 m.Merge,
@@ -589,6 +606,7 @@ class MemoryService:
             "memory_latest",
             "memory_retract",
             "memory_confirm",
+            "memory_allow_alternatives",
             "memory_merge",
         }
         catalog = {name: entry for name, entry in self.tools().items() if name in names}
@@ -600,6 +618,7 @@ class MemoryService:
         for name, schema, handler in (
             ("memory_recall", retrieval.RecallView, retrieval.recall),
             ("memory_latest", retrieval.LatestView, retrieval.latest),
+            ("memory_evidence", retrieval.EvidenceView, retrieval.evidence),
         ):
             catalog[name] = (
                 schema,

@@ -125,28 +125,34 @@ longer advertised. New clients see `entity` plus optional `question`. Search kee
 
 ## Verify a fact
 
-`memory_evidence` has the intent description "Use when you need to verify a
-recalled fact or inspect the evidence behind it."
+`memory_evidence` accepts one to ten IDs in a batch. The MCP default is compact;
+internal Python/CLI requests retain full detail for compatibility.
 
 ```json
 {"fact_ids":["ID_RETURNED_BY_RECALL"]}
 ```
 
-It accepts up to ten fact IDs, returns exact conversational quotes separately
-from tool-validation quotes, and includes message roles/timestamps and recorded
+Use `detail:"index"` for a claim/source inventory (240-character claim summaries,
+source IDs and roles), `detail:"compact"` for up to three claim and three validation
+excerpts per fact (400 characters each), or `detail:"full"` for all stored metadata.
+Counts and truncation flags distinguish omitted material. A truncated quote is
+called `quote_excerpt`, never `quote`; do not use an excerpt as an exact-source write.
+An expansion call preserves the historical sequence when applicable. Full detail
+returns exact conversational quotes separately from tool-validation quotes,
+including message roles/timestamps and recorded
 source URI when available. It reads durable graph evidence, not today's source
 file. The fact may be historical or retracted; evidence retrieval does not assert
 that it remains current. Missing IDs/sources are explicit. IDs from another
 namespace are not returned. For historical recall, pass the same `known_at` or
 `at_change` to evidence retrieval.
 
-Each quote includes `source_context.kind`: for example `user_assertion`,
+Each compact/full quote includes `source_context.kind`: for example `user_assertion`,
 `assistant_report`, `memory_derived_report`, `documentation_lookup`,
 `shell_output`, or `file_read`. These describe the recorded collection method,
 not independent verification of the claim. Documentation lookup currently
 recognizes Context7's `query-docs` and `get-library-docs`; unknown tools remain
 `tool_output`. Context and memory-read labels take precedence over tool names.
-When its paired tool call is present in the episode, `source_context.tool_call`
+In full detail, when its paired tool call is present in the episode, `source_context.tool_call`
 includes its message ID, tool name, and up to 1,200 characters of recorded
 arguments with `arguments_truncated`. Split source records also set that flag.
 Captured artifact metadata and source gaps are preserved without duplicating
@@ -161,9 +167,21 @@ These details are fetched on demand with `memory_evidence`; compact recall
 does not load episode payloads or call a model to classify sources.
 
 Evidence and entity search are also permitted by retrieval-only MCP servers.
-The public catalog has ten tools: these eight plus `memory_status` and `memory_confirm`, added later.
+The public catalog has twelve tools, including `memory_allow_alternatives` for
+source-reviewed corrections of mistakenly exclusive slots. It preserves both
+claims and their evidence; genuine exclusive conflicts must not be cleared.
+Corrections must include the complete unretracted role history, including ended
+records, so a partial correction cannot resurrect an earlier alternative.
 Clients with cached catalogs may need to reconnect. Tool results remain JSON in
 both the MCP text and structured-content representations.
+
+Historical MCP requests are serialized across local session processes and HTTP
+threads sharing a user/container. A competing request returns BUSY with retry
+guidance; live requests remain available. Evidence and entity lookup selectively
+retain checkpoint nodes while still validating every part and replayed delta.
+Historical evidence resolves requested facts and their episodes at one pinned
+sequence. General historical recall still reconstructs its complete dependency
+graph; this change does not claim constant-memory historical recall.
 
 ## Validation
 
