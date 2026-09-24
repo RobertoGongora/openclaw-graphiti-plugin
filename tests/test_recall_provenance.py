@@ -36,6 +36,11 @@ def transcript(messages, **kwargs):
 @pytest.mark.parametrize(
     "name, call",
     [
+        ("mcp__graph_memory__memory_search", '{"question":"Atlas database"}'),
+        (
+            "functions.exec",
+            "await tools.mcp__graph_memory__memory_search({question:'Atlas database'})",
+        ),
         ("mcp__graph_memory__memory_recall", '{"entity":"Atlas"}'),
         ("mcp__graph_memory__memory_evidence", '{"fact_ids":["..."]}'),
         ("functions.exec", "await tools.mcp__graph_memory__memory_recall({entity:'Atlas'})"),

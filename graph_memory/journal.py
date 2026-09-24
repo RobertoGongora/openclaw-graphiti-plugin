@@ -910,6 +910,7 @@ class Journal:
         known_at=None,
         sequence=None,
         complete=False,
+        search=False,
     ):
         snapshot = self.snapshot(namespace, known_at=known_at, sequence=sequence)
         state = snapshot["state"]
@@ -925,6 +926,26 @@ class Journal:
         candidates = candidates[:21]
         exact = [e for e in candidates if needle in e["aliases"]]
         selected = exact or candidates
+        if search:
+            from .retrieval import tokens
+
+            terms = tokens(query)
+            matched = set()
+            for f in state["MemoryFact"].values():
+                s = state["MemoryEntity"].get(f["subject_id"], {})
+                t = state["MemoryEntity"].get(f["target_id"], {})
+                text = " ".join(
+                    str(f.get(k) or "")
+                    for k in ("summary", "subject", "target", "relation", "slot")
+                )
+                if terms.intersection(
+                    tokens(text + " " + s.get("name", "") + " " + t.get("name", ""))
+                ):
+                    matched.add(f["subject_id"])
+            selected = sorted(
+                (e for e in state["MemoryEntity"].values() if e["id"] in matched),
+                key=lambda e: e["key"],
+            )
         ids = {e["id"] for e in selected}
 
         def grounded(f):
@@ -991,7 +1012,7 @@ class Journal:
             "as_of": at.isoformat(),
             "revision": snapshot["revision"],
             "entities": selected[:20],
-            "ambiguous": len(selected) > 1,
+            "ambiguous": not search and len(selected) > 1,
             "entity_matches_truncated": len(selected) > 20,
             **{k: v if complete else v[:limit] for k, v in projection.items()},
             "inferred": inferences[:limit],

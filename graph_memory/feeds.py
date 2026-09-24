@@ -18,7 +18,9 @@ from .store import digest
 
 AGENT_INSTRUCTIONS = """Use graph-memory as your memory system. Native memories are disabled.
 Before answering anything about past work, projects, preferences, decisions, people, or habits,
-call memory_recall with a short entity name/key. Use memory_latest with entity and optional
+call memory_recall with a short entity name/key and put the question in its question field.
+For a full question or topic spanning entities, use memory_search. memory_search_entities
+finds short names/aliases only, not facts. A miss is not proof no relevant memory exists. Use memory_latest with entity and optional
 relation to find the newest decision, resolved issue, observation, preference, or occurrence.
 All memory management must use memory_* tools. Never search/write Markdown memory files or
 substitute remembered conversation summaries for fresh tool results. Resolve ambiguous entities
