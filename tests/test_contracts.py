@@ -49,6 +49,7 @@ def test_mcp_stateless_discovery_metadata_headers_and_catalog():
         "memory_render",
         "memory_evidence",
         "memory_search_entities",
+        "memory_search",
         "memory_status",
     }
     ingest_schema = next(t["inputSchema"] for t in result["tools"] if t["name"] == "memory_ingest")
@@ -157,6 +158,7 @@ def test_retrieval_only_server_rejects_writes_before_dispatch():
         "memory_render",
         "memory_evidence",
         "memory_search_entities",
+        "memory_search",
         "memory_status",
     }
     attempted = rpc(

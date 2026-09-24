@@ -1,0 +1,53 @@
+{
+  "date": "2026-09-24",
+  "method": "Read-only probes against changing live transcripts namespace. Observational latency, no accuracy-improvement claim. Search uses keyword matches and does not change evidence lanes.",
+  "cases": [
+    {
+      "question": "Ketch DROP upload batching CalPrivacy one CSV per list",
+      "seconds": 4.859,
+      "response_bytes": 4721,
+      "returned": 5,
+      "lanes": [
+        "uncertain",
+        "uncertain",
+        "uncertain",
+        "uncertain",
+        "uncertain"
+      ]
+    },
+    {
+      "question": "How does Supabase treat database disk size?",
+      "seconds": 3.935,
+      "response_bytes": 4560,
+      "returned": 5,
+      "lanes": [
+        "uncertain",
+        "uncertain",
+        "uncertain",
+        "uncertain",
+        "uncertain"
+      ]
+    },
+    {
+      "question": "DROP Backup Plan ADR-017 Session 13 first-party CPPA cycle",
+      "seconds": 4.175,
+      "response_bytes": 4190,
+      "returned": 5,
+      "lanes": [
+        "planned",
+        "uncertain",
+        "uncertain",
+        "uncertain",
+        "uncertain"
+      ]
+    }
+  ],
+  "regressions": [
+    "Phrase entity lookup stays empty but suggests question search",
+    "Topic search spans subjects with stable pagination",
+    "Namespace isolation and read-only MCP authorization",
+    "Old values retrieve replacements; at_change excludes future knowledge",
+    "Conflicts, retractions, and event-time cutoff preserved",
+    "New search tool output marked as derived memory, not independent evidence"
+  ]
+}

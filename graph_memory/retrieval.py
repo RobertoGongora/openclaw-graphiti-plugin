@@ -56,11 +56,21 @@ class RecallView(m.HistoricalScope):
 
 class EntitySearch(m.HistoricalScope):
     query: m.Text = Field(
-        description="Name, alias, or words identifying a person, project, or other entity."
+        description="Short entity name or alias, e.g. Ketch or T3 Code. Every word must match that entity's names. For a topic or full question, use memory_search instead."
     )
     kind: m.Kind | None = None
     limit: Annotated[int, Field(ge=1, le=20)] = 5
     offset: Annotated[int, Field(ge=0, le=100_000)] = 0
+
+
+class QuestionSearch(m.HistoricalScope):
+    question: Annotated[str, Field(min_length=1, max_length=2000)] = Field(
+        description="A topic or natural-language question to search across remembered facts, without choosing an entity."
+    )
+    as_of: AwareDatetime | None = None
+    limit: Annotated[int, Field(ge=1, le=20)] = 5
+    offset: Annotated[int, Field(ge=0, le=100_000)] = 0
+    include_history: bool = False
 
 
 class LatestView(m.Latest):
@@ -213,6 +223,10 @@ def recall(store, r):
     if r.detail == "full" and not r.question:
         return raw
     terms = tokens(r.question or "") - tokens(r.entity)
+    return ranked_view(raw, r, terms)
+
+
+def ranked_view(raw, r, terms):
     shared = shared_slots(f for lane in LANES for f in raw[lane])
     # Match across all evidence BEFORE hiding history. A question mentioning the old
     # database must also retrieve the replacement in the same exclusive role.
@@ -329,6 +343,47 @@ def recall(store, r):
             {**f, "lane": lane, **group_fields(f, lane, len(copies), sessions(copies))}
             for lane, f, copies, _ in selected
         ]
+    return result
+
+
+def search(store, r):
+    # Reuse recall's temporal projection, conflict handling, deduplication and
+    # evidence lanes. A topical match never promotes an uncertain report.
+    terms = tokens(r.question)
+    if not terms:
+        return {
+            "question": r.question,
+            "status": "needs_search_terms",
+            "facts": [],
+            "next_offset": None,
+            "guidance": "Include a subject or topic, such as Ketch uploads or database disk size.",
+        }
+    raw = store.recall(
+        r.namespace,
+        r.question,
+        r.as_of,
+        r.limit,
+        _complete=True,
+        known_at=r.known_at,
+        at_change=r.at_change,
+        _search=True,
+    )
+    view = RecallView(**r.model_dump(), entity=r.question, detail="compact")
+    result = ranked_view(raw, view, terms)
+    result.pop("entity")
+    result.pop("entities")
+    result.pop("entity_matches_truncated")
+    by_id = {f["id"]: f for lane in LANES for f in raw[lane]}
+    for fact in result["facts"]:
+        original = by_id[fact["id"]]
+        fact.update(subject=original["subject"], target=original["target"])
+    result["scope"] = (
+        "Keyword search across stored facts; a miss is not proof that no relevant memory exists."
+    )
+    if not result["facts"]:
+        result["guidance"] = (
+            "Try fewer distinctive words or an alternative name. Use memory_search_entities for a short name, then memory_recall with the returned key and your question."
+        )
     return result
 
 
@@ -598,5 +653,20 @@ def search_entities(store, r):
         "matches": rows,
         "total": total,
         "next_offset": end if end < total else None,
+        **(
+            {
+                "guidance": "No entity name matched. This does not mean no relevant facts exist. Use memory_search for this topic/question, or try one short entity name and pass the question to memory_recall.",
+                "suggested_call": {
+                    "tool": "memory_search",
+                    "arguments": {
+                        "question": r.query,
+                        **({"known_at": r.known_at.isoformat()} if r.known_at is not None else {}),
+                        **({"at_change": r.at_change} if r.at_change is not None else {}),
+                    },
+                },
+            }
+            if total == 0
+            else {}
+        ),
         **({"knowledge_history": history} if history else {}),
     }

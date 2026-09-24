@@ -679,6 +679,7 @@ class GraphStore:
         _complete=False,
         known_at=None,
         at_change=None,
+        _search=False,
     ):
         if known_at is not None or at_change is not None:
             from .journal import Journal
@@ -691,6 +692,7 @@ class GraphStore:
                 known_at=known_at,
                 sequence=at_change,
                 complete=_complete,
+                search=_search,
             )
         from . import aliases
 
@@ -701,20 +703,53 @@ class GraphStore:
             space = tx.run("MATCH (s:MemorySpace {id:$ns}) RETURN s.revision AS r", ns=namespace)
             revision = (space.single() or {"r": 0})["r"]
             candidates = (
+                []
+                if _search
                 # No `e.key=$q` arm: canonical puts every normalized key among the names.
-                aliases.containing(tx, namespace, needle, 21)
-                if aliases.indexed(tx, namespace)
-                else tx.run(
-                    "MATCH (e:MemoryEntity {namespace:$ns}) WHERE e.merged_into IS NULL "
-                    "AND (any(a IN e.aliases WHERE a CONTAINS $q) OR e.key=$q) "
-                    "RETURN properties(e) AS entity "
-                    "ORDER BY CASE WHEN $q IN e.aliases THEN 0 ELSE 1 END,e.key LIMIT 21",
-                    ns=namespace,
-                    q=needle,
-                ).data()
+                else (
+                    aliases.containing(tx, namespace, needle, 21)
+                    if aliases.indexed(tx, namespace)
+                    else tx.run(
+                        "MATCH (e:MemoryEntity {namespace:$ns}) WHERE e.merged_into IS NULL "
+                        "AND (any(a IN e.aliases WHERE a CONTAINS $q) OR e.key=$q) "
+                        "RETURN properties(e) AS entity "
+                        "ORDER BY CASE WHEN $q IN e.aliases THEN 0 ELSE 1 END,e.key LIMIT 21",
+                        ns=namespace,
+                        q=needle,
+                    ).data()
+                )
             )
+            if _search:
+                # Read the small searchable fields first, not every fact's
+                # evidence payload. Select complete subjects before projection:
+                # filtering individual facts would hide corrections/conflicts.
+                from .retrieval import tokens
+
+                terms = tokens(query)
+                rows = tx.run(
+                    "MATCH (f:MemoryFact {namespace:$ns}) "
+                    "MATCH (s:MemoryEntity {id:f.subject_id,namespace:$ns}),"
+                    "(t:MemoryEntity {id:f.target_id,namespace:$ns}) "
+                    "RETURN f.subject_id AS id,f.summary AS summary,f.subject AS subject,"
+                    "f.target AS target,f.relation AS relation,f.slot AS slot,"
+                    "s.name AS subject_name,t.name AS target_name",
+                    ns=namespace,
+                )
+                matched = {
+                    row["id"]
+                    for row in rows
+                    if terms.intersection(
+                        tokens(" ".join(str(v or "") for k, v in row.items() if k != "id"))
+                    )
+                }
+                candidates = tx.run(
+                    "MATCH (e:MemoryEntity {namespace:$ns}) WHERE e.id IN $ids "
+                    "RETURN properties(e) AS entity ORDER BY e.key",
+                    ns=namespace,
+                    ids=list(matched),
+                ).data()
             exact = [r for r in candidates if needle in r["entity"]["aliases"]]
-            selected = exact or candidates
+            selected = candidates if _search else exact or candidates
             ids = [r["entity"]["id"] for r in selected]
             # All root facts are resolved before response limits are applied.
             facts = self.grounded_facts(tx, namespace, ids)
@@ -772,7 +807,7 @@ class GraphStore:
                 "as_of": at.isoformat(),
                 "revision": revision,
                 "entities": [r["entity"] for r in selected[:20]],
-                "ambiguous": len(selected) > 1,
+                "ambiguous": not _search and len(selected) > 1,
                 "entity_matches_truncated": len(selected) > 20,
                 **{k: v if _complete else v[:limit] for k, v in projection.items()},
                 "inferred": inferences[:limit],

@@ -25,6 +25,7 @@ READ_ONLY = {
     "memory_render",
     "memory_evidence",
     "memory_search_entities",
+    "memory_search",
 }
 
 

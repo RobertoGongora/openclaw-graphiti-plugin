@@ -478,10 +478,15 @@ class MemoryService:
                 lambda r: self.store.commit(r.namespace, r.episode_id, r.extraction),
                 "Validate typed relationships and exact source quotes, then atomically commit graph facts. Idempotent.",
             ),
+            "memory_search": (
+                retrieval.QuestionSearch,
+                lambda r: retrieval.search(self.store, r),
+                "Search remembered facts with a topic or full question across entities. Use before claiming nothing is remembered; follow up with memory_evidence to verify sources. Keyword search, not live verification.",
+            ),
             "memory_search_entities": (
                 retrieval.EntitySearch,
                 lambda r: retrieval.search_entities(self.store, r),
-                "Use when you need to find a remembered person, project, or thing and are unsure of its name or identity.",
+                "Find an entity by a short name or alias, e.g. Ketch or T3 Code. This searches names, not facts. Use memory_search for topics or full questions.",
             ),
             "memory_evidence": (
                 retrieval.EvidenceRequest,
@@ -571,6 +576,7 @@ class MemoryService:
             "memory_render",
             "memory_evidence",
             "memory_search_entities",
+            "memory_search",
             "memory_ingest",
             "memory_recall",
             "memory_latest",

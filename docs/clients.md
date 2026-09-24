@@ -1,6 +1,6 @@
 # Clients with native memories disabled
 
-MCP exposes ten tools: recall, latest, evidence, entity search, status, confirm, graph
+MCP exposes eleven tools: recall, question search, latest, evidence, entity search, status, confirm, graph
 rendering, ingest, retract, and merge. Background processing is owned by the
 Python engine.
 Docker can run the entire stack; see [Docker setup](docker.md).
@@ -84,6 +84,11 @@ source IDs; choose one intake route per transcript directory.
 - Retrieve from `memory_recall` before questions about past work, preferences,
   projects, people, decisions, or activities. Use `memory_latest` with an entity
   and optional relation for the newest evidence of a particular kind.
+- Use `memory_search(question="Ketch DROP upload batching CalPrivacy one CSV per list")`
+  for full questions or topics across entities. Results retain evidence IDs, source
+  lanes and subject/target keys; follow up with `memory_evidence` or entity recall.
+- Use `memory_search_entities(query="Ketch")` for names only. It requires all words
+  to match one entity's names/aliases; an empty response suggests question search.
 - Resolve ambiguous identities and follow relevant returned neighbor keys.
 - Use tools for all memory writes, corrections, and identity management.
 - Never substitute cached conversational memory or Markdown lookup for the graph.
@@ -163,3 +168,9 @@ Turn native memory off with `"autoMemoryEnabled": false` in
 worker already mounts `~/.claude/projects`: choose one intake route per
 transcript directory. The installed plugin is cached, so reinstall after
 changing its files. Start a new session to load it.
+
+Question search is deterministic keyword matching, with bounded, paginated output.
+It scans searchable fact fields in the namespace, then resolves complete subjects
+before ranking, so an old-value match can return its correction. It is not semantic
+search and cannot establish absence from a miss. `known_at`/`at_change` search only
+what was recorded at that cutoff; `as_of` controls event-time projection separately.

@@ -4,12 +4,14 @@ import json
 import re
 from datetime import UTC, datetime
 
-MEMORY_CALL = re.compile(r"memory_(?:recall|latest|evidence|search_entities|render|status)\b")
+MEMORY_CALL = re.compile(
+    r"memory_(?:recall|latest|evidence|search_entities|search|render|status)\b"
+)
 # Literal nested calls in Codex code mode: tools.x.memory_recall(, tools['x.memory_recall'](
 # and tools['x'].memory_recall(. Dynamic dispatch is not recognized.
 NESTED_READ = re.compile(
     r"\btools(?:\.[\w.]*|\[['\"][\w.]*|\[['\"][\w.]*['\"]\]\.[\w.]*)"
-    r"memory_(?:recall|latest|evidence|search_entities|render|status)\b\w*(?:['\"]\])?\s*\("
+    r"memory_(?:recall|latest|evidence|search_entities|search|render|status)\b\w*(?:['\"]\])?\s*\("
 )
 # Exact tool names only: Codex multi-agent tools and Claude Code sub-agent tools.
 # A chat tool whose name merely contains send_message is not delegation.
