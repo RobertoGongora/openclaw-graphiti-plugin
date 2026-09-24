@@ -8,6 +8,7 @@ journal and `rebuild` recreates them from the lists at any time."""
 import re
 from collections import Counter
 
+from .models import Kind
 from .store import GraphStore, digest
 
 BATCH = 5000
@@ -179,10 +180,10 @@ MENTIONED = (
 )
 CONTAINING = (
     "MATCH (a:MemoryAlias) USING TEXT INDEX a:MemoryAlias(text) "
-    "WHERE a.namespace=$ns AND a.text CONTAINS $q "
+    "WHERE a.namespace=$ns AND a.text CONTAINS $q AND ($kind IS NULL OR a.kind=$kind) "
     "MATCH (a)-[:ALIAS_OF]->(e:MemoryEntity) WHERE e.merged_into IS NULL "
     "WITH e,min(CASE WHEN a.text=$q THEN 0 ELSE 1 END) AS rank "
-    "RETURN properties(e) AS entity ORDER BY rank,e.key LIMIT $limit"
+    "RETURN properties(e) AS entity ORDER BY CASE WHEN e.key=$q THEN 0 ELSE 1 END,rank,e.key LIMIT $limit"
 )
 
 
@@ -250,8 +251,14 @@ def containing(tx, namespace, needle, limit):
         CONTAINING,
         ns=namespace,
         q=needle,
+        kind=qualified_kind(needle),
         limit=limit,
     ).data()
+
+
+def qualified_kind(query):
+    prefix, separator, _ = query.partition(":")
+    return prefix if separator and prefix in Kind._value2member_map_ else None
 
 
 def search(tx, namespace, needle, terms, kind, offset, limit):

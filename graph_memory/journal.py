@@ -502,7 +502,7 @@ class Journal:
             parts=parts,
         )
 
-    def _restore(self, tx, namespace, event, bodies):
+    def _restore(self, tx, namespace, event, bodies, keep=None):
         """The state a checkpoint event carries, the hashes of its nodes that hold
         references, and its hash sum (None for the whole-state digest of version 1)."""
         state = {label: {} for label in LABELS}
@@ -540,10 +540,13 @@ class Journal:
                         record = json.loads(line)
                         node = Node(label, bodies) if "h" in record else {}
                         node.update(record["p"])
-                        state[label][node["id"]] = node
+                        retained = keep is None or keep(label, node)
+                        if retained:
+                            state[label][node["id"]] = node
                         if "h" in record:
                             total += int(record["h"], 16)
-                            sealed[(label, node["id"])] = int(record["h"], 16)
+                            if retained:
+                                sealed[(label, node["id"])] = int(record["h"], 16)
                         else:
                             total += element_hash(label, node)
                 except (ValueError, TypeError, KeyError, zlib.error) as exc:
@@ -685,7 +688,7 @@ class Journal:
         if count != last - first + 1:
             raise ValueError(INTEGRITY)
 
-    def snapshot(self, namespace, *, known_at=None, sequence=None, transaction=None):
+    def snapshot(self, namespace, *, known_at=None, sequence=None, transaction=None, select=None):
         if known_at is not None and sequence is not None:
             raise ValueError("Choose known_at or at_change, not both")
         if sequence is not None and sequence < 0:
@@ -741,12 +744,38 @@ class Journal:
             bodies = Bodies(self.store, namespace)
             events = self._events(tx, namespace, start, target, previous)
             event, tip = next(events)
-            state, sealed, running = self._restore(tx, namespace, event, bodies)
+            keep = None
+            if select is not None and event.get("version", 1) >= 2:
+                # Every delta still participates in integrity verification. Retain
+                # all changed nodes, even outside the requested view, so advance
+                # can subtract their old hashes and validate their new shapes.
+                changed = set()
+                legacy = False
+                for delta, _ in events:
+                    legacy |= delta.get("version", 1) < 2
+                    changed.update((c["label"], c["id"]) for c in delta["changes"])
+                if not legacy:
+                    selector = select
+
+                    def retained(label, node):
+                        return selector(label, node) or (label, node["id"]) in changed
+
+                    keep = retained
+                events = self._events(tx, namespace, start, target, previous)
+                event, tip = next(events)
+            state, sealed, running = self._restore(tx, namespace, event, bodies, keep)
             for following in events:
                 event, tip = following
                 running = advance(state, sealed, running, event, bodies)
             if target == head["journal_sequence"] and tip != head["journal_hash"]:
                 raise ValueError("Journal head does not match its history")
+            if select is not None:
+                # Selection is against final historical values, not checkpoint
+                # values: an entity may have been renamed or a fact repointed.
+                state = {
+                    label: {key: node for key, node in nodes.items() if select(label, node)}
+                    for label, nodes in state.items()
+                }
             return {
                 "state": state,
                 "sequence": event["sequence"],
@@ -917,16 +946,26 @@ class Journal:
         state = snapshot["state"]
         at = as_of or datetime.fromisoformat(snapshot["known_at"])
         needle = normalized(query)
+        from .aliases import qualified_kind
+
+        kind = qualified_kind(needle)
         candidates = [
             e
             for e in state["MemoryEntity"].values()
             if not e.get("merged_into")
+            and (kind is None or e["kind"] == kind)
             and (e["key"] == needle or any(needle in a for a in e["aliases"]))
         ]
-        candidates.sort(key=lambda e: (0 if needle in e["aliases"] else 1, e["key"]))
+        candidates.sort(
+            key=lambda e: (
+                0 if normalized(e["key"]) == needle else 1 if needle in e["aliases"] else 2,
+                e["key"],
+            )
+        )
         candidates = candidates[:21]
         exact = [e for e in candidates if needle in e["aliases"]]
-        selected = exact or candidates
+        canonical = [e for e in candidates if normalized(e["key"]) == needle]
+        selected = canonical or exact or candidates
         if search:
             from .retrieval import tokens
 

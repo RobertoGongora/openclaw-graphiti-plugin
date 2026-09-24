@@ -518,7 +518,15 @@ The personal stack uses a 512 MB heap, a 256 MB page cache and a 1,536 MB limit.
 
 The transcripts MCP container has a 2 GB memory limit. Each client session
 attached through `docker exec` is charged to that container, at about 56 MB per
-session. The personal MCP container keeps 1 GB.
+session before query working sets. Historical requests can use substantially
+more. A process-shared nonblocking file lock serializes historical MCP handlers;
+competing callers get BUSY and must retry with the same cutoff. Locks release
+automatically when a session dies. Entity/evidence history selectively retains
+nodes while validating the complete journal; broad historical recall still has
+a namespace-sized working set. This reduces concurrent peaks, not idle allocator
+retention. A healthy main process does not establish that every stdio session
+survived: inspect container OOM events when a client reports a closed transport.
+The personal MCP container keeps 1 GB.
 
 ## Quarantine review
 

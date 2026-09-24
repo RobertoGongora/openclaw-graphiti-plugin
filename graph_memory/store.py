@@ -713,11 +713,13 @@ class GraphStore:
                     if aliases.indexed(tx, namespace)
                     else tx.run(
                         "MATCH (e:MemoryEntity {namespace:$ns}) WHERE e.merged_into IS NULL "
+                        "AND ($kind IS NULL OR e.kind=$kind) "
                         "AND (any(a IN e.aliases WHERE a CONTAINS $q) OR e.key=$q) "
                         "RETURN properties(e) AS entity "
-                        "ORDER BY CASE WHEN $q IN e.aliases THEN 0 ELSE 1 END,e.key LIMIT 21",
+                        "ORDER BY CASE WHEN e.key=$q THEN 0 WHEN $q IN e.aliases THEN 1 ELSE 2 END,e.key LIMIT 21",
                         ns=namespace,
                         q=needle,
+                        kind=aliases.qualified_kind(needle),
                     ).data()
                 )
             )
@@ -751,7 +753,8 @@ class GraphStore:
                     ids=list(matched),
                 ).data()
             exact = [r for r in candidates if needle in r["entity"]["aliases"]]
-            selected = candidates if _search else exact or candidates
+            canonical = [r for r in candidates if normalized(r["entity"]["key"]) == needle]
+            selected = candidates if _search else canonical or exact or candidates
             ids = [r["entity"]["id"] for r in selected]
             root_ids = set(ids)
             if _related_question and not _search:
@@ -1011,6 +1014,71 @@ class GraphStore:
                 namespace,
                 "fact_retracted",
                 {"fact_id": fact_id, "reason": reason},
+                run,
+                scoped=True,
+            )
+        )
+
+    def allow_alternatives(self, namespace, fact_ids, reason):
+        """Correct a mistaken exclusive role, preserving claims and their sources."""
+        ids = list(dict.fromkeys(fact_ids))
+        if not 2 <= len(ids) <= 10:
+            raise ValueError("Choose 2–10 distinct facts that were incorrectly made exclusive")
+
+        def run(tx):
+            self.lock(tx, namespace)
+            facts = tx.run(
+                "MATCH (f:MemoryFact {namespace:$ns}) WHERE f.id IN $ids RETURN properties(f) AS f",
+                ns=namespace,
+                ids=ids,
+            ).value()
+            if len(facts) != len(ids) or any(f.get("retracted") for f in facts):
+                raise ValueError("Every fact must exist in this namespace and not be retracted")
+            if len({(f["subject"], f["relation"]) for f in facts}) != 1:
+                raise ValueError("Alternatives must have the same subject and relation")
+            if len({f["target"] for f in facts}) < 2:
+                raise ValueError("Alternatives require distinct targets")
+            slots = {f.get("slot") for f in facts}
+            if slots == {None}:
+                return {"fact_ids": ids, "exclusive": False, "replayed": True}
+            if len(slots) != 1 or None in slots:
+                raise ValueError("All selected facts must share the same erroneous exclusive slot")
+            # Partial corrections can strand end/replacement records in another
+            # temporal role and resurrect claims that were explicitly ended.
+            members = tx.run(
+                "MATCH (f:MemoryFact {namespace:$ns,subject:$subject,relation:$relation,slot:$slot}) "
+                "WHERE coalesce(f.retracted,false)=false RETURN f.id AS id LIMIT 11",
+                ns=namespace,
+                subject=facts[0]["subject"],
+                relation=facts[0]["relation"],
+                slot=facts[0]["slot"],
+            ).value()
+            if set(members) != set(ids):
+                raise ValueError(
+                    "Inspect the complete exclusive-role history before correction; include all "
+                    "unretracted facts, including ended/replacement records. Additional IDs: "
+                    + ", ".join(fid for fid in members if fid not in ids)
+                )
+            self.touch(tx, namespace, "MemoryFact", ids)
+            tx.run(
+                "MATCH (f:MemoryFact {namespace:$ns}) WHERE f.id IN $ids "
+                "SET f.original_slot=coalesce(f.original_slot,f.slot),f.slot=null,"
+                "f.slot_correction_reason=$reason,f.slot_corrected_at=$at "
+                "WITH count(f) AS changed MATCH (s:MemorySpace {id:$ns}) "
+                "SET s.revision=s.revision+1",
+                ns=namespace,
+                ids=ids,
+                reason=reason,
+                at=now().isoformat(),
+            ).consume()
+            return {"fact_ids": ids, "exclusive": False, "claims_and_sources_preserved": True}
+
+        return self.transaction(
+            lambda tx: self.mutate(
+                tx,
+                namespace,
+                "fact_roles_corrected",
+                {"fact_ids": ids, "reason": reason},
                 run,
                 scoped=True,
             )

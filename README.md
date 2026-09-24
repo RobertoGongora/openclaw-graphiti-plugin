@@ -92,13 +92,14 @@ stateless answer on both transports.
 | `memory_retract` | Use when the user says a remembered fact is incorrect or should no longer inform answers. |
 | `memory_confirm` | Use when the user states that an uncertain remembered fact is true. Never confirm on your own judgement. |
 | `memory_merge` | Use when separate memory entries are confirmed to refer to the same person, project, or thing. |
+| `memory_allow_alternatives` | Correct a mistaken exclusive slot when the user or original evidence establishes compatible alternatives; preserve both facts. |
 | `memory_render` | Use when the user wants to see their memory graph or how its facts connect. Shows the whole graph by default, or a selected view using optional Cypher. |
 | `memory_search_entities` | Use when you need to find a remembered person, project, or thing and are unsure of its name or identity. |
 | `memory_evidence` | Use when you need to verify a recalled fact or inspect the evidence behind it. |
 | `memory_status` | Use when you want to check memory ingestion progress, how much remains unstaged, processing or failed work, and graph counts. |
 
-Only these ten operations are exposed through MCP. Read-only mode exposes recall,
-latest, rendering, entity search, evidence and status. Extraction, commit, repair,
+Twelve operations are exposed through MCP. Read-only mode exposes recall,
+latest, rendering, entity search, question search, evidence and status. Extraction, commit, repair,
 and dreaming stay inside the engine and CLI; calling an internal operation through
 MCP is rejected, even by name.
 
@@ -169,6 +170,14 @@ The output is a separate durable `MemoryDream`. `--apply` promotes supported
 Dream operations are available through Python and CLI `call memory_dream_*`, not MCP.
 Dream scheduling and promotion remain explicit operator actions; the ingestion daemon
 does not silently generate or publish new insights.
+
+Add `--review-uncertain` to review up to ten uncertain claims against bounded
+original user/tool evidence from the supplied episodes. `claim_reviews` classify
+each as supported, contradicted or insufficient, with source IDs and reasons.
+These are probabilistic recommendations, not confirmations: applying a dream
+never promotes its reviewed facts. Recalled summaries, assistant repetition,
+failed tools and unsourced notes cannot serve as review evidence. Candidate
+selection can miss paraphrases; insufficient evidence remains unresolved.
 
 ## Import and continuous ingestion
 

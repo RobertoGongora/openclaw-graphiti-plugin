@@ -1,0 +1,70 @@
+{
+  "engine": "44cffa960a7aae1091d9e6b334cb78df6a483dbe3dc34a1c9e933c56e949b651",
+  "synthetic_checkpoint": {
+    "nodes": 50002,
+    "repeats": 3,
+    "scope": "Checkpoint restoration only; excludes DB/network/delta replay, uses separate fresh process per repetition, Python allocations measured with tracemalloc",
+    "measurements": {
+      "full": {
+        "median_seconds": 0.5410610000108136,
+        "peak_python_bytes": 86542628,
+        "retained_nodes": 50002
+      },
+      "selective": {
+        "median_seconds": 0.4335688749997644,
+        "peak_python_bytes": 19162717,
+        "retained_nodes": 2
+      }
+    }
+  },
+  "evidence_views": {
+    "source_reviewed_facts": 14,
+    "full_fact_array_bytes": 34288,
+    "compact_fact_array_bytes": 17853,
+    "index_fact_array_bytes": 10709,
+    "scope": "Same current records, fact arrays only; excludes protocol envelope and expansion guidance. No omission of source identity or uncertainty labels."
+  },
+  "model_smoke": {
+    "model": "gpt-5.6-terra",
+    "reasoning_effort": "low",
+    "synthetic_review_verdicts": {
+      "supported": "supported",
+      "contradicted": "contradicted",
+      "insufficient": "insufficient"
+    },
+    "accuracy_claim": false,
+    "alternative_extraction_probe": "Inconsistent coverage: baseline Spanish emitted one combined request; candidate Spanish and both English runs emitted zero facts. This does not establish improved extraction or false-conflict prevention."
+  },
+  "limitations": [
+    "General historical recall/search still reconstruct full namespace state.",
+    "Selective replay can scan the checkpoint twice for evidence and deltas twice; memory reduction is not a universal latency guarantee.",
+    "A cross-process lock limits simultaneous historical handlers, not allocator retention or total idle session memory.",
+    "Model review labels are probabilistic recommendations; no facts are promoted or user-confirmed.",
+    "Short extraction guidance has no demonstrated quality gain in this smoke test."
+  ],
+  "production_mutations": [
+    "User-requested merges of person:user and person:session-user into person:rob, preserving aliases and journal history.",
+    "Two source-verified DigitalOcean alternative facts had only their erroneous exclusive slots cleared; original claims and citations preserved."
+  ],
+  "validation": {
+    "deterministic_tests": {
+      "passed": 406,
+      "skipped": 1
+    },
+    "golden": {
+      "passed": 6,
+      "total": 6,
+      "suite": "d6ada26d7dd2dde590511ca96107d25c4bd2c449c39ea8008814cfe176d1f941",
+      "model": "gpt-5.6-terra",
+      "reasoning_effort": "low",
+      "inputs_unchanged_during_run": true
+    },
+    "static_checks": [
+      "ruff check",
+      "ruff format --check",
+      "pyright: zero errors",
+      "skill quick_validate",
+      "git diff --check"
+    ]
+  }
+}

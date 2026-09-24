@@ -198,6 +198,11 @@ def run():
     dream.add_argument("query")
     dream.add_argument("--episode", action="append", required=True)
     dream.add_argument(
+        "--review-uncertain",
+        action="store_true",
+        help="Produce source-linked uncertain-claim reviews without changing those facts",
+    )
+    dream.add_argument(
         "--apply", action="store_true", help="Promote supported inferences after completion"
     )
     call = commands.add_parser("call")
@@ -479,7 +484,12 @@ def run():
             result = feed(service, args.namespace, args.path, args.session_id)
         elif args.command == "dream":
             created = service.dream_create(
-                DreamCreate(namespace=args.namespace, query=args.query, episode_ids=args.episode)
+                DreamCreate(
+                    namespace=args.namespace,
+                    query=args.query,
+                    episode_ids=args.episode,
+                    review_uncertain=args.review_uncertain,
+                )
             )
             request = DreamRequest(namespace=args.namespace, dream_id=created["dream_id"])
             result = service.dream_run(request)

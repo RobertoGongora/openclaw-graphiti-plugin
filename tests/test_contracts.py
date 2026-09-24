@@ -46,6 +46,7 @@ def test_mcp_stateless_discovery_metadata_headers_and_catalog():
         "memory_merge",
         "memory_retract",
         "memory_confirm",
+        "memory_allow_alternatives",
         "memory_render",
         "memory_evidence",
         "memory_search_entities",
