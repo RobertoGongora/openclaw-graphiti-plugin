@@ -1,5 +1,6 @@
 """The experimental projection must preserve answers and journal verification."""
 
+import json
 from datetime import datetime
 
 import pytest
@@ -150,3 +151,158 @@ def test_changed_projected_nodes_keep_original_fields_until_validation(graph, mo
     )
     with pytest.raises(ValueError, match="checkpoint integrity"):
         RecallJournal(store).snapshot(ns)
+
+
+def test_unchanged_nodes_are_projected_when_restored(graph, monkeypatch):
+    store, ns = graph
+    mixed_chain(store, ns, monkeypatch)
+    journal = RecallJournal(store)
+    journal.checkpoint(ns)
+    episode = next(
+        key
+        for key, node in journal.snapshot(ns)["state"]["MemoryEpisode"].items()
+        if node["status"] == "complete"
+    )
+
+    def update(tx):
+        tx.run("MATCH (e:MemoryEpisode {id:$id}) SET e.status='pending'", id=episode).consume()
+
+    store.transaction(lambda tx: store.mutate(tx, ns, "experiment-test", {}, update))
+    restored = []
+    original = journal._restore
+
+    def inspect(*args, **kwargs):
+        state, sealed, total = original(*args, **kwargs)
+        restored.append({label: dict(nodes) for label, nodes in state.items()})
+        return state, sealed, total
+
+    monkeypatch.setattr(journal, "_restore", inspect)
+    journal.snapshot(ns)
+    state = restored[-1]
+    assert "payload" in state["MemoryEpisode"][episode]  # changed later: complete
+    assert all(
+        node == recall_node(label, node)
+        for label in ("MemoryEpisode", "MemoryMessage")
+        for key, node in state[label].items()
+        if (label, key) != ("MemoryEpisode", episode)
+    )
+    assert state["MemoryMessage"] and not any(
+        state[label]
+        for label in ("MemorySession", "MemoryArtifact", "MemoryArtifactObservation", "MemoryDream")
+    )
+
+
+def test_report_time_fallback_reads_projected_message_timestamps(graph, monkeypatch):
+    store, ns = graph
+    mixed_chain(store, ns, monkeypatch)
+
+    def legacy(tx):
+        # Facts committed before reported_at existed take their messages' time.
+        tx.run("MATCH (f:MemoryFact {namespace:$ns}) REMOVE f.reported_at", ns=ns).consume()
+
+    store.transaction(lambda tx: store.mutate(tx, ns, "experiment-test", {}, legacy))
+    Journal(store).checkpoint(ns)
+    store.stage(transcript(ns, "four", "Atlas uses DuckDB."))
+    head = Journal(store).snapshot(ns)["sequence"]
+    args = {"entity": "Atlas", "at_change": head, "detail": "full", "include_history": True}
+    result = compare(store, ns, monkeypatch, "memory_recall", args)
+    assert any(f.get("reported_at") for lane in ("current", "history") for f in result[lane])
+    compare(
+        store,
+        ns,
+        monkeypatch,
+        "memory_latest",
+        {"entity": "Atlas", "at_change": head, "detail": "full"},
+    )
+
+
+def test_legacy_checkpoint_and_delta_are_verified_before_projection(graph, monkeypatch):
+    store, ns = graph
+    query(store, "MERGE (s:MemorySpace {id:$ns}) ON CREATE SET s.revision=0", ns=ns)
+    with monkeypatch.context() as patch:
+        patch.setattr(store, "mutate", lambda tx, ns, kind, details, op, scoped=False: op(tx))
+        receipt = store.stage(transcript(ns, "legacy"))
+        store.commit(ns, receipt["episode_id"], extraction())
+    checkpoint = v2_write(store, ns, monkeypatch, checkpoint=True, version=1)
+    second = transcript(ns, "second", "Atlas uses Postgres.")
+    delta = v2_write(
+        store, ns, monkeypatch, lambda tx: store.stage(second, transaction=tx), version=1
+    )
+    for sequence in (checkpoint, delta):
+        compare(store, ns, monkeypatch, "memory_recall", {"entity": "Atlas", "at_change": sequence})
+    original = Journal._events
+
+    def corrupting(target):
+        def corrupt(self, *args):
+            for event, tip in original(self, *args):
+                if event["sequence"] == target:
+                    if "snapshot" in event:
+                        next(iter(event["snapshot"]["MemoryEpisode"].values()))["status"] = "x"
+                    else:
+                        event["changes"][0]["set"]["status"] = "x"
+                yield event, tip
+
+        return corrupt
+
+    for target, message in ((checkpoint, "checkpoint integrity"), (delta, "replay integrity")):
+        with monkeypatch.context() as patch:
+            patch.setattr(Journal, "_events", corrupting(target))
+            with pytest.raises(ValueError, match=message):
+                RecallJournal(store).snapshot(ns, sequence=delta)
+
+
+def test_legacy_delta_after_a_parts_checkpoint_replays_in_full(graph, monkeypatch):
+    store, ns = graph
+
+    def seed(tx):
+        tx.run("CREATE (:MemorySession {id:'s1',namespace:$ns,name:'session'})", ns=ns).consume()
+        tx.run(
+            "CREATE (:MemoryEntity {id:'e1',namespace:$ns,key:'project:atlas',name:'Atlas',"
+            "kind:'project',aliases:['atlas']})",
+            ns=ns,
+        ).consume()
+
+    store.transaction(lambda tx: store.mutate(tx, ns, "experiment-test", {}, seed))
+    Journal(store).checkpoint(ns)
+
+    def add(tx):
+        tx.run(
+            "CREATE (:MemoryEntity {id:'e2',namespace:$ns,key:'database:mysql',name:'MySQL',"
+            "kind:'database',aliases:['mysql']})",
+            ns=ns,
+        ).consume()
+
+    sequence = v2_write(store, ns, monkeypatch, add, version=1)
+    full = Journal(store).snapshot(ns, sequence=sequence)
+    projected = RecallJournal(store).snapshot(ns, sequence=sequence)
+    assert set(full["state"]["MemoryEntity"]) == {"e1", "e2"}
+    assert projected["state"]["MemoryEntity"] == full["state"]["MemoryEntity"]
+    assert not projected["state"]["MemorySession"]
+
+
+def test_runner_records_request_and_engine_errors_without_crashing(graph, tmp_path):
+    from evals.historical_recall import run
+
+    store, ns = graph
+    cases = [
+        # Rejected by a cross-field validator: its error context holds an exception.
+        {
+            "tool": "memory_search",
+            "arguments": {"question": "x", "at_change": 0, "known_at": "2026-09-24T00:00:00Z"},
+        },
+        {"tool": "memory_search_entities", "arguments": {"query": "", "at_change": 0}},
+        {"tool": "memory_recall", "arguments": {"entity": "Atlas", "at_change": 0}},
+    ]
+    rows = run(store, ns, cases, 1, tmp_path / "out")
+    responses = [
+        json.loads((tmp_path / "out" / f"response-0-{row['case']}.json").read_bytes())
+        for row in rows
+    ]
+    assert list(responses[0]) == list(responses[1]) == ["validation_error"]
+    assert responses[2] == {"error": "No journal exists for this namespace"}
+    with pytest.raises(ValueError, match="new or empty"):
+        run(store, ns, cases, 1, tmp_path / "out")
+    with pytest.raises(NotImplementedError):
+        RecallJournal(store).replay(ns, "replay:" + ns)
+    with pytest.raises(NotImplementedError):
+        RecallJournal(store).verify(ns)

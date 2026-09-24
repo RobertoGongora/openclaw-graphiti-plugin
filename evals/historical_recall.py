@@ -13,6 +13,7 @@ import argparse
 import gc
 import hashlib
 import json
+import os
 import resource
 import sys
 import time
@@ -46,6 +47,12 @@ class RecallJournal(Journal):
             select=lambda label, node: label in RECALL_LABELS,
             project_node=recall_node,
         )
+
+    def _complete_only(self, *args, **kwargs):
+        raise NotImplementedError("RecallJournal serves projected recall only")
+
+    # Both would write or compare a projected state as if it were complete.
+    replay = verify = _complete_only
 
 
 class ProjectedStore(GraphStore):
@@ -93,6 +100,9 @@ def memory():
 
 
 def run(store, namespace, cases, repeats, output):
+    # Leftover responses from an earlier run would enter the byte comparison.
+    if output.exists() and any(output.iterdir()):
+        raise ValueError("--output must be a new or empty directory")
     output.mkdir(parents=True, exist_ok=True)
     catalog = MemoryService(store).session_tools()
     rows = []
@@ -113,10 +123,20 @@ def run(store, namespace, cases, repeats, output):
             schema, handler, _ = catalog[tool]
             before = memory()
             start = time.perf_counter()
+            # Only request validation is recorded as an expected error; a
+            # ValidationError from inside a handler must fail the run.
             try:
-                response = handler(schema.model_validate(args))
+                request = schema.model_validate(args)
             except ValidationError as exc:
-                response = {"validation_error": exc.errors(include_url=False)}
+                response = {"validation_error": json.loads(exc.json(include_url=False))}
+            else:
+                try:
+                    response = handler(request)
+                except ValueError as exc:
+                    # The engine's own messages, as MCP returns them; subclasses raise.
+                    if type(exc) is not ValueError:
+                        raise
+                    response = {"error": str(exc)}
             # Same canonical response encoding in both modes; compare every field.
             encoded = json.dumps(response, sort_keys=True, ensure_ascii=False).encode()
             elapsed = time.perf_counter() - start
@@ -153,11 +173,20 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     uri = urlparse(args.uri)
-    if uri.hostname not in {"localhost", "127.0.0.1"} or uri.port in {17687, 27687}:
-        parser.error("Use an isolated loopback database; live graph ports are forbidden")
+    try:
+        port = uri.port
+    except ValueError:
+        parser.error("--uri has an invalid port")
+    # Without a port the driver would use 7687, which this guard cannot vouch for.
+    if uri.hostname not in {"localhost", "127.0.0.1", "::1"} or port in {None, 17687, 27687}:
+        parser.error(
+            "Use an isolated loopback database with an explicit port; live graph ports are forbidden"
+        )
     if args.repeats < 1:
         parser.error("--repeats must be positive")
-    store = (ProjectedStore if args.mode == "projected" else GraphStore)(args.uri)
+    store = (ProjectedStore if args.mode == "projected" else GraphStore)(
+        args.uri, password=os.environ.get("NEO4J_PASSWORD")
+    )
     try:
         run(
             store,

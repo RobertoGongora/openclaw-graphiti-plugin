@@ -4,6 +4,9 @@ Issue [#191](https://github.com/RobertoGongora/openclaw-graphiti-plugin/issues/1
 The recall projection reduced median peak process memory **50.7%** on the frozen
 historical profile workload. All **51 paired responses** matched byte for byte:
 42 from the repeated original audit and nine additional regression requests.
+The projection changes only `memory_recall`, `memory_search` and `memory_latest`;
+32 of the 51 pairs used it. The other 19 (entity search, evidence and one
+expected validation error) run the same code in both modes and match by construction.
 The candidate remains opt-in in the eval runner; ordinary service routing is
 unchanged and nothing was deployed.
 
@@ -11,7 +14,9 @@ unchanged and nothing was deployed.
 
 Three fresh containers per mode, each executing the original seven requests
 twice, sequentially. Each container had two CPUs and a 2 GiB memory limit.
-The table reports medians across the three containers, not per-query peaks.
+The table reports medians across the three containers, computed independently
+for each row (so a row's median may come from a different container than
+another's), not per-query peaks.
 
 | Measurement | Full reconstruction | Recall projection | Reduction |
 | --- | ---: | ---: | ---: |
@@ -76,12 +81,14 @@ delta remains complete until replay and its shape/state checks finish. Older
 whole-state hash formats reconstruct fully before projection. No current/live
 properties are substituted for historical status, aliases or timestamps.
 
-All complete canonical JSON responses matched across modes and repetitions,
-including facts, IDs, statuses, conflicts, temporal metadata, pagination,
-freshness, source references and error details. The nine supplemental cases
+All complete canonical JSON responses matched across modes and repetitions.
+For the 32 recall/search/latest pairs this covers facts, IDs, statuses,
+conflicts, temporal metadata, pagination and freshness. Entity search, evidence
+and the validation error never use the projection. The nine supplemental cases
 covered compact/full ranking, unranked full recall, pagination/history,
 independent `as_of`, a later knowledge cutoff after identity merges, latest,
-search misses and full evidence expansion. Full evidence bytes also matched.
+broad search and full evidence expansion. No case returned an empty search
+result, and the evidence case does not use the projection.
 
 Deterministic integration tests cover mixed journal versions, knowledge/event
 cutoffs, no future decision leakage, projected episode changes, corrupted delta
@@ -90,6 +97,31 @@ shape hashes and corrupt checkpoint data. Final validation: **410 passed,
 One new corruption test initially selected an already-pending episode and made
 no change; it now explicitly selects a completed episode and asserts that a new
 journal event was written before testing corruption rejection.
+
+### Changes after review
+
+A red-team review found no break in journal verification or response parity,
+but the original four tests would still pass if the projection were never applied
+while restoring a checkpoint, if legacy deltas were not forced into full
+reconstruction, if the version 1 checkpoint digest were skipped, or if message
+timestamps were dropped. Five tests were added; each of those four changes now
+fails at least one of them. They assert that unchanged episodes and messages are
+already projected when restored, replay a real version 1 delta and reject its
+corruption, cover a version 1 delta after a parts checkpoint, compare recall and
+latest for facts that fall back to message timestamps, and exercise the runner's
+error handling.
+
+The runner was then corrected: requests rejected by cross-field validation no
+longer crash JSON encoding, engine `ValueError`s are recorded as MCP returns them,
+a validation error raised inside a handler now fails the run, output folders must
+be new or empty, the URI needs an explicit loopback port, `NEO4J_PASSWORD` is
+honoured, and `RecallJournal` refuses `replay` and `verify`. `graph_memory/journal.py`
+is unchanged, so its recorded hash still matches. The recorded hash of
+`evals/historical_recall.py` identifies the code that produced these
+measurements, not the corrected runner. The new validation-error encoding
+reproduces the recorded response byte for byte; the other changes affect only
+paths these runs never reached. Validation after the changes: **415 passed,
+1 skipped**, Ruff check/format clean, and Pyright zero errors.
 
 ## Decision and limits
 

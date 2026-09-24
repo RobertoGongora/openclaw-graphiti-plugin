@@ -204,9 +204,16 @@ source requirements.
 projection on a restored, frozen database copy. It never installs the candidate
 into the normal service. Restore a backup into a separate database volume and
 use an unused loopback port; do not use a production volume or endpoint.
+`--frozen-copy` is an acknowledgement, not a check: the requests only read, but
+the runner cannot tell a restored copy from a live graph on another port. Set
+`NEO4J_PASSWORD` if the restored database requires authentication.
 
 The private query file has `calls: [{tool, arguments}]`. Every call must specify
 `known_at` or `at_change`; only the five historical read tools are accepted.
+`--namespace` replaces any namespace in the arguments. Each `--output` folder
+must be new or empty. Only `memory_recall`, `memory_search` and `memory_latest`
+use the projection; entity search and evidence read the journal directly, so
+their responses match in both modes by construction.
 For example, with a restored database on port 47687:
 
 ```sh
@@ -221,9 +228,12 @@ uv run python -m evals.historical_recall \
 ```
 
 Compare every `response-REPETITION-CASE.json` byte for byte between modes, not
-just selected fact IDs. `measurements.json` records elapsed time through JSON
-serialization, response bytes/hash, process peak RSS and, on Linux, current RSS
-and cgroup memory. Peak counters are cumulative within a process; use fresh
+just selected fact IDs, for example with
+`diff -rq -x measurements.json .local/history-full .local/history-projected`.
+Request validation failures are recorded as `validation_error` and engine
+errors as `error`, as MCP returns them. `measurements.json` records elapsed time
+through JSON serialization, response bytes/hash, process peak RSS and, on Linux,
+current RSS and, inside a cgroup v2 container, cgroup memory. Peak counters are cumulative within a process; use fresh
 containers for independent peaks and repeat the workload within each container
 to measure allocator retention. The first request is process-cold; database and
 OS caches are not reset. These are session-tool handler timings, excluding MCP
