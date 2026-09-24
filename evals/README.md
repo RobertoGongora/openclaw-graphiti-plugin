@@ -197,3 +197,46 @@ memory. Passing is evidence for these cases, not a semantic correctness guarante
 The deterministic tests separately cover commit enforcement, cache/source binding,
 checker outages, rejected-cache retries, revision preflight, and direct-write
 source requirements.
+
+## Broad historical recall memory experiment
+
+`evals.historical_recall` compares ordinary reconstruction with an opt-in recall
+projection on a restored, frozen database copy. It never installs the candidate
+into the normal service. Restore a backup into a separate database volume and
+use an unused loopback port; do not use a production volume or endpoint.
+
+The private query file has `calls: [{tool, arguments}]`. Every call must specify
+`known_at` or `at_change`; only the five historical read tools are accepted.
+For example, with a restored database on port 47687:
+
+```sh
+uv run python -m evals.historical_recall \
+  --uri bolt://127.0.0.1:47687 --frozen-copy --namespace transcripts \
+  --queries .local/history-queries.json --mode full --repeats 2 \
+  --output .local/history-full
+uv run python -m evals.historical_recall \
+  --uri bolt://127.0.0.1:47687 --frozen-copy --namespace transcripts \
+  --queries .local/history-queries.json --mode projected --repeats 2 \
+  --output .local/history-projected
+```
+
+Compare every `response-REPETITION-CASE.json` byte for byte between modes, not
+just selected fact IDs. `measurements.json` records elapsed time through JSON
+serialization, response bytes/hash, process peak RSS and, on Linux, current RSS
+and cgroup memory. Peak counters are cumulative within a process; use fresh
+containers for independent peaks and repeat the workload within each container
+to measure allocator retention. The first request is process-cold; database and
+OS caches are not reset. These are session-tool handler timings, excluding MCP
+HTTP transport and model interpretation. Keep private requests/responses ignored.
+
+The candidate retains all facts, entities and insights so temporal competitors,
+related decisions and inference supports remain available. Episodes become
+ID/status pairs and messages become ID/timestamp pairs. Other source records
+are omitted from the recall working set; the evidence tool still reconstructs
+and validates requested source text on demand. Journal replay verifies the same
+checkpoint parts, event chain, node/shape and state hashes. Changed nodes stay
+complete until replay ends; legacy formats may require full reconstruction.
+This reduces reconstruction memory but is not a fixed bound independent of
+namespace size or the number of nodes changed after a checkpoint.
+
+Results and limitations: [2026-09-24 experiment](reports/20260924-historical-recall.md).

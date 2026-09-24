@@ -1,0 +1,193 @@
+{
+  "issue": 191,
+  "baseline_commit": "9ce29c94af93bcf98ea9de6b1e671268cdd7a9f1",
+  "scope": "Isolated restored production backup; sequential session-tool handlers, not HTTP transport or live MCP load.",
+  "backup": {
+    "name": "20260924-pre-a9b49e9",
+    "sha256_verified": "623de333f18bac6f3ccda459830368fda1124d0bc9c4db022716f55417b82b49",
+    "head_sequence": 42769,
+    "head_hash": "c82b1c9e657a365805c75adaaad8f1655aeeae4cc60775a392d08f7209acb64a"
+  },
+  "historical_scope": {
+    "known_at": "2026-09-24T12:53:50Z",
+    "at_change": 42540,
+    "checkpoint_sequence": 41039,
+    "delta_events": 1501
+  },
+  "runtime": {
+    "image": "graph-memory:a9b49e9",
+    "neo4j": "neo4j:5.26-community",
+    "query_memory_limit_bytes": 2147483648,
+    "query_cpus": 2,
+    "db_heap": "512m",
+    "db_pagecache": "128m"
+  },
+  "main_corpus": {
+    "calls": 7,
+    "valid_reads": 6,
+    "expected_validation_errors": 1,
+    "fresh_processes_per_mode": 3,
+    "passes_per_process": 2,
+    "paired_responses": 42,
+    "byte_mismatches": 0,
+    "queries_sha256": "a7154dea44246adbf7367854c95c234a3a8dafc23a039a35081edba5cd46e135"
+  },
+  "modes": {
+    "full": {
+      "runs": [
+        {
+          "trial": 1,
+          "peak_process_bytes": 926121984,
+          "peak_container_bytes": 916688896,
+          "final_process_rss_after_gc_bytes": 396693504,
+          "final_container_after_gc_bytes": 385912832,
+          "first_request_seconds": 5.488561254001979,
+          "first_pass_seconds": 22.196824087001005,
+          "repeat_pass_seconds": 21.432827519001876,
+          "total_seconds": 43.62965160600288,
+          "response_bytes_per_pass": 53815,
+          "recall_search_seconds": 31.77150564800104
+        },
+        {
+          "trial": 2,
+          "peak_process_bytes": 930439168,
+          "peak_container_bytes": 920633344,
+          "final_process_rss_after_gc_bytes": 402145280,
+          "final_container_after_gc_bytes": 391499776,
+          "first_request_seconds": 4.657483562998095,
+          "first_pass_seconds": 21.847143190992938,
+          "repeat_pass_seconds": 21.586160460999963,
+          "total_seconds": 43.4333036519929,
+          "response_bytes_per_pass": 53815,
+          "recall_search_seconds": 31.484288796997134
+        },
+        {
+          "trial": 3,
+          "peak_process_bytes": 924987392,
+          "peak_container_bytes": 915144704,
+          "final_process_rss_after_gc_bytes": 397377536,
+          "final_container_after_gc_bytes": 386748416,
+          "first_request_seconds": 4.4874502290003875,
+          "first_pass_seconds": 21.363916920006886,
+          "repeat_pass_seconds": 21.44533211999442,
+          "total_seconds": 42.809249040001305,
+          "response_bytes_per_pass": 53815,
+          "recall_search_seconds": 31.257645500001672
+        }
+      ],
+      "median": {
+        "peak_process_bytes": 926121984,
+        "peak_container_bytes": 916688896,
+        "final_process_rss_after_gc_bytes": 397377536,
+        "final_container_after_gc_bytes": 386748416,
+        "first_request_seconds": 4.657483562998095,
+        "first_pass_seconds": 21.847143190992938,
+        "repeat_pass_seconds": 21.44533211999442,
+        "total_seconds": 43.4333036519929,
+        "response_bytes_per_pass": 53815,
+        "recall_search_seconds": 31.484288796997134
+      }
+    },
+    "projected": {
+      "runs": [
+        {
+          "trial": 1,
+          "peak_process_bytes": 456339456,
+          "peak_container_bytes": 445853696,
+          "final_process_rss_after_gc_bytes": 266919936,
+          "final_container_after_gc_bytes": 256102400,
+          "first_request_seconds": 4.240589290999196,
+          "first_pass_seconds": 19.8181415379986,
+          "repeat_pass_seconds": 20.217609408999124,
+          "total_seconds": 40.03575094699772,
+          "response_bytes_per_pass": 53815,
+          "recall_search_seconds": 28.269938264998927
+        },
+        {
+          "trial": 2,
+          "peak_process_bytes": 456417280,
+          "peak_container_bytes": 445878272,
+          "final_process_rss_after_gc_bytes": 287653888,
+          "final_container_after_gc_bytes": 276869120,
+          "first_request_seconds": 4.45854309599963,
+          "first_pass_seconds": 21.07503006999832,
+          "repeat_pass_seconds": 21.22070688199892,
+          "total_seconds": 42.29573695199724,
+          "response_bytes_per_pass": 53815,
+          "recall_search_seconds": 30.18472224299694
+        },
+        {
+          "trial": 3,
+          "peak_process_bytes": 456626176,
+          "peak_container_bytes": 445812736,
+          "final_process_rss_after_gc_bytes": 262868992,
+          "final_container_after_gc_bytes": 251916288,
+          "first_request_seconds": 4.299196432999452,
+          "first_pass_seconds": 20.22511523600042,
+          "repeat_pass_seconds": 20.311804577999283,
+          "total_seconds": 40.5369198139997,
+          "response_bytes_per_pass": 53815,
+          "recall_search_seconds": 28.84807995600204
+        }
+      ],
+      "median": {
+        "peak_process_bytes": 456417280,
+        "peak_container_bytes": 445853696,
+        "final_process_rss_after_gc_bytes": 266919936,
+        "final_container_after_gc_bytes": 256102400,
+        "first_request_seconds": 4.299196432999452,
+        "first_pass_seconds": 20.22511523600042,
+        "repeat_pass_seconds": 20.311804577999283,
+        "total_seconds": 40.5369198139997,
+        "response_bytes_per_pass": 53815,
+        "recall_search_seconds": 28.84807995600204
+      }
+    }
+  },
+  "median_reduction_percent": {
+    "peak_process_bytes": 50.71736899833705,
+    "peak_container_bytes": 51.36259444774599,
+    "final_process_rss_after_gc_bytes": 32.82963634864352,
+    "total_seconds": 6.668578244013679,
+    "recall_search_seconds": 8.373093189408575
+  },
+  "candidate_files_sha256": {
+    "graph_memory/journal.py": "cb41ea823d3c3861ba601ee5b416b6b1c50609295178cd5a53e6cce1a5f9c5bd",
+    "evals/historical_recall.py": "761f21f2c29dc845c9ee56d5030687d33105a94fd4a45ae9cab468da122036dc"
+  },
+  "expanded_regressions": {
+    "paired_responses": 9,
+    "byte_mismatches": 0,
+    "queries_sha256": "4154d0880a757440bbb34629ac276abaabfd2a4c19b68b32bf51d73e4ce3836e",
+    "coverage": [
+      "compact ranked profile",
+      "full unranked recall",
+      "pagination and history",
+      "as_of cutoff",
+      "later knowledge after identity merge",
+      "latest",
+      "search pagination",
+      "search miss",
+      "full source evidence"
+    ]
+  },
+  "validation": {
+    "pytest_passed": 410,
+    "pytest_skipped": 1,
+    "ruff_check": "passed",
+    "ruff_format": "passed",
+    "pyright_errors": 0,
+    "diff_check": "passed",
+    "backup_checksum": "verified"
+  },
+  "limitations": [
+    "Sequential handlers; original concurrent/session OOM not reproduced or diagnosed.",
+    "Database and OS caches were not reset; first query is process-cold only.",
+    "Timings include database and serialization, exclude MCP HTTP transport and model work.",
+    "Ordinary background workloads continued; timing differences are descriptive, not statistical guarantees.",
+    "Retained RSS measured after explicit gc.collect(), not uncontrolled idle production sessions.",
+    "All facts/entities/insights remain resident; this is not a namespace-independent fixed memory bound.",
+    "Changed nodes stay complete; long delta tails and legacy snapshots can retain more memory.",
+    "No runtime routing change, production deployment, or live graph mutation."
+  ]
+}
