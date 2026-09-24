@@ -299,7 +299,7 @@ def ranked_view(raw, r, terms):
         sides += [c["id"] for c in raw["conflicts"] if role(c, shared) == dispute]
     sides = list(dict.fromkeys(sides))
     result = {
-        "entity": r.entity,
+        "entity": getattr(r, "entity", None),
         # The words that ranked. Empty means the question held only stop words or
         # the entity's own name, and the facts are unranked as if it were omitted.
         **({"question": r.question, "question_terms": sorted(terms)} if r.question else {}),
@@ -338,7 +338,7 @@ def ranked_view(raw, r, terms):
         "evidence_tool": "memory_evidence",
         **metadata(raw),
     }
-    if r.detail == "full":
+    if getattr(r, "detail", "compact") == "full":
         result["facts"] = [
             {**f, "lane": lane, **group_fields(f, lane, len(copies), sessions(copies))}
             for lane, f, copies, _ in selected
@@ -368,8 +368,7 @@ def search(store, r):
         at_change=r.at_change,
         _search=True,
     )
-    view = RecallView(**r.model_dump(), entity=r.question, detail="compact")
-    result = ranked_view(raw, view, terms)
+    result = ranked_view(raw, r, terms)
     result.pop("entity")
     result.pop("entities")
     result.pop("entity_matches_truncated")

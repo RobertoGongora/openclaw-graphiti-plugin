@@ -185,3 +185,12 @@ def test_search_preserves_conflicts_retractions_and_event_time(graph):
     result = v.search(store, r.model_copy(update={"question": "database"}))
     assert result["status"] == "found"
     assert result["facts"][0]["id"] == receipts[1]["fact_ids"][0]
+
+
+def test_question_search_accepts_its_full_advertised_length():
+    from .test_retrieval import fact, raw
+
+    store = SimpleNamespace(recall=lambda *a, **kw: raw(current=[fact("found")]))
+    question = "Atlas MySQL " * 80
+    result = v.search(store, v.QuestionSearch(namespace="test", question=question))
+    assert result["facts"][0]["id"] == "found"
