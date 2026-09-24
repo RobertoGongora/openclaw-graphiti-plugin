@@ -115,6 +115,8 @@ def test_public_ingest_stages_normalized_claim_and_enforces_it_at_commit(graph):
     assert receipt["processing"] == "queued_for_worker"
     assert handler(r)["episode_id"] == receipt["episode_id"]
     assert receipt["context_only_message_ids"] == ["m"]
+    assert receipt["available_for_recall"] is False
+    assert receipt["guidance"]
     for state in ("active", "uncertain"):
         with pytest.raises(ValueError, match="verified source"):
             store.commit(ns, receipt["episode_id"], extraction("m", status=state))
@@ -125,7 +127,9 @@ def test_public_ingest_stages_normalized_claim_and_enforces_it_at_commit(graph):
     )
     assert done["model_calls"] == 0
     assert store.episode(ns, receipt["episode_id"])["fact_count"] == 0
-    assert handler(r)["status"] == "complete"
+    completed = handler(r)
+    assert completed["status"] == "complete"
+    assert completed["available_for_recall"] is False
 
 
 @pytest.mark.parametrize("kind", ["memory_read", "memory_write", "tool_result"])
@@ -156,6 +160,8 @@ def test_stored_source_roundtrip_through_evidence_and_direct_write(graph):
     r.transcript.namespace = ns
     r.transcript.source_id = "sourced-direct"
     receipt = MemoryService(store).remember(r)
+    assert "context_only_message_ids" not in receipt
+    assert "guidance" not in receipt
     committed = store.commit(ns, receipt["episode_id"], extraction("m"))
     result = evidence(store, EvidenceRequest(namespace=ns, fact_ids=committed["fact_ids"]))
     assert result["facts"][0]["claims"][0]["source_message_id"] == ref
