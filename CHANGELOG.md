@@ -3,6 +3,15 @@
 
 ### Fixed
 
+- Recall ranking now gives bounded preferences to named subjects and relevant
+  stored validation, normalizes common word forms, and limits the advantage of
+  long retellings without penalizing short factual statements.
+- Plan/decision questions can find related decisions through canonical topic
+  names within the existing response budget. Live and historical reads use the
+  same bounded selection and preserve replacements, conflicts, and source roles.
+- Context-only direct-write receipts and shared agent guidance distinguish
+  accepted context from searchable facts; completed context-only writes remain
+  explicitly unavailable for recall.
 - Specific recall questions no longer give broad database/framework/language
   roles an extra ranking bonus when topic words match the stored facts. Broad
   stack questions keep that bonus. Frozen recall evals now enforce answer-rank

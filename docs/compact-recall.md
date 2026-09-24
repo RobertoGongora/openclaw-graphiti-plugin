@@ -57,7 +57,18 @@ an old database can surface its replacement. A role is a slot that at least two
 facts of that subject and relation share; a slot only one fact carries is a
 label, and the fact is grouped by its target instead. This relies on the existing entity
 and relationship identities; it cannot repair misclassified or missing facts.
-Related decisions and paraphrases can still be missed; see the
+For plan/decision questions about one unambiguous entity, recall also considers
+decisions attached to topics or decision nodes whose canonical name/key contains
+that entity's name. Discovery is bounded to eight related entities and twelve
+decision nodes; arbitrary aliases and recursive neighbor traversal do not expand
+scope. A person's `decided` edge loads its decision, not every fact about the
+person. Complete outgoing decision roles still resolve replacements/conflicts
+before selection. Related facts compete within the same response limit and carry
+their subject key; no extra entity list or separate decision section is returned.
+Unquestioned recall and ordinary non-decision lookups retain their original scope.
+This is conservative name/word matching, including a small rebuild/recreate
+equivalence, not general semantic retrieval. Related decisions without a matching
+canonical name and unsupported paraphrases can still be missed; see the
 [ranking follow-ups](recall-ranking-follow-ups.md).
 Historical rows are hidden by default; `include_history:true` makes them eligible.
 Conflicts, source backlog counts, entity ambiguity, omitted-result counts and

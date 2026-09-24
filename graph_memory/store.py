@@ -680,6 +680,7 @@ class GraphStore:
         known_at=None,
         at_change=None,
         _search=False,
+        _related_question=None,
     ):
         if known_at is not None or at_change is not None:
             from .journal import Journal
@@ -693,6 +694,7 @@ class GraphStore:
                 sequence=at_change,
                 complete=_complete,
                 search=_search,
+                related_question=_related_question,
             )
         from . import aliases
 
@@ -751,6 +753,53 @@ class GraphStore:
             exact = [r for r in candidates if needle in r["entity"]["aliases"]]
             selected = candidates if _search else exact or candidates
             ids = [r["entity"]["id"] for r in selected]
+            root_ids = set(ids)
+            if _related_question and not _search:
+                from . import related
+
+                roots = [r["entity"] for r in selected]
+                names = related.root_names(roots)
+                if names:
+                    neighbors = tx.run(
+                        "MATCH (e:MemoryEntity {namespace:$ns}) "
+                        "WHERE e.merged_into IS NULL AND e.kind IN $kinds "
+                        # Stored aliases include normalized canonical names/keys;
+                        # their NFKC/casefold form matches the historical selector.
+                        # select() below rejects alias-only hits.
+                        "AND any(a IN e.aliases WHERE any(name IN $names WHERE "
+                        "replace(replace(replace(a,'_',''),'-',''),' ','') CONTAINS name)) "
+                        "RETURN e { .id,.key,.name,.kind } AS entity",
+                        ns=namespace,
+                        kinds=sorted(related.KINDS),
+                        names=[
+                            name.replace("_", "").replace("-", "").replace(" ", "")
+                            for name in names
+                        ],
+                    ).data()
+                    extra = related.select(
+                        roots, [r["entity"] for r in neighbors], _related_question
+                    )
+                    # Complete subjects preserve replacements/conflicts even if
+                    # only an older target's name led us to the decision.
+                    seeds = (
+                        tx.run(
+                            "MATCH (f:MemoryFact {namespace:$ns}) "
+                            "WHERE f.subject_id IN $ids OR f.target_id IN $ids "
+                            "MATCH (s:MemoryEntity {id:f.subject_id,namespace:$ns}),"
+                            "(t:MemoryEntity {id:f.target_id,namespace:$ns}) "
+                            "WHERE s.kind='decision' OR (f.relation='decided' AND t.kind='decision') "
+                            "RETURN f { .subject_id,.target_id,.subject,.target,.summary,.relation,.slot,"
+                            "subject_kind:s.kind,target_kind:t.kind } AS fact",
+                            ns=namespace,
+                            ids=[e["id"] for e in extra],
+                        ).data()
+                        if extra
+                        else []
+                    )
+                    ids = sorted(
+                        root_ids
+                        | set(related.subjects([r["fact"] for r in seeds], _related_question))
+                    )
             # All root facts are resolved before response limits are applied.
             facts = self.grounded_facts(tx, namespace, ids)
             stored_count = tx.run(
@@ -809,6 +858,17 @@ class GraphStore:
                 "entities": [r["entity"] for r in selected[:20]],
                 "ambiguous": not _search and len(selected) > 1,
                 "entity_matches_truncated": len(selected) > 20,
+                **(
+                    {
+                        "related_fact_ids": [
+                            f["id"]
+                            for f in flat
+                            if not root_ids.intersection((f["subject_id"], f["target_id"]))
+                        ]
+                    }
+                    if _related_question
+                    else {}
+                ),
                 **{k: v if _complete else v[:limit] for k, v in projection.items()},
                 "inferred": inferences[:limit],
                 "insights": insights[:limit],

@@ -911,6 +911,7 @@ class Journal:
         sequence=None,
         complete=False,
         search=False,
+        related_question=None,
     ):
         snapshot = self.snapshot(namespace, known_at=known_at, sequence=sequence)
         state = snapshot["state"]
@@ -947,6 +948,30 @@ class Journal:
                 key=lambda e: e["key"],
             )
         ids = {e["id"] for e in selected}
+        root_ids = set(ids)
+        if related_question and not search:
+            from . import related
+
+            extra = related.select(selected, state["MemoryEntity"].values(), related_question)
+            extra_ids = {e["id"] for e in extra}
+            ids |= set(
+                related.subjects(
+                    [
+                        {
+                            **f,
+                            "subject_kind": state["MemoryEntity"]
+                            .get(f["subject_id"], {})
+                            .get("kind"),
+                            "target_kind": state["MemoryEntity"]
+                            .get(f["target_id"], {})
+                            .get("kind"),
+                        }
+                        for f in state["MemoryFact"].values()
+                        if f["subject_id"] in extra_ids or f["target_id"] in extra_ids
+                    ],
+                    related_question,
+                )
+            )
 
         def grounded(f):
             s = state["MemoryEntity"].get(f["subject_id"])
@@ -1014,6 +1039,17 @@ class Journal:
             "entities": selected[:20],
             "ambiguous": not search and len(selected) > 1,
             "entity_matches_truncated": len(selected) > 20,
+            **(
+                {
+                    "related_fact_ids": [
+                        f["id"]
+                        for f in facts
+                        if not root_ids.intersection((f["subject_id"], f["target_id"]))
+                    ]
+                }
+                if related_question
+                else {}
+            ),
             **{k: v if complete else v[:limit] for k, v in projection.items()},
             "inferred": inferences[:limit],
             "insights": insights[:limit],

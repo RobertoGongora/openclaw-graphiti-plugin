@@ -48,7 +48,14 @@ class MemoryService:
         context_only = [
             m.id for m in transcript.messages if m.id not in transcript.verified_source_refs
         ]
-        return {**receipt, **({"context_only_message_ids": context_only} if context_only else {})}
+        if context_only:
+            receipt.update(
+                context_only_message_ids=context_only,
+                guidance="Context-only messages cannot produce searchable facts. Check recall first; sourced writes require exact excerpts and source_message_id values from memory_evidence.",
+            )
+            if len(context_only) == len(transcript.messages):
+                receipt["available_for_recall"] = False
+        return receipt
 
     def prepare(self, request: m.EpisodeRequest):
         episode = self.store.episode(request.namespace, request.episode_id)

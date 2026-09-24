@@ -2,7 +2,11 @@
 
 ## Related decisions can be stored but missed by entity recall
 
-Status: open. Observed 2026-09-24; preserve as a regression case before extending retrieval.
+Status: bounded implementation on the ranking feature branch, not deployed.
+Observed and frozen on 2026-09-24. The original deferral now appears within five
+facts for the three tested Colima decision/plan questions. Ordinary targeted
+lookups remain unchanged in the regression set. Broader semantic discovery is
+still open.
 
 A plan can be attached to a service, while the user's decision to defer that plan is attached to a separate decision and topic. Recall scoped to the service then returns the plan without the deferral. The original user message and its extracted decision can both be present: this is a retrieval gap, not evidence that ingestion lost the decision.
 
@@ -29,11 +33,33 @@ Evaluate the exact service-scoped and cross-entity questions on the same fixed k
 
 Candidate approaches: conservative entity/topic expansion and semantic candidate retrieval, evaluated before deciding whether a model reranker is needed. Do not rely solely on arbitrary entity aliases.
 
+The initial implementation only expands recognizable plan/decision questions
+about one unambiguous entity. Canonical names/keys discover at most eight related
+decision/topic nodes; at most twelve decision nodes contribute complete roles.
+There is no recursive traversal or expansion to all facts about a person.
+The existing five-fact default stays unchanged. Unknown wordings, unnamed links,
+and general semantic paraphrases remain limitations.
+
 ## Direct memory writes need clearer completion language
 
 An unsourced `memory_ingest` write is retained as context only and cannot originate a fact. Agents should inspect `available_for_recall` and `context_only_message_ids`, check whether the original conversation already supplies the fact, and avoid claiming successful searchable recall from an ingestion receipt alone. Background processing is not a guarantee that any particular claim will be extracted.
 
 When using direct writes with existing evidence, supply the verified source-message references and exact source content; do not invent a user message, source role, or timestamp for an agent-written paraphrase.
+
+Implemented on the feature branch: shared skill/native instructions now explain
+this distinction, and context-only receipts include guidance. A completed
+context-only episode still explicitly reports `available_for_recall: false`.
+
+## Multipart experiment: do not enable naive splitting
+
+Three offline variants were evaluated on 26 frozen cases with a fixed five-fact
+budget: round robin, reciprocal-rank fusion, and greedy clause coverage. Only
+the two long prompts split; the other 24 remained identical. No reviewed answer
+rank improved. Round robin introduced irrelevant records from procedural
+instructions, while clause scoring added roughly eleven seconds. Response bytes
+did not grow, but relevance and latency failed the gate. No variant was added to
+production code. Future experiments must distinguish information needs from
+constraints and presentation instructions while preserving subject context.
 
 ## Optional model reranking and language scope
 

@@ -114,12 +114,26 @@ def tokens(text: str) -> set[str]:
         "cycles": "cycle",
         "batches": "batch",
         "batching": "batch",
+        "rebuilds": "rebuild",
+        "rebuilt": "rebuild",
+        "rebuilding": "rebuild",
+        "recreated": "recreate",
+        "recreating": "recreate",
+        "recreation": "recreate",
+        "deferred": "defer",
+        "deferring": "defer",
+        "decided": "decide",
     }
-    return {
+    words = {
         forms[w] if w in forms else w
         for w in re.findall(r"[^\W_]+", normalized(text))
         if w not in STOP
     }
+    # A small action equivalence used only for retrieval, never entity identity
+    # or factual inference. Keep original tokens so exact wording still matches.
+    if {"rebuild", "recreate"} & words:
+        words.update({"rebuild", "recreate"})
+    return words
 
 
 def reported_time(f):
@@ -301,6 +315,8 @@ def metadata(raw):
 
 
 def recall(store, r):
+    from .related import decision_question
+
     raw = store.recall(
         r.namespace,
         r.entity,
@@ -309,6 +325,7 @@ def recall(store, r):
         _complete=r.detail == "compact" or bool(r.question),
         known_at=r.known_at,
         at_change=r.at_change,
+        _related_question=r.question if decision_question(r.question) else None,
     )
     if r.detail == "full" and not r.question:
         return raw
@@ -360,6 +377,10 @@ def ranked_view(raw, r, terms):
     facts = [
         compact_fact(f, lane, len(copies), sessions(copies)) for lane, f, copies, _ in selected
     ]
+    related_ids = set(raw.get("related_fact_ids", []))
+    for output, (_, source, copies, _) in zip(facts, selected, strict=True):
+        if any(f["id"] in related_ids for f in copies):
+            output["subject"] = source["subject"]
     next_offset = r.offset + len(selected)
     # Derived conclusions remain explicitly separate and bounded; they never replace facts.
     derived = []
