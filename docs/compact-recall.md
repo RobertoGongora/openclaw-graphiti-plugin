@@ -31,16 +31,24 @@ with `memory_confirm` carries `confirmed_by_user: true`. Summary excerpts are ca
 at 500 characters and explicitly marked when truncated. Plans, uncertain claims,
 undated documents and conflicting claims never become current facts by formatting.
 
-Questions rank individual facts by weighted lexical overlap, with small lexical
-normalizations for deployment/evaluation questions and a preference for measured
-outcomes when asking for results. The response echoes `question_terms`, the
+Questions rank individual facts by weighted lexical overlap, with conservative
+word-form normalizations and a preference for measured outcomes when asking for
+results. Both question search and entity recall use the same scorer. Named
+subjects receive a bounded preference based on canonical names, not arbitrary
+aliases. Longer summaries receive a bounded length penalty, with an allowance
+for short factual statements. Topically matching records with stored validation
+or user confirmation receive a bounded preference; repeated reports do not.
+None of these signals changes a fact's evidence or uncertainty category.
+The response echoes `question_terms`, the
 words that ranked; when a question holds only stop words or words the entity's
 own name already covers after normalization, the list is empty and the facts are
 unranked, as if no question were given.
 Partial matches remain available through
 pagination instead of being discarded by a highest-score-only filter. Explicit
-database/framework/language questions also match the relation and target kind.
-Those schema roles receive an extra bonus only when the question has no other
+database/framework/language questions receive an extra bonus for matching
+schema relationships, not merely an endpoint's kind: a validated framework
+build event must not outrank the actual framework state on that basis alone.
+Those schema roles receive the bonus only when the question has no other
 matching topic words. For example, "which database?" benefits from the role;
 "database disk size?" ranks lexical topic matches without the broad role bonus.
 Matching an older value also selects other facts in the same genuine exclusive
@@ -49,6 +57,8 @@ an old database can surface its replacement. A role is a slot that at least two
 facts of that subject and relation share; a slot only one fact carries is a
 label, and the fact is grouped by its target instead. This relies on the existing entity
 and relationship identities; it cannot repair misclassified or missing facts.
+Related decisions and paraphrases can still be missed; see the
+[ranking follow-ups](recall-ranking-follow-ups.md).
 Historical rows are hidden by default; `include_history:true` makes them eligible.
 Conflicts, source backlog counts, entity ambiguity, omitted-result counts and
 snapshot revision remain visible. `status:"conflict"` means a disagreement

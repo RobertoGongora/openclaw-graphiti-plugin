@@ -93,6 +93,27 @@ def tokens(text: str) -> set[str]:
         "evals": "evaluation",
         "results": "result",
         "benchmarks": "benchmark",
+        "uploads": "upload",
+        "uploaded": "upload",
+        "uploading": "upload",
+        "downloads": "download",
+        "downloaded": "download",
+        "downloading": "download",
+        "released": "release",
+        "releases": "release",
+        "releasing": "release",
+        "created": "create",
+        "creates": "create",
+        "creating": "create",
+        "creation": "create",
+        "threads": "thread",
+        "endpoints": "endpoint",
+        "tokens": "token",
+        "files": "file",
+        "lists": "list",
+        "cycles": "cycle",
+        "batches": "batch",
+        "batching": "batch",
     }
     return {
         forms[w] if w in forms else w
@@ -114,8 +135,64 @@ def recency(f):
     return (0, -ts, -reported_time(f)) if ts is not None else (1, 0, -reported_time(f))
 
 
-def relevance(raw, terms, shared):
-    """Rank individual records. Only exclusive state roles inherit old-value matches."""
+ANCHOR_KINDS = {"project", "person", "organization", "service", "database", "framework", "language"}
+GENERIC_NAMES = (
+    STOP
+    | SCHEMA_CONCEPTS
+    | {
+        "api",
+        "code",
+        "server",
+        "service",
+        "app",
+        "agent",
+        "tool",
+        "thread",
+        "token",
+        "session",
+        "user",
+        "project",
+        "production",
+        "sandbox",
+        "endpoint",
+        "memory",
+        "backup",
+    }
+)
+
+
+def named_subjects(facts, question):
+    """Canonical names only: noisy aliases must not narrow a question's scope."""
+    query = normalized(question)
+    found = {}
+    for f in facts:
+        for side in ("subject", "target"):
+            key = f.get(side, "")
+            kind = f.get(side + "_kind") or key.partition(":")[0]
+            if kind not in ANCHOR_KINDS:
+                continue
+            name = normalized(f.get(side + "_name") or key.partition(":")[2].replace("-", " "))
+            if (
+                not name
+                or name in GENERIC_NAMES
+                or (len(name) < 3 and not any(c.isdigit() for c in name))
+            ):
+                continue
+            if re.search(r"(?<!\w)" + re.escape(name) + r"(?!\w)", query):
+                found[key] = name
+    # Prefer the specific name over a nested fragment (e.g. T3 Code over Code).
+    return {
+        key: name
+        for key, name in found.items()
+        if not any(
+            name != other and re.search(r"(?<!\w)" + re.escape(name) + r"(?!\w)", other)
+            for other in found.values()
+        )
+    }
+
+
+def relevance(raw, terms, shared, question=""):
+    """Bounded lexical, identity and provenance signals; none changes truth lanes."""
     facts = [f for lane in LANES for f in raw[lane]]
     words = {
         f["id"]: tokens(
@@ -134,8 +211,6 @@ def relevance(raw, terms, shared):
         )
         for f in facts
     }
-    # Evaluation questions often name the study, while its result states the
-    # measured validation/benchmark numbers instead of repeating the question.
     measured = set()
     for f in facts:
         ws = words[f["id"]]
@@ -145,20 +220,35 @@ def relevance(raw, terms, shared):
             ws.add("result")
             measured.add(f["id"])
     frequency = Counter(w for ws in words.values() for w in ws)
-    # A schema role helps answer "which database?", but is only background
-    # context in "database disk size?". Keep lexical matches in both cases;
-    # reserve the role bonus for queries without any matching topic words.
     schema_question = not ((terms & frequency.keys()) - SCHEMA_CONCEPTS)
-    scores = {
-        fid: sum(1 + math.log(1 + len(words) / frequency[t]) for t in sorted(terms & ws))
-        for fid, ws in words.items()
-    }
+    anchors = named_subjects(facts, question) if terms else {}
+    identity_terms = set().union(*(tokens(name) for name in anchors.values())) if anchors else set()
+    topical_terms = terms - identity_terms
+    lengths = {f["id"]: max(1, len(tokens(f["summary"]))) for f in facts}
+    average = sum(lengths.values()) / max(1, len(lengths))
+    scores = {}
     for f in facts:
-        concepts = tokens(f.get("relation", "")) | {f.get("target_kind", "")}
+        fid = f["id"]
+        matches = terms & words[fid]
+        score = sum(1 + math.log(1 + len(words) / frequency[t]) for t in sorted(matches))
+        # Moderate, bounded length normalization. A long answer can still win
+        # through additional relevant terms; protect short factual statements from
+        # a corpus dominated by even shorter records.
+        score /= min(2.5, 1 + 0.5 * max(0, lengths[fid] - max(50, average)) / max(50, average))
+        topical = not topical_terms or bool(topical_terms & words[fid])
+        if score and topical:
+            identity_hits = len({f["subject"], f["target"]} & anchors.keys())
+            score *= 1 + 0.5 * min(identity_hits, 2)
+            # This is recorded validation, not a new verification of the source.
+            # Neither the current lane nor repeated reports earn this preference.
+            if not schema_question and (f.get("validation_message_refs") or f.get("confirmed")):
+                score *= 1.35
+        concepts = tokens(f.get("relation", ""))
         if schema_question:
-            scores[f["id"]] += 6 * len(terms & concepts & SCHEMA_CONCEPTS)
-        if "result" in terms and f["id"] in measured:
-            scores[f["id"]] += 4
+            score += 6 * len(terms & concepts & SCHEMA_CONCEPTS)
+        if "result" in terms and fid in measured:
+            score += 4
+        scores[fid] = score
     roles = {}
     for f in facts:
         if (f["subject"], f["relation"], f.get("slot")) in shared and f[
@@ -230,7 +320,7 @@ def ranked_view(raw, r, terms):
     shared = shared_slots(f for lane in LANES for f in raw[lane])
     # Match across all evidence BEFORE hiding history. A question mentioning the old
     # database must also retrieve the replacement in the same exclusive role.
-    scores = relevance(raw, terms, shared)
+    scores = relevance(raw, terms, shared, r.question or "")
     groups = {}
     for lane in LANES:
         if lane == "history" and not r.include_history:
