@@ -1,6 +1,16 @@
 # Changelog
 ## [Unreleased]
 
+### Added
+
+- Remote push: a Mac stages its transcripts over Bolt on Tailscale into a graph
+  on another host (`compose.transcripts.tailscale.yaml`, `docs/remote-push.md`).
+  With a remote `NEO4J_URI`, or `MEMORY_FEED_REMOTE_RECEIVER=1` on the receiver,
+  bare `claude`/`codex`/`cursor` labels and `MEMORY_FEED_ACCEPT_UNMATCHED=1` are
+  refused before connecting. `follow` accepts `LABEL=PATH` roots whose PATH
+  exists. `feeds relabel` renames a label in every source key without changing
+  feed ids or cursors.
+
 ### Fixed
 
 - Historical MCP calls share admission control across session processes; bounded

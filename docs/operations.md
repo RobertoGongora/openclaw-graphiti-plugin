@@ -417,17 +417,19 @@ claim one file, and a person has to decide which one is kept.
 `MEMORY_FEED_ACCEPT_UNMATCHED=1` makes intake continue regardless. Every file it
 cannot match then gets a new feed, so sessions the graph already holds are staged
 and extracted again under new ids, with duplicate facts as the result. Use it
-only when the unmatched feeds belong to files that are gone for good. The Compose
-files do not pass this variable to the worker.
+only when the unmatched feeds belong to files that are gone for good. Both
+Compose files pass it to the worker from the env file, where it is empty by
+default.
 
-**Never set `MEMORY_FEED_ACCEPT_UNMATCHED=1` on a CT receiving remote pushes.**
-When a Mac forwarder reconnects with different roots or labels, the CT would mint
-new feeds for every file, duplicating the entire graph. The Tailscale overlay
-(`compose.transcripts.tailscale.yaml`) explicitly unsets it. See
-[remote push](remote-push.md) for the full remote transcript setup.
+A graph shared between machines refuses it: with a remote `NEO4J_URI`, or with
+`MEMORY_FEED_REMOTE_RECEIVER=1` on the receiving host, `follow`, `inventory` and
+`daemon` exit with code 2 before connecting. See [remote push](remote-push.md).
 
 Do not rename a label, and do not add a root below an existing root, without
 planning it as a migration. Both change the key that existing files would get.
+`feeds relabel --from OLD --to NEW` renames a label in every key and keeps the
+feed ids; without `--apply` it only counts, and it refuses when a key under the
+new label is taken.
 The daemon validates its roots at start and exits with a message when two
 different directories share a label. Give one of them as `LABEL=PATH`.
 

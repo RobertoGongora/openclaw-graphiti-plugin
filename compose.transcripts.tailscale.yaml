@@ -1,56 +1,39 @@
-# Tailscale overlay for compose.transcripts.yaml: add Tailscale Bolt binding.
+# Receiver overlay for compose.transcripts.yaml: other machines push transcripts
+# into this graph over Tailscale; this host mounts none of their files.
 #
-# Usage on the CT (server):
-#   docker compose -f compose.transcripts.yaml -f compose.transcripts.tailscale.yaml up -d
+#   docker compose --env-file /path/outside/repo/transcripts.env \
+#     -f compose.transcripts.yaml -f compose.transcripts.tailscale.yaml up -d
 #
-# The Mac pushes transcripts using graph-memory follow/feed with NEO4J_URI pointing
-# to the CT's Tailscale address. MCP recall remains on the CT (loopback from base);
-# no transcript files are mounted from the Mac.
+# Requires Docker Compose 2.24.4 or later (the !override tags below).
+# Compose reads the base file's required variables before this overlay removes
+# the mounts that use them: set CLAUDE_SESSIONS_PATH and CODEX_SESSIONS_PATH to
+# any placeholder, such as remote-push. The base file alone then fails to start,
+# since a placeholder is not a path.
 #
-# Security hardening:
-# 1. Bolt is bound to loopback (for CT-local tooling) AND Tailscale (for remote push)
-# 2. Bolt is NOT bound to 0.0.0.0 or LAN interfaces
-# 3. Set Tailscale ACLs to allow only your Mac's Tailscale IP to reach the CT's Bolt port
-#
-# Example Tailscale ACL:
-#   {"action": "accept", "src": ["rob-mbp"], "dst": ["ct-160:27687"]}
-#
-# Required environment variables:
-#   TAILSCALE_IP: The CT's Tailscale IP address (e.g. 100.x.y.z)
-#
-# See docs/remote-push.md for the full remote push setup.
+# Bolt is published on loopback and on the Tailscale address, never on 0.0.0.0
+# or the LAN. The password is the Neo4j admin password: anyone who reaches the
+# port with it can run any Cypher. Restrict the port with a tailnet policy; see
+# docs/remote-push.md. MCP stays on loopback, as in the base file.
 name: graph-memory-transcripts
 
 services:
   neo4j:
-    ports:
-      # Keep loopback for CT-local tooling, add Tailscale for remote push.
-      # Do NOT use 0.0.0.0 (would expose on LAN).
+    ports: !override
       - '127.0.0.1:27687:7687'
-      - '${TAILSCALE_IP:?Set TAILSCALE_IP to the Tailscale interface address}:27687:7687'
+      - '${TAILSCALE_IP:?Set TAILSCALE_IP to this host''s Tailscale address}:27687:7687'
     environment:
-      # Advertise the Tailscale address for remote client connections
       NEO4J_server_bolt_advertised__address: ${TAILSCALE_IP}:27687
 
-  # The worker still runs on the CT but without Mac transcript mounts.
-  # Mac transcripts are pushed via remote Bolt by the Mac's own forwarder process.
+  # Extraction only: every machine's own `graph-memory follow` stages its files.
   worker:
-    # Override command: no --transcripts for Mac sessions pushed via remote Bolt.
-    # The CT worker only processes its own local sources (if any).
     command: [daemon, --source-records, --workers, '${TRANSCRIPT_WORKERS:-8}']
-    volumes:
-      # Only Codex auth for model calls; no Mac transcript mounts
+    volumes: !override
       - '${TRANSCRIPT_AUTH_PATH:?Set Codex authentication directory}:/home/memory/.codex'
     environment:
-      # Mark this as a remote receiver: MEMORY_FEED_ACCEPT_UNMATCHED=1 will hard-fail.
-      # This prevents duplicate ingestion when a Mac forwarder reconnects with
-      # different feed identities.
+      # Other machines' feeds are unmatched here by design: with this set the worker
+      # exits with code 2 if MEMORY_FEED_ACCEPT_UNMATCHED=1 reaches it.
       MEMORY_FEED_REMOTE_RECEIVER: '1'
-      # Defense in depth: also unset MEMORY_FEED_ACCEPT_UNMATCHED.
-      MEMORY_FEED_ACCEPT_UNMATCHED: ''
 
-  # Inventory does not apply: Mac transcripts are not mounted.
+  # Each pushing machine runs its own inventory against its own files.
   inventory:
     profiles: [disabled]
-
-  # MCP stays on loopback from base compose; this overlay does not change it.

@@ -34,13 +34,12 @@ UID_LINES, UID_BYTES = 64, 262_144
 # Session uuids, rollout names and agent hashes name one file wherever it sits.
 UNIQUE_NAME = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-|[0-9a-f]{12,}")
 ACCEPT_UNMATCHED = "MEMORY_FEED_ACCEPT_UNMATCHED"
+# Set on a graph that other machines push into; see docs/remote-push.md.
 REMOTE_RECEIVER = "MEMORY_FEED_REMOTE_RECEIVER"
 
 # Bare labels that must be machine-qualified in remote mode.
 # These are host-local names that would collide across machines.
 BARE_LABELS = frozenset({"claude", "codex", "cursor"})
-# Machine-qualified labels have the form "hostname.label".
-MACHINE_QUALIFIED = re.compile(r"[\w-]+\.[\w.-]+")
 
 
 def is_remote_bolt(uri: str | None = None) -> bool:
@@ -68,28 +67,23 @@ def is_remote_bolt(uri: str | None = None) -> bool:
     return host not in ("localhost", "127.0.0.1", "::1", "neo4j")
 
 
-def is_machine_qualified(label: str) -> bool:
-    """Return True if the label is machine-qualified (hostname.label)."""
-    return bool(MACHINE_QUALIFIED.fullmatch(label))
+def shared_graph() -> bool:
+    """Other machines' feeds live in this graph: this process pushes to a remote
+    Bolt, or runs beside a graph that receives pushes. The receiver's own services
+    reach Neo4j as bolt://neo4j, which does not look remote, hence the flag."""
+    return os.environ.get(REMOTE_RECEIVER) == "1" or is_remote_bolt()
 
 
 def validate_remote_label(label: str, remote: bool | None = None) -> None:
     """Raise ValueError if the label is bare in remote mode.
 
-    In remote mode (pushing to a non-loopback Bolt), labels like ``claude``,
-    ``codex``, and ``cursor`` must be machine-qualified (e.g. ``rob-mbp.claude``)
-    to avoid collisions when multiple machines push to the same database.
-
-    Args:
-        label: The feed label to validate.
-        remote: Override remote detection (for testing). If None, detected
-            from NEO4J_URI environment variable.
-
-    Raises:
-        ValueError: If the label is bare and we're in remote mode.
+    In remote mode (a shared graph), labels like ``claude``, ``codex`` and
+    ``cursor`` must be machine-qualified (e.g. ``rob-mbp.claude``) to avoid
+    collisions when multiple machines push to the same database.
+    ``remote`` overrides the detection, for tests.
     """
     if remote is None:
-        remote = is_remote_bolt()
+        remote = shared_graph()
     if remote and label in BARE_LABELS:
         raise ValueError(
             f"Feed label {label!r} must be machine-qualified in remote mode "
@@ -127,18 +121,10 @@ def derived_label(directory: Path):
 
 
 def parse_root(root) -> Root:
-    """Parse a root as LABEL=PATH or a plain path.
-
-    LABEL=PATH is recognized by syntax first: a valid label, followed by ``=``,
-    followed by a non-empty path. Only when the syntax does not match is the
-    whole string treated as a path. This allows remote paths that do not exist
-    locally (e.g. ``rob-mbp.claude=/sessions/claude`` where the path is on a
-    remote machine). An existing path that happens to contain ``=`` and does not
-    match LABEL=PATH syntax is still treated as a path.
-    """
     text = str(root)
     label, stated, rest = text.partition("=")
-    if stated and LABEL.fullmatch(label) and rest:
+    # An existing path that happens to contain "=" is a path, not a label.
+    if stated and LABEL.fullmatch(label) and rest and not Path(text).exists():
         given = Path(os.path.abspath(Path(rest).expanduser()))
     else:
         label, given = "", Path(os.path.abspath(Path(text).expanduser()))
@@ -148,17 +134,8 @@ def parse_root(root) -> Root:
 
 def validate_roots(roots, remote: bool | None = None) -> list[Root]:
     """Parse the roots, most specific first so overlapping roots name a file the
-    same in any order. Two directories under one label would merge their files.
-
-    Args:
-        roots: Paths or LABEL=PATH strings.
-        remote: Override remote detection (for testing). If None, detected
-            from NEO4J_URI environment variable.
-
-    Raises:
-        ValueError: If two roots share a label, or if a bare label is used
-            in remote mode.
-    """
+    same in any order. Two directories under one label would merge their files,
+    and on a shared graph so would two machines' bare labels."""
     owners = {}
     parsed = []
     for given in roots:
@@ -240,28 +217,25 @@ def unique_name(uri):
 
 
 def accept_unmatched():
-    """Return True if unmatched feeds should be accepted.
+    """Whether intake may mint feeds for files it cannot match to a known feed.
 
-    When MEMORY_FEED_REMOTE_RECEIVER=1 (CT receiving remote pushes), setting
-    MEMORY_FEED_ACCEPT_UNMATCHED=1 is a hard error. This prevents duplicate
-    ingestion when a Mac forwarder reconnects with different feed identities.
-    The CT worker uses bolt://neo4j internally, so is_remote_bolt() is false
-    and cannot enforce this; the explicit flag does.
-
-    Raises:
-        RuntimeError: If both MEMORY_FEED_REMOTE_RECEIVER=1 and
-            MEMORY_FEED_ACCEPT_UNMATCHED=1 are set.
+    Refused wherever the graph is shared between machines: when this process
+    pushes to a remote Bolt (a Mac forwarder), and when it runs next to a graph
+    that receives pushes (MEMORY_FEED_REMOTE_RECEIVER=1, since the receiver's own
+    services reach Neo4j as bolt://neo4j and do not look remote). There, every
+    other machine's feeds are unmatched by design, so accepting them would stage
+    the files of this machine again under new ids. ValueError: the CLI prints it
+    in one line and exits 2.
     """
-    is_receiver = os.environ.get(REMOTE_RECEIVER) == "1"
-    wants_accept = os.environ.get(ACCEPT_UNMATCHED) == "1"
-    if is_receiver and wants_accept:
-        raise RuntimeError(
-            f"{ACCEPT_UNMATCHED}=1 is forbidden when {REMOTE_RECEIVER}=1. "
-            "A CT receiving remote pushes must not accept unmatched feeds, "
-            "as this would duplicate the entire graph when a Mac forwarder "
-            "reconnects with different roots or labels."
+    if os.environ.get(ACCEPT_UNMATCHED) != "1":
+        return False
+    if shared_graph():
+        raise ValueError(
+            f"{ACCEPT_UNMATCHED}=1 is refused on a graph shared between machines "
+            f"(remote NEO4J_URI or {REMOTE_RECEIVER}=1): other machines' feeds are "
+            "always unmatched here, so every file would be staged again as new"
         )
-    return wants_accept
+    return True
 
 
 class Feeds:
@@ -439,3 +413,46 @@ def stamp_existing(store, namespace, roots) -> dict[str, int]:
             ).single()["n"]
         )
     return counts
+
+
+def relabel(store, namespace, old, new, apply=False) -> dict[str, int]:
+    """Rename one label in every source key of the namespace: ``claude:x`` becomes
+    ``rob-mbp.claude:x``. Ids, sessions and cursors stay, so no file is fed again.
+
+    Renaming is how a machine's bare labels become machine-qualified before it
+    pushes into a shared graph; the files keep their relative paths. Without
+    ``apply`` it only counts. Returns feeds, conflicts, relabelled.
+    """
+    for label in (old, new):
+        if not LABEL.fullmatch(label):
+            raise ValueError(f"Invalid feed label {label!r}")
+    if old == new:
+        raise ValueError("The old and new labels are the same")
+
+    def run(tx):
+        if apply:
+            store.lock(tx, namespace)
+        row = tx.run(
+            "MATCH (f:MemoryFeed {namespace:$ns}) WHERE f.source_key STARTS WITH $old "
+            "WITH collect(f) AS feeds "
+            "RETURN size(feeds) AS feeds, size([f IN feeds WHERE EXISTS { "
+            "MATCH (t:MemoryFeed {namespace:$ns}) "
+            "WHERE t.source_key = $new + substring(f.source_key, size($old)) }]) AS conflicts",
+            ns=namespace,
+            old=old + ":",
+            new=new + ":",
+        ).single()
+        counts = dict(feeds=row["feeds"], conflicts=row["conflicts"], relabelled=0)
+        # A key under the new label is already taken: two feeds would claim one file.
+        if apply and not counts["conflicts"]:
+            counts["relabelled"] = tx.run(
+                "MATCH (f:MemoryFeed {namespace:$ns}) WHERE f.source_key STARTS WITH $old "
+                "SET f.source_key = $new + substring(f.source_key, size($old)) "
+                "RETURN count(f) AS n",
+                ns=namespace,
+                old=old + ":",
+                new=new + ":",
+            ).single()["n"]
+        return counts
+
+    return store.transaction(run) if apply else store.read(run)

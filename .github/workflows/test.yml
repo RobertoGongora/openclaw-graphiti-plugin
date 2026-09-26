@@ -75,6 +75,7 @@ jobs:
           docker compose -f compose.test.yaml config -q
           docker compose -f compose.yaml --env-file .env.example config -q
           docker compose -f compose.transcripts.yaml --env-file .env.example config -q
+          TAILSCALE_IP=100.64.0.1 docker compose -f compose.transcripts.yaml -f compose.transcripts.tailscale.yaml config -q
       - run: docker build --target production --build-arg GIT_SHA=${{ github.sha }} -t graph-memory:ci .
       - run: docker run --rm graph-memory:ci
       - run: docker run --rm --entrypoint codex graph-memory:ci --version
