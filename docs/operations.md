@@ -420,6 +420,12 @@ and extracted again under new ids, with duplicate facts as the result. Use it
 only when the unmatched feeds belong to files that are gone for good. The Compose
 files do not pass this variable to the worker.
 
+**Never set `MEMORY_FEED_ACCEPT_UNMATCHED=1` on a CT receiving remote pushes.**
+When a Mac forwarder reconnects with different roots or labels, the CT would mint
+new feeds for every file, duplicating the entire graph. The Tailscale overlay
+(`compose.transcripts.tailscale.yaml`) explicitly unsets it. See
+[remote push](remote-push.md) for the full remote transcript setup.
+
 Do not rename a label, and do not add a root below an existing root, without
 planning it as a migration. Both change the key that existing files would get.
 The daemon validates its roots at start and exits with a message when two
