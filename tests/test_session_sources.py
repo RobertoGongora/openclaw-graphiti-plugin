@@ -9,7 +9,9 @@ from graph_memory.session_sources import (
     OPAQUE_CALL,
     SHELL_OUTPUT,
     before_shell_results,
+    cursor_entries,
     feed_records,
+    is_cursor_format,
     records,
 )
 from graph_memory.store import digest
@@ -409,3 +411,186 @@ def test_claude_sidechain_instruction_is_context(tmp_path):
     r["isSidechain"] = True
     p.write_text(json.dumps(r) + "\n")
     assert list(records(p))[0].source_type == "context"
+
+
+# --- Cursor agent-transcript adapter tests ---
+
+
+def cursor(role, content, stamp=None):
+    """Generate a Cursor agent-transcript JSONL line."""
+    record = {"role": role, "message": {"content": content}}
+    if stamp:
+        record["timestamp"] = stamp
+    return json.dumps(record) + "\n"
+
+
+def cursor_direct(role, content, stamp=None):
+    """Cursor format with content at top level (alternative shape)."""
+    record = {"role": role, "content": content}
+    if stamp:
+        record["timestamp"] = stamp
+    return json.dumps(record) + "\n"
+
+
+def test_cursor_format_detection():
+    assert is_cursor_format({"role": "user", "message": {"content": []}})
+    assert is_cursor_format({"role": "assistant", "message": {"content": "text"}})
+    assert is_cursor_format({"role": "user", "content": "text"})
+    assert not is_cursor_format({"type": "user", "message": {"content": []}})
+    assert not is_cursor_format({"type": "response_item", "role": "user"})
+    assert not is_cursor_format({"type": "session_meta"})
+    assert not is_cursor_format({"role": "system", "message": {"content": []}})
+
+
+def test_cursor_text_messages(tmp_path):
+    p = tmp_path / "s.jsonl"
+    p.write_text(
+        cursor("user", [{"type": "text", "text": "Atlas uses MySQL."}])
+        + cursor("assistant", [{"type": "text", "text": "I understand."}])
+    )
+    ms = list(records(p))
+    assert len(ms) == 2
+    assert ms[0].role == "user"
+    assert ms[0].source_type == "user_assertion"
+    assert ms[0].content == "Atlas uses MySQL."
+    assert ms[1].role == "assistant"
+    assert ms[1].source_type == "assistant_report"
+
+
+def test_cursor_string_content(tmp_path):
+    p = tmp_path / "s.jsonl"
+    p.write_text(cursor("user", "Plain string content."))
+    ms = list(records(p))
+    assert len(ms) == 1
+    assert ms[0].content == "Plain string content."
+
+
+def test_cursor_direct_content_format(tmp_path):
+    p = tmp_path / "s.jsonl"
+    p.write_text(cursor_direct("user", [{"type": "text", "text": "Direct format."}]))
+    ms = list(records(p))
+    assert len(ms) == 1
+    assert ms[0].content == "Direct format."
+
+
+def test_cursor_tool_use_and_result_pairing(tmp_path):
+    p = tmp_path / "s.jsonl"
+    p.write_text(
+        cursor(
+            "assistant",
+            [
+                {
+                    "type": "tool_use",
+                    "id": "call_abc",
+                    "name": "Read",
+                    "input": {"file_path": "/bank/memory/state.md"},
+                }
+            ],
+        )
+        + cursor(
+            "user",
+            [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "call_abc",
+                    "content": "Memory content here.",
+                }
+            ],
+        )
+    )
+    ms = list(records(p))
+    assert len(ms) == 2
+    assert ms[0].source_type == "tool_call"
+    assert ms[0].tool_name == "Read"
+    assert ms[0].call_id == "call_abc"
+    assert ms[1].source_type == "memory_read"
+    assert ms[1].call_id == "call_abc"
+
+
+def test_cursor_shell_command_output(tmp_path):
+    p = tmp_path / "s.jsonl"
+    p.write_text(
+        cursor(
+            "assistant",
+            [{"type": "tool_use", "id": "sh1", "name": "Shell", "input": {"command": "ls"}}],
+        )
+        + cursor(
+            "user",
+            [{"type": "tool_result", "tool_use_id": "sh1", "content": "file1.txt\nfile2.txt"}],
+        )
+    )
+    ms = list(records(p))
+    assert ms[1].source_type == "tool_result"
+    assert SHELL_OUTPUT in ms[1].gaps
+
+
+def test_cursor_missing_timestamp(tmp_path):
+    p = tmp_path / "s.jsonl"
+    p.write_text(cursor("user", [{"type": "text", "text": "No timestamp."}]))
+    ms = list(records(p))
+    assert ms[0].timestamp is None
+
+
+def test_cursor_with_timestamp(tmp_path):
+    p = tmp_path / "s.jsonl"
+    p.write_text(
+        cursor("user", [{"type": "text", "text": "Has timestamp."}], "2026-09-20T15:00:00Z")
+    )
+    ms = list(records(p))
+    assert ms[0].timestamp is not None
+
+
+def test_cursor_mixed_with_claude_codex(tmp_path):
+    p = tmp_path / "s.jsonl"
+    p.write_text(
+        claude("user", [{"type": "text", "text": "Claude message."}])
+        + cursor("user", [{"type": "text", "text": "Cursor message."}])
+        + codex("message", role="user", content=[{"type": "input_text", "text": "Codex message."}])
+    )
+    ms = list(records(p))
+    assert len(ms) == 3
+    assert [m.content for m in ms] == ["Claude message.", "Cursor message.", "Codex message."]
+
+
+def test_cursor_subagent_directory_is_delegated(tmp_path):
+    subagent_dir = tmp_path / "project" / "agent-transcripts" / "subagents"
+    subagent_dir.mkdir(parents=True)
+    p = subagent_dir / "s.jsonl"
+    p.write_text(cursor("user", [{"type": "text", "text": "From subagent."}]))
+    ms = list(records(p))
+    assert ms[0].source_type == "context"
+    assert "delegated_instruction" in ms[0].gaps
+
+
+def test_cursor_image_attachment(tmp_path):
+    p = tmp_path / "s.jsonl"
+    p.write_text(
+        cursor(
+            "user",
+            [
+                {"type": "text", "text": "See this image:"},
+                {"type": "image", "source": {"type": "base64", "data": "..."}},
+            ],
+        )
+    )
+    ms = list(records(p))
+    assert len(ms) == 2
+    assert ms[0].content == "See this image:"
+    assert "Non-text attachment" in ms[1].content
+
+
+def test_cursor_entries_helper():
+    item = {"role": "user", "message": {"content": [{"type": "text", "text": "Hello"}]}}
+    entries = cursor_entries(item)
+    assert len(entries) == 1
+    assert entries[0] == ("text", {"role": "user", "content": "Hello"})
+
+
+def test_cursor_string_blocks_in_content(tmp_path):
+    p = tmp_path / "s.jsonl"
+    p.write_text(
+        json.dumps({"role": "user", "message": {"content": ["Plain string block."]}}) + "\n"
+    )
+    ms = list(records(p))
+    assert len(ms) == 1
+    assert ms[0].content == "Plain string block."

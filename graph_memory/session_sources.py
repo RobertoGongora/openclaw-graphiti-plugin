@@ -104,6 +104,79 @@ def tool_touch(name, arguments) -> list[Touch]:
     return []
 
 
+def cursor_entries(item):
+    """Parse Cursor agent-transcript JSONL records.
+
+    Cursor JSONL uses {role, message:{content:[…]}} without a top-level type field.
+    Tool calls use {type:"tool_use", id, name, input} in content blocks; tool results
+    use {type:"tool_result", tool_use_id, content}. Plain text blocks use {type:"text", text}.
+    Some Cursor records have role directly at the top level with content as a sibling.
+    """
+    role = item.get("role")
+    if role not in {"user", "assistant"}:
+        return []
+    message = item.get("message", {})
+    if isinstance(message, dict) and "content" in message:
+        content = message.get("content", [])
+    else:
+        content = item.get("content", [])
+    if isinstance(content, str):
+        return [("text", {"role": role, "content": content})]
+    if not isinstance(content, list):
+        return []
+    entries = []
+    for block in content:
+        if not isinstance(block, dict):
+            if isinstance(block, str):
+                entries.append(("text", {"role": role, "content": block}))
+            continue
+        t = block.get("type")
+        if t == "tool_use":
+            entries.append(("call", {**block, "call_id": block.get("id")}))
+        elif t == "tool_result":
+            entries.append(
+                (
+                    "result",
+                    {
+                        **block,
+                        "call_id": block.get("tool_use_id"),
+                        "output": block.get("content"),
+                    },
+                )
+            )
+        elif t in {"text", "input_text", "output_text"}:
+            entries.append(("text", {"role": role, "content": block.get("text", "")}))
+        elif t in {"image", "document"}:
+            entries.append(
+                (
+                    "attachment",
+                    {
+                        "role": "note",
+                        "content": "[Non-text attachment unavailable to transcript text extraction]",
+                    },
+                )
+            )
+    return entries
+
+
+def is_cursor_format(item):
+    """Detect Cursor agent-transcript JSONL format.
+
+    Cursor format: has 'role' at top level without a recognized 'type' field, and has
+    either 'message' or 'content' as a sibling. Does not match Claude Code (type=user/assistant)
+    or Codex (type=response_item) records.
+    """
+    if not isinstance(item, dict):
+        return False
+    kind = item.get("type")
+    if kind in {"user", "assistant", "response_item", "session_meta", "turn_context", "compacted"}:
+        return False
+    role = item.get("role")
+    if role not in {"user", "assistant"}:
+        return False
+    return "message" in item or "content" in item
+
+
 def records(path: Path):
     """Stable IDs use line/block/chunk positions, including tool arguments/results."""
     calls = {}
@@ -131,7 +204,9 @@ def records(path: Path):
         cwd = item.get("cwd", cwd)
         payload = item.get("payload", {}) if kind == "response_item" else item.get("message", {})
         entries = []
-        if kind == "response_item" and isinstance(payload, dict):
+        if is_cursor_format(item):
+            entries = cursor_entries(item)
+        elif kind == "response_item" and isinstance(payload, dict):
             t = payload.get("type")
             if t in {"function_call", "custom_tool_call"}:
                 entries = [("call", payload)]

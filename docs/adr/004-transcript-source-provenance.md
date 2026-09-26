@@ -1,14 +1,15 @@
 # ADR 004: Transcript claims with separate validation and artifact evidence
 
-Status: accepted and validated, 2026-09-17.
+Status: accepted and validated, 2026-09-17. Updated 2026-09-26 for Cursor
+agent-transcript support.
 
 The original deployment imports derived markdown memories. It cannot establish
 what was said, corrected, observed by tools, or merely repeated from old memory.
 Rob requires transcripts as primary sources and explicitly requires tool outputs
 to validate conversational claims rather than generate independent facts.
 
-Use a versioned Claude/Codex transcript adapter, durable incremental cursor and
-bounded episodes, retaining session identity. Store messages/calls/results and
+Use a versioned Claude/Codex/Cursor transcript adapter, durable incremental cursor
+and bounded episodes, retaining session identity. Store messages/calls/results and
 historical memory observations alongside the existing fact graph. Do not read
 today's memory file to fill a missing historical version. Preserve gaps.
 
@@ -16,6 +17,22 @@ Keep conversational `evidence` and tool `validation_evidence` distinct. A fact
 without a conversational claim is rejected; assistant claims without primary
 validation remain uncertain and undated. Memory reads/writes never validate
 current state. Exact quotes remain necessary but do not prove semantic entailment.
+
+## Timestamp and dating policy
+
+Timestamps in transcript records establish when a claim was made. When a record
+lacks a timestamp:
+
+- The message's `timestamp` field remains `null`.
+- Facts extracted from such claims must use `status=uncertain` and `valid_at=null`.
+- The extraction system must not invent timestamps from file modification times
+  or other heuristics. Undated claims must not pretend to be dated.
+- File modification times are operational metadata only, not evidence of when
+  statements were made.
+
+This policy applies equally to Claude, Codex, and Cursor records. Cursor
+agent-transcripts may have weak or missing timestamps; the parser accepts them
+and preserves the gap.
 
 Keep the existing markdown workers running until completion for comparison.
 Deploy the transcript engine to a second Neo4j Community container/volume, with
