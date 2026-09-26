@@ -34,6 +34,7 @@ UID_LINES, UID_BYTES = 64, 262_144
 # Session uuids, rollout names and agent hashes name one file wherever it sits.
 UNIQUE_NAME = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-|[0-9a-f]{12,}")
 ACCEPT_UNMATCHED = "MEMORY_FEED_ACCEPT_UNMATCHED"
+REMOTE_RECEIVER = "MEMORY_FEED_REMOTE_RECEIVER"
 
 # Bare labels that must be machine-qualified in remote mode.
 # These are host-local names that would collide across machines.
@@ -239,7 +240,28 @@ def unique_name(uri):
 
 
 def accept_unmatched():
-    return os.environ.get(ACCEPT_UNMATCHED) == "1"
+    """Return True if unmatched feeds should be accepted.
+
+    When MEMORY_FEED_REMOTE_RECEIVER=1 (CT receiving remote pushes), setting
+    MEMORY_FEED_ACCEPT_UNMATCHED=1 is a hard error. This prevents duplicate
+    ingestion when a Mac forwarder reconnects with different feed identities.
+    The CT worker uses bolt://neo4j internally, so is_remote_bolt() is false
+    and cannot enforce this; the explicit flag does.
+
+    Raises:
+        RuntimeError: If both MEMORY_FEED_REMOTE_RECEIVER=1 and
+            MEMORY_FEED_ACCEPT_UNMATCHED=1 are set.
+    """
+    is_receiver = os.environ.get(REMOTE_RECEIVER) == "1"
+    wants_accept = os.environ.get(ACCEPT_UNMATCHED) == "1"
+    if is_receiver and wants_accept:
+        raise RuntimeError(
+            f"{ACCEPT_UNMATCHED}=1 is forbidden when {REMOTE_RECEIVER}=1. "
+            "A CT receiving remote pushes must not accept unmatched feeds, "
+            "as this would duplicate the entire graph when a Mac forwarder "
+            "reconnects with different roots or labels."
+        )
+    return wants_accept
 
 
 class Feeds:

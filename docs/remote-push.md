@@ -83,13 +83,13 @@ Replace `rob-mbp` and `ct-160` with your actual Tailscale machine names.
 ### Deny LAN access
 
 Ensure the CT's Bolt port is not exposed on the LAN. With the Tailscale overlay:
-- Bolt binds to `${TAILSCALE_IP}:27687` instead of `127.0.0.1:27687`
-- No port is published on the LAN interface
+- Bolt binds to both `127.0.0.1:27687` (for CT-local tooling) and `${TAILSCALE_IP}:27687` (for remote push)
+- Bolt is NOT bound to `0.0.0.0` or LAN interfaces
 
 Verify with:
 
 ```sh
-# Should show only Tailscale IP, not 0.0.0.0 or 127.0.0.1
+# Should show 127.0.0.1 and Tailscale IP, not 0.0.0.0
 docker inspect graph-memory-transcripts-neo4j-1 | grep -A5 PortBindings
 ```
 
@@ -240,8 +240,13 @@ If migrating from a local-mount setup to remote push:
 **Never set `MEMORY_FEED_ACCEPT_UNMATCHED=1` on the CT in remote mode.**
 
 This variable bypasses feed identity checks and would cause duplicate ingestion
-when the Mac forwarder reconnects with different labels or roots. The Tailscale
-overlay explicitly unsets it.
+when the Mac forwarder reconnects with different labels or roots.
+
+The Tailscale overlay enforces this with two mechanisms:
+1. **`MEMORY_FEED_REMOTE_RECEIVER=1`**: When set, `MEMORY_FEED_ACCEPT_UNMATCHED=1`
+   becomes a hard error (RuntimeError at startup). This is necessary because the
+   CT worker uses `bolt://neo4j` internally, so `is_remote_bolt()` returns false.
+2. **`MEMORY_FEED_ACCEPT_UNMATCHED=''`**: Defense in depth; explicitly unset.
 
 ## Deployment profiles
 

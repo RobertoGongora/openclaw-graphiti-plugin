@@ -1,16 +1,16 @@
-# Tailscale overlay for compose.transcripts.yaml: bind Bolt to Tailscale only.
+# Tailscale overlay for compose.transcripts.yaml: add Tailscale Bolt binding.
 #
 # Usage on the CT (server):
 #   docker compose -f compose.transcripts.yaml -f compose.transcripts.tailscale.yaml up -d
 #
 # The Mac pushes transcripts using graph-memory follow/feed with NEO4J_URI pointing
-# to the CT's Tailscale address. MCP recall remains on the CT; no transcript
-# files are mounted from the Mac.
+# to the CT's Tailscale address. MCP recall remains on the CT (loopback from base);
+# no transcript files are mounted from the Mac.
 #
 # Security hardening:
-# 1. Bolt is bound to the Tailscale interface only (TAILSCALE_IP)
-# 2. Set Tailscale ACLs to allow only your Mac's Tailscale IP to reach the CT's Bolt port
-# 3. Do not expose Bolt on the LAN or internet
+# 1. Bolt is bound to loopback (for CT-local tooling) AND Tailscale (for remote push)
+# 2. Bolt is NOT bound to 0.0.0.0 or LAN interfaces
+# 3. Set Tailscale ACLs to allow only your Mac's Tailscale IP to reach the CT's Bolt port
 #
 # Example Tailscale ACL:
 #   {"action": "accept", "src": ["rob-mbp"], "dst": ["ct-160:27687"]}
@@ -24,10 +24,12 @@ name: graph-memory-transcripts
 services:
   neo4j:
     ports:
-      # Remove the loopback binding, add Tailscale-only binding
+      # Keep loopback for CT-local tooling, add Tailscale for remote push.
+      # Do NOT use 0.0.0.0 (would expose on LAN).
+      - '127.0.0.1:27687:7687'
       - '${TAILSCALE_IP:?Set TAILSCALE_IP to the Tailscale interface address}:27687:7687'
     environment:
-      # Advertise the Tailscale address for client connections
+      # Advertise the Tailscale address for remote client connections
       NEO4J_server_bolt_advertised__address: ${TAILSCALE_IP}:27687
 
   # The worker still runs on the CT but without Mac transcript mounts.
@@ -40,15 +42,15 @@ services:
       # Only Codex auth for model calls; no Mac transcript mounts
       - '${TRANSCRIPT_AUTH_PATH:?Set Codex authentication directory}:/home/memory/.codex'
     environment:
-      # Forbid MEMORY_FEED_ACCEPT_UNMATCHED in remote mode to prevent duplicate
-      # ingestion when the Mac forwarder reconnects with different feed identities.
+      # Mark this as a remote receiver: MEMORY_FEED_ACCEPT_UNMATCHED=1 will hard-fail.
+      # This prevents duplicate ingestion when a Mac forwarder reconnects with
+      # different feed identities.
+      MEMORY_FEED_REMOTE_RECEIVER: '1'
+      # Defense in depth: also unset MEMORY_FEED_ACCEPT_UNMATCHED.
       MEMORY_FEED_ACCEPT_UNMATCHED: ''
 
   # Inventory does not apply: Mac transcripts are not mounted.
   inventory:
     profiles: [disabled]
 
-  mcp:
-    # MCP serves recall over Tailscale for authorized clients
-    ports:
-      - '${TAILSCALE_IP}:${TRANSCRIPT_MCP_PORT:-8766}:8765'
+  # MCP stays on loopback from base compose; this overlay does not change it.

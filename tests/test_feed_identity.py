@@ -513,6 +513,40 @@ def test_validate_roots_refuses_bare_labels_in_remote_mode(tmp_path):
     validate_roots([f"rob-mbp.claude={root}"], remote=True)
 
 
+def test_remote_receiver_forbids_accept_unmatched(monkeypatch):
+    """MEMORY_FEED_REMOTE_RECEIVER=1 makes MEMORY_FEED_ACCEPT_UNMATCHED=1 a hard error.
+
+    The CT worker uses bolt://neo4j internally, so is_remote_bolt() is false.
+    The explicit MEMORY_FEED_REMOTE_RECEIVER flag ensures accept_unmatched()
+    hard-fails to prevent duplicate ingestion on reconnect.
+    """
+    from graph_memory.feed_identity import accept_unmatched
+
+    # Neither set: returns False
+    monkeypatch.delenv("MEMORY_FEED_REMOTE_RECEIVER", raising=False)
+    monkeypatch.delenv("MEMORY_FEED_ACCEPT_UNMATCHED", raising=False)
+    assert accept_unmatched() is False
+
+    # Only ACCEPT_UNMATCHED=1: returns True (normal local behavior)
+    monkeypatch.delenv("MEMORY_FEED_REMOTE_RECEIVER", raising=False)
+    monkeypatch.setenv("MEMORY_FEED_ACCEPT_UNMATCHED", "1")
+    assert accept_unmatched() is True
+
+    # Only REMOTE_RECEIVER=1: returns False (no conflict)
+    monkeypatch.setenv("MEMORY_FEED_REMOTE_RECEIVER", "1")
+    monkeypatch.delenv("MEMORY_FEED_ACCEPT_UNMATCHED", raising=False)
+    assert accept_unmatched() is False
+
+    # Both set: hard error
+    monkeypatch.setenv("MEMORY_FEED_REMOTE_RECEIVER", "1")
+    monkeypatch.setenv("MEMORY_FEED_ACCEPT_UNMATCHED", "1")
+    with pytest.raises(RuntimeError) as exc:
+        accept_unmatched()
+    assert "forbidden" in str(exc.value)
+    assert "MEMORY_FEED_REMOTE_RECEIVER" in str(exc.value)
+    assert "MEMORY_FEED_ACCEPT_UNMATCHED" in str(exc.value)
+
+
 def test_a_different_file_at_a_known_key_is_reported_not_merged(graph, tmp_path):
     store, ns = graph
     service = MemoryService(store)
