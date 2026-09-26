@@ -77,7 +77,7 @@ def test_labels_do_not_depend_on_the_mount_point(tmp_path):
     assert parse_root(Path("~/.codex/sessions")).label == "codex"
     stated = parse_root(Path("work=/mnt/anything"))
     assert (stated.label, str(stated.given)) == ("work", "/mnt/anything")
-    # A real path with "=" in it is a path.
+    # A path with "=" in it is a path when the part before "=" is not a valid label.
     odd = tmp_path / "a=b"
     odd.mkdir()
     assert parse_root(odd).label == "a_b"
@@ -425,6 +425,126 @@ def test_label_fallbacks_and_bounded_uid(tmp_path):
     huge = tmp_path / "huge.jsonl"
     huge.write_text(json.dumps({"pad": "x" * 400_000, "sessionId": "beyond-the-bound"}) + "\n")
     assert session_uid(huge) is None
+
+
+def test_label_path_parsed_before_existence_check():
+    """LABEL=PATH syntax is recognized by syntax, not existence.
+
+    This allows remote paths that do not exist locally, such as
+    ``rob-mbp.claude=/sessions/claude`` where the path is on a remote machine
+    reached via Tailscale.
+    """
+    # Remote path that definitely doesn't exist locally
+    remote = parse_root("rob-mbp.claude=/nonexistent/sessions/claude")
+    assert remote.label == "rob-mbp.claude"
+    assert str(remote.given) == "/nonexistent/sessions/claude"
+
+    # Machine-qualified labels are valid
+    for spec in [
+        "rob-mbp.claude=/sessions/claude",
+        "ct-160.transcripts=/data/transcripts",
+        "dev.codex=/home/user/.codex/sessions",
+    ]:
+        label, _, path = spec.partition("=")
+        root = parse_root(spec)
+        assert root.label == label
+        assert str(root.given) == path
+
+
+def test_remote_mode_detection():
+    from graph_memory.feed_identity import is_remote_bolt
+
+    # Loopback addresses are local
+    assert is_remote_bolt("bolt://127.0.0.1:7687") is False
+    assert is_remote_bolt("bolt://localhost:7687") is False
+    assert is_remote_bolt("bolt://[::1]:7687") is False  # IPv6 loopback with brackets
+    # Docker internal hostname is local
+    assert is_remote_bolt("bolt://neo4j:7687") is False
+
+    # Remote addresses
+    assert is_remote_bolt("bolt://ct-160:7687") is True
+    assert is_remote_bolt("bolt://ct-160.tailnet.ts.net:7687") is True
+    assert is_remote_bolt("bolt://192.168.1.100:7687") is True
+    assert is_remote_bolt("neo4j://graph.example.com:7687") is True
+
+    # TLS variants
+    assert is_remote_bolt("bolt+s://graph.example.com:7687") is True
+    assert is_remote_bolt("neo4j+s://127.0.0.1:7687") is False
+
+
+def test_bare_labels_refused_in_remote_mode():
+    from graph_memory.feed_identity import validate_remote_label
+
+    # Bare labels are fine locally
+    validate_remote_label("claude", remote=False)
+    validate_remote_label("codex", remote=False)
+    validate_remote_label("cursor", remote=False)
+
+    # Bare labels are refused in remote mode
+    for bare in ("claude", "codex", "cursor"):
+        with pytest.raises(ValueError) as exc:
+            validate_remote_label(bare, remote=True)
+        assert "machine-qualified" in str(exc.value)
+        assert f"hostname.{bare}" in str(exc.value)
+
+    # Machine-qualified labels are always fine
+    validate_remote_label("rob-mbp.claude", remote=True)
+    validate_remote_label("ct-160.codex", remote=True)
+    validate_remote_label("dev-box.cursor", remote=True)
+
+    # Non-bare labels are fine even if not machine-qualified
+    validate_remote_label("personal", remote=True)
+    validate_remote_label("transcripts", remote=True)
+
+
+def test_validate_roots_refuses_bare_labels_in_remote_mode(tmp_path):
+    root = tmp_path / "sessions" / "claude"
+    root.mkdir(parents=True)
+
+    # Local mode: bare derived labels are fine
+    validate_roots([root], remote=False)
+
+    # Remote mode: bare derived labels are refused
+    with pytest.raises(ValueError) as exc:
+        validate_roots([root], remote=True)
+    assert "machine-qualified" in str(exc.value)
+
+    # Remote mode: machine-qualified explicit labels are fine
+    validate_roots([f"rob-mbp.claude={root}"], remote=True)
+
+
+def test_remote_receiver_forbids_accept_unmatched(monkeypatch):
+    """MEMORY_FEED_REMOTE_RECEIVER=1 makes MEMORY_FEED_ACCEPT_UNMATCHED=1 a hard error.
+
+    The CT worker uses bolt://neo4j internally, so is_remote_bolt() is false.
+    The explicit MEMORY_FEED_REMOTE_RECEIVER flag ensures accept_unmatched()
+    hard-fails to prevent duplicate ingestion on reconnect.
+    """
+    from graph_memory.feed_identity import accept_unmatched
+
+    # Neither set: returns False
+    monkeypatch.delenv("MEMORY_FEED_REMOTE_RECEIVER", raising=False)
+    monkeypatch.delenv("MEMORY_FEED_ACCEPT_UNMATCHED", raising=False)
+    assert accept_unmatched() is False
+
+    # Only ACCEPT_UNMATCHED=1: returns True (normal local behavior)
+    monkeypatch.delenv("MEMORY_FEED_REMOTE_RECEIVER", raising=False)
+    monkeypatch.setenv("MEMORY_FEED_ACCEPT_UNMATCHED", "1")
+    assert accept_unmatched() is True
+
+    # Only REMOTE_RECEIVER=1: returns False (no conflict)
+    monkeypatch.setenv("MEMORY_FEED_REMOTE_RECEIVER", "1")
+    monkeypatch.delenv("MEMORY_FEED_ACCEPT_UNMATCHED", raising=False)
+    assert accept_unmatched() is False
+
+    # Both set: hard error
+    monkeypatch.setenv("MEMORY_FEED_REMOTE_RECEIVER", "1")
+    monkeypatch.setenv("MEMORY_FEED_ACCEPT_UNMATCHED", "1")
+    with pytest.raises(RuntimeError) as exc:
+        accept_unmatched()
+    assert "forbidden" in str(exc.value)
+    assert "MEMORY_FEED_REMOTE_RECEIVER" in str(exc.value)
+    assert "MEMORY_FEED_ACCEPT_UNMATCHED" in str(exc.value)
 
 
 def test_a_different_file_at_a_known_key_is_reported_not_merged(graph, tmp_path):

@@ -34,6 +34,68 @@ UID_LINES, UID_BYTES = 64, 262_144
 # Session uuids, rollout names and agent hashes name one file wherever it sits.
 UNIQUE_NAME = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-|[0-9a-f]{12,}")
 ACCEPT_UNMATCHED = "MEMORY_FEED_ACCEPT_UNMATCHED"
+REMOTE_RECEIVER = "MEMORY_FEED_REMOTE_RECEIVER"
+
+# Bare labels that must be machine-qualified in remote mode.
+# These are host-local names that would collide across machines.
+BARE_LABELS = frozenset({"claude", "codex", "cursor"})
+# Machine-qualified labels have the form "hostname.label".
+MACHINE_QUALIFIED = re.compile(r"[\w-]+\.[\w.-]+")
+
+
+def is_remote_bolt(uri: str | None = None) -> bool:
+    """Return True if the Bolt URI points to a non-loopback host.
+
+    Remote mode requires machine-qualified feed labels to avoid collisions
+    when multiple machines push transcripts to the same Neo4j instance.
+    """
+    if uri is None:
+        uri = os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687")
+    # Parse the host from bolt:// or neo4j:// URI
+    uri_lower = uri.lower()
+    if any(uri_lower.startswith(s) for s in ("bolt://", "neo4j://", "bolt+s://", "neo4j+s://")):
+        rest = uri.split("://", 1)[1]
+        # Handle IPv6 addresses in brackets: [::1]:7687
+        if rest.startswith("["):
+            host = rest.split("]")[0][1:]  # Extract from [host]
+        else:
+            # IPv4 or hostname: split at first : or /
+            host = rest.split(":")[0].split("/")[0]
+    else:
+        host = "127.0.0.1"
+    host = host.lower()
+    # Check for loopback addresses and the docker-internal "neo4j" service name
+    return host not in ("localhost", "127.0.0.1", "::1", "neo4j")
+
+
+def is_machine_qualified(label: str) -> bool:
+    """Return True if the label is machine-qualified (hostname.label)."""
+    return bool(MACHINE_QUALIFIED.fullmatch(label))
+
+
+def validate_remote_label(label: str, remote: bool | None = None) -> None:
+    """Raise ValueError if the label is bare in remote mode.
+
+    In remote mode (pushing to a non-loopback Bolt), labels like ``claude``,
+    ``codex``, and ``cursor`` must be machine-qualified (e.g. ``rob-mbp.claude``)
+    to avoid collisions when multiple machines push to the same database.
+
+    Args:
+        label: The feed label to validate.
+        remote: Override remote detection (for testing). If None, detected
+            from NEO4J_URI environment variable.
+
+    Raises:
+        ValueError: If the label is bare and we're in remote mode.
+    """
+    if remote is None:
+        remote = is_remote_bolt()
+    if remote and label in BARE_LABELS:
+        raise ValueError(
+            f"Feed label {label!r} must be machine-qualified in remote mode "
+            f"(e.g. 'hostname.{label}'). Bare labels like {', '.join(sorted(BARE_LABELS))} "
+            f"would collide when multiple machines push to the same database."
+        )
 
 
 class Root(NamedTuple):
@@ -65,10 +127,18 @@ def derived_label(directory: Path):
 
 
 def parse_root(root) -> Root:
+    """Parse a root as LABEL=PATH or a plain path.
+
+    LABEL=PATH is recognized by syntax first: a valid label, followed by ``=``,
+    followed by a non-empty path. Only when the syntax does not match is the
+    whole string treated as a path. This allows remote paths that do not exist
+    locally (e.g. ``rob-mbp.claude=/sessions/claude`` where the path is on a
+    remote machine). An existing path that happens to contain ``=`` and does not
+    match LABEL=PATH syntax is still treated as a path.
+    """
     text = str(root)
     label, stated, rest = text.partition("=")
-    # An existing path that happens to contain "=" is a path, not a label.
-    if stated and LABEL.fullmatch(label) and rest and not Path(text).exists():
+    if stated and LABEL.fullmatch(label) and rest:
         given = Path(os.path.abspath(Path(rest).expanduser()))
     else:
         label, given = "", Path(os.path.abspath(Path(text).expanduser()))
@@ -76,13 +146,24 @@ def parse_root(root) -> Root:
     return Root(label or derived_label(directory), given, directory.resolve())
 
 
-def validate_roots(roots) -> list[Root]:
+def validate_roots(roots, remote: bool | None = None) -> list[Root]:
     """Parse the roots, most specific first so overlapping roots name a file the
-    same in any order. Two directories under one label would merge their files."""
+    same in any order. Two directories under one label would merge their files.
+
+    Args:
+        roots: Paths or LABEL=PATH strings.
+        remote: Override remote detection (for testing). If None, detected
+            from NEO4J_URI environment variable.
+
+    Raises:
+        ValueError: If two roots share a label, or if a bare label is used
+            in remote mode.
+    """
     owners = {}
     parsed = []
     for given in roots:
         root = parse_root(given)
+        validate_remote_label(root.label, remote)
         first, base = owners.setdefault(root.label, (given, root.base))
         if base != root.base:
             raise ValueError(
@@ -159,7 +240,28 @@ def unique_name(uri):
 
 
 def accept_unmatched():
-    return os.environ.get(ACCEPT_UNMATCHED) == "1"
+    """Return True if unmatched feeds should be accepted.
+
+    When MEMORY_FEED_REMOTE_RECEIVER=1 (CT receiving remote pushes), setting
+    MEMORY_FEED_ACCEPT_UNMATCHED=1 is a hard error. This prevents duplicate
+    ingestion when a Mac forwarder reconnects with different feed identities.
+    The CT worker uses bolt://neo4j internally, so is_remote_bolt() is false
+    and cannot enforce this; the explicit flag does.
+
+    Raises:
+        RuntimeError: If both MEMORY_FEED_REMOTE_RECEIVER=1 and
+            MEMORY_FEED_ACCEPT_UNMATCHED=1 are set.
+    """
+    is_receiver = os.environ.get(REMOTE_RECEIVER) == "1"
+    wants_accept = os.environ.get(ACCEPT_UNMATCHED) == "1"
+    if is_receiver and wants_accept:
+        raise RuntimeError(
+            f"{ACCEPT_UNMATCHED}=1 is forbidden when {REMOTE_RECEIVER}=1. "
+            "A CT receiving remote pushes must not accept unmatched feeds, "
+            "as this would duplicate the entire graph when a Mac forwarder "
+            "reconnects with different roots or labels."
+        )
+    return wants_accept
 
 
 class Feeds:

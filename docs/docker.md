@@ -42,6 +42,8 @@ A volume first created without authentication takes the password on its first
 authenticated start, provided the default password was never changed. After that
 the stored password wins, and `NEO4J_PASSWORD` must match it.
 
+For a remote transcript source over Tailscale, see [remote-push.md](remote-push.md).
+
 ## Container hardening
 
 The `worker` and `mcp` services run with a read-only root filesystem, a tmpfs
