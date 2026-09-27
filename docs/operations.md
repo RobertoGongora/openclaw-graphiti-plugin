@@ -74,7 +74,7 @@ graph-memory --version          # package version and engine identity of a build
 
    ```sh
    gm up -d neo4j
-   gm up -d mcp inventory
+   gm up -d mcp inventory        # a push receiver has no inventory: gm up -d mcp
    gm ps                         # wait for healthy
    gm exec mcp graph-memory --namespace transcripts history verify-live
    ```

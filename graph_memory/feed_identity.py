@@ -17,12 +17,14 @@ Feeds staged before source keys existed keep the ids derived from their absolute
 path: episodes, messages and the journal already reference them.
 """
 
+import ipaddress
 import json
 import os
 import re
 from itertools import islice
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple
+from urllib.parse import urlsplit
 
 from .session_sources import FORMAT, records
 from .store import digest
@@ -43,28 +45,26 @@ BARE_LABELS = frozenset({"claude", "codex", "cursor"})
 
 
 def is_remote_bolt(uri: str | None = None) -> bool:
-    """Return True if the Bolt URI points to a non-loopback host.
+    """Whether the Neo4j URI points anywhere but this host.
 
-    Remote mode requires machine-qualified feed labels to avoid collisions
-    when multiple machines push transcripts to the same Neo4j instance.
+    Only a loopback address, ``localhost`` and the Compose service name ``neo4j``
+    are local, whatever the scheme (``bolt+ssc://`` included). A URI whose host
+    cannot be read counts as remote: the guards it decides must fail closed.
     """
     if uri is None:
         uri = os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687")
-    # Parse the host from bolt:// or neo4j:// URI
-    uri_lower = uri.lower()
-    if any(uri_lower.startswith(s) for s in ("bolt://", "neo4j://", "bolt+s://", "neo4j+s://")):
-        rest = uri.split("://", 1)[1]
-        # Handle IPv6 addresses in brackets: [::1]:7687
-        if rest.startswith("["):
-            host = rest.split("]")[0][1:]  # Extract from [host]
-        else:
-            # IPv4 or hostname: split at first : or /
-            host = rest.split(":")[0].split("/")[0]
-    else:
-        host = "127.0.0.1"
-    host = host.lower()
-    # Check for loopback addresses and the docker-internal "neo4j" service name
-    return host not in ("localhost", "127.0.0.1", "::1", "neo4j")
+    try:
+        host = urlsplit(uri.strip()).hostname
+    except ValueError:
+        return True
+    if not host:
+        return True
+    if host in ("localhost", "neo4j"):
+        return False
+    try:
+        return not ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return True
 
 
 def shared_graph() -> bool:

@@ -7,7 +7,9 @@
   on another host (`compose.transcripts.tailscale.yaml`, `docs/remote-push.md`).
   With a remote `NEO4J_URI`, or `MEMORY_FEED_REMOTE_RECEIVER=1` on the receiver,
   bare `claude`/`codex`/`cursor` labels and `MEMORY_FEED_ACCEPT_UNMATCHED=1` are
-  refused before connecting. `follow` accepts `LABEL=PATH` roots whose PATH
+  refused before connecting. A URI counts as remote unless its host is loopback,
+  `localhost` or `neo4j`, for every scheme including `bolt+ssc://`; an unreadable
+  URI counts as remote. `follow` accepts `LABEL=PATH` roots whose PATH
   exists. `feeds relabel` renames a label in every source key without changing
   feed ids or cursors.
 

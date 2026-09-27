@@ -447,6 +447,19 @@ def test_remote_mode_detection():
     assert is_remote_bolt("bolt+s://graph.example.com:7687") is True
     assert is_remote_bolt("neo4j+s://127.0.0.1:7687") is False
 
+    # Every scheme is read for its host, including self-signed TLS.
+    assert is_remote_bolt("bolt+ssc://ct-160:27687") is True
+    assert is_remote_bolt("neo4j+ssc://ct-160:27687") is True
+    assert is_remote_bolt("bolt+ssc://127.0.0.1:27687") is False
+    assert is_remote_bolt("BOLT://CT-160:27687") is True
+    assert is_remote_bolt("bolt://user@ct-160:27687") is True
+    # Any loopback address, not just 127.0.0.1.
+    assert is_remote_bolt("bolt://127.0.1.1:7687") is False
+    assert is_remote_bolt("bolt://LOCALHOST:7687") is False
+    # A host that cannot be read fails closed.
+    for unreadable in ("ct-160:27687", "", "bolt://", "bolt://[::1:7687"):
+        assert is_remote_bolt(unreadable) is True, unreadable
+
 
 def test_bare_labels_refused_in_remote_mode():
     from graph_memory.feed_identity import validate_remote_label
@@ -656,6 +669,14 @@ def test_follow_cli_accepts_label_path_and_refuses_bare_labels_remotely(
     monkeypatch.setenv("MEMORY_FEED_ACCEPT_UNMATCHED", "1")
     assert invoke("follow", "--once", f"rob-mbp.claude={root}") == 2
     assert invoke("inventory", "--once", "--transcripts", f"rob-mbp.claude={root}") == 2
+    # Self-signed TLS to the receiver is just as remote.
+    monkeypatch.setenv("NEO4J_URI", "bolt+ssc://ct-160:27687")
+    assert invoke("follow", "--once", f"rob-mbp.claude={root}") == 2
+    monkeypatch.delenv("MEMORY_FEED_ACCEPT_UNMATCHED")
+    capsys.readouterr()
+    assert invoke("follow", "--once", str(root)) == 2
+    assert "machine-qualified" in capsys.readouterr().err
+    monkeypatch.setenv("MEMORY_FEED_ACCEPT_UNMATCHED", "1")
     # The receiver's worker watches no transcripts and still refuses.
     monkeypatch.setenv("NEO4J_URI", "bolt://neo4j:7687")
     monkeypatch.setenv("MEMORY_FEED_REMOTE_RECEIVER", "1")

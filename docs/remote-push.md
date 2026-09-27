@@ -109,7 +109,10 @@ The overlay:
 - publishes Bolt on loopback and `TAILSCALE_IP`, and advertises the Tailscale
   address;
 - runs the worker without transcript roots or session mounts;
-- disables `inventory`, which counts files this host does not have;
+- disables `inventory`, which counts files this host does not have. Do not name
+  it in `gmr up`: naming a service enables its profile, and Compose then fails on
+  the placeholder session paths. Upgrade with `gmr up -d neo4j`, then
+  `gmr up -d mcp`, then `gmr up -d worker`;
 - sets `MEMORY_FEED_REMOTE_RECEIVER=1`. Every other machine's feeds are
   unmatched here by design, so `MEMORY_FEED_ACCEPT_UNMATCHED=1` would stage their
   files again under new ids. With the flag set, a worker that receives it exits
@@ -209,10 +212,17 @@ set -eu
 NEO4J_PASSWORD=$(security find-generic-password -a "$USER" -s graph-memory-transcripts -w)
 export NEO4J_PASSWORD
 export NEO4J_URI=bolt://graph-memory.taild00569.ts.net:27687
+export MEMORY_FEED_REMOTE_RECEIVER=1
 exec graph-memory --namespace transcripts follow --source-records \
   "rob-mbp.claude=$HOME/.claude/projects" \
   "rob-mbp.codex=$HOME/.codex/sessions"
 ```
+
+The guards against bare labels and `MEMORY_FEED_ACCEPT_UNMATCHED` apply when
+`NEO4J_URI` names another host, whatever the scheme. A URI that reaches the
+receiver through this host, such as an SSH port forward to `127.0.0.1`, looks
+local. `MEMORY_FEED_REMOTE_RECEIVER=1` in the wrapper keeps the guards on in
+that case too.
 
 Run it under launchd:
 
