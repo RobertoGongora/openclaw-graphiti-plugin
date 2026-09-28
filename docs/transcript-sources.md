@@ -189,7 +189,11 @@ The source key is `grok-bot:<agentId>.jsonl`. Episodes from this root use
 `source_format=grok-bot`, which follows the same evidence rules as
 `session-records-v1` (facts, validation, and the source graph). The feed cursor
 node stays `source_format=session-records-v1` so identity and resume match the
-existing worker. Missing timestamps stay null. File mtime is not an event time.
+existing worker. The format follows the root label: a file under the root
+labelled `grok-bot` gets `grok-bot`, and a `grok-bot` directory inside the
+Claude or Codex root does not. Missing timestamps stay null, and so does a
+timestamp without a time zone or one that does not parse; the rest of the file
+is still read. File mtime is not an event time.
 
 ### Claude-shaped lines
 
@@ -200,14 +204,20 @@ This is the contract the exporter writes. Each complete line is Claude Code JSON
 {"type":"assistant","timestamp":"2026-09-28T12:01:00Z","channel":"desk","message":{"role":"assistant","content":[{"type":"text","text":"Atlas uses MySQL."}]}}
 ```
 
-- A `user` line without `isSidechain` and without `fromAgent` is a `user_assertion`.
+- A `user` line without `isSidechain` and without `fromAgent` is a `user_assertion`:
+  Roberto's own words. The exporter writes a plain `user` line only for his
+  messages. A message from anyone else, human or agent, is written with
+  `fromAgent` (or dropped). The parser does not check `fromUser` against an owner
+  id, so a `fromUser` line without `fromAgent` is read as his.
 - An `assistant` line is an `assistant_report`, including when it names `fromAgent`.
   That report can yield a fact. An unvalidated assistant claim stays uncertain
   and undated. It is not a user assertion.
-- `isSidechain: true`, or `fromAgent` on a `user` line, is `context` with gap
-  `delegated_instruction`. Those relays cannot originate facts.
-- `channel` and `fromAgent.id` (or `fromAgent.name` when there is no id) are
-  stored on the message when present.
+- `isSidechain: true`, or `fromAgent` with any value other than null on a `user`
+  line, is `context` with gap `delegated_instruction`. Those relays cannot
+  originate facts.
+- `channel` and `fromAgent.id` (or `fromAgent.name` when there is no id, or
+  `unknown-agent` when neither is a string) are stored on the message, redacted
+  like the message text.
 
 ### Flat grok-bot lines
 
@@ -220,8 +230,8 @@ A line that is not Claude or Codex JSONL is read when it sets
 {"source_format":"grok-bot","role":"user","content":"Check Atlas.","fromAgent":{"id":"fleet-agent","name":"Fleet"},"channel":"fleet","timestampMs":1759053720000}
 ```
 
-`timestampMs` is Unix epoch milliseconds. A user line with `fromAgent` is a
-relay, same as `isSidechain`. Lines with no role or no text are skipped.
+`timestampMs` is Unix epoch milliseconds; `timestamp`, when present, wins. A
+user line with `fromAgent` is a relay, same as `isSidechain`. Lines with no role or no text are skipped.
 Widgets, events, voice, attachments, and streaming chunks are not this
 contract; the exporter drops them. A full ReadTranscript sealed-union adapter
 is a follow-up if the exporter stops writing these lines.
@@ -235,8 +245,10 @@ outside this repository.
 The default `compose.transcripts.yaml` does not mount this root. Do not edit a
 running host compose file from the repository change. When a deploy is
 approved, add the same read-only mount and `--transcripts` root to **both**
-the worker and the inventory service. A compose override replaces the whole
-`command` and `volumes` list, so repeat the Claude and Codex entries:
+the worker and the inventory service. In an override file `command` replaces
+the whole list, so repeat the Claude and Codex roots. `volumes` merge by
+container path, so the grok-bot mount alone is enough; repeating the others, as
+below, is harmless:
 
 ```yaml
 # worker
@@ -255,9 +267,9 @@ volumes:
   - '${GROK_BOT_SESSIONS_PATH:?Set Grok Bot JSONL directory}:/sessions/grok-bot:ro'
 ```
 
-After that mount exists, stamp feed identity the same way as the other roots,
-with `--root grok-bot=/sessions/grok-bot`. The container path's last component
-must stay `grok-bot`. Do not mount a model-worker home directory on this root.
+A new grok-bot root has no older feeds, so it needs no `feeds stamp`. The
+container path's last component must stay `grok-bot`: it is the feed label. Do
+not mount a model-worker home directory on this root.
 
 ## Deployment and validation
 

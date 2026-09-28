@@ -4,11 +4,17 @@
 ### Added
 
 - Grok Bot desk and fleet chats can be ingested from a `grok-bot` transcript
-  root (`<agentId>.jsonl`). Claude-shaped lines and flat lines that carry
-  `fromAgent` or `channel` become sourced messages with `source_format=grok-bot`.
-  Sidechain and `fromAgent` user relays stay context, not user assertions.
-  `importers.redact()` also covers GitHub device codes, `tskey-`, `xai-`,
-  `crsr_` webhook keys, JWTs, and `token`/`key` query values.
+  root (`<agentId>.jsonl`). Claude-shaped lines, and flat lines that name
+  `source_format`/`source` `grok-bot` or carry `fromAgent`, `fromUser` or
+  `channel`, become sourced messages with `source_format=grok-bot`. Sidechain
+  and `fromAgent` user relays stay context, not user assertions.
+- `importers.redact()` also covers GitHub device codes shown with a device-code
+  prompt, `tskey-`, `xai-` keys, `crsr_` keys, `github_pat_`, JWTs, quoted JSON
+  keys (`"api_key": "…"`), prefixed names (`OPENAI_API_KEY=`, `GITHUB_TOKEN=`),
+  webhook keys and secrets, `Authorization: Basic`, unterminated private keys,
+  and `token`/`key`/`access_token`/`client_secret` query and fragment values.
+  Feed cursors written with the earlier redaction still resume; the text already
+  stored keeps its earlier redaction.
 
 ### Fixed
 

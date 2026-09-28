@@ -409,9 +409,8 @@ gm exec worker graph-memory --namespace transcripts feeds stamp \
   --root claude=/sessions/claude --root codex=/sessions/codex
 ```
 
-A grok-bot root, once that mount exists, uses the same stamp form:
-`--root grok-bot=/sessions/grok-bot`. The default compose file does not mount
-it.
+A grok-bot root is new, so it has no feeds from before source keys and needs
+no stamp. The default compose file does not mount it.
 
 The output counts `feeds`, `stamped`, `already_stamped`, `unmatched` and
 `conflicts`. The command changes no feed id and can be repeated. The next scan

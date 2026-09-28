@@ -9,6 +9,7 @@ from graph_memory.session_sources import (
     OPAQUE_CALL,
     SHELL_OUTPUT,
     before_shell_results,
+    cursor_matches,
     episode_format,
     feed_records,
     records,
@@ -549,3 +550,102 @@ def test_flat_grok_bot_lines_keep_channel_and_from_agent_relays(tmp_path):
     assert sourced.can_yield_facts()
     extraction(person.id).validate_evidence(sourced)
     assert grok_transcript([relay]).can_yield_facts() is False
+
+
+def test_cursor_written_before_current_redaction_resumes(graph, tmp_path):
+    from graph_memory.importers import redact_v1
+    from graph_memory.inventory import census
+
+    store, ns = graph
+    p = tmp_path / "s.jsonl"
+    p.write_text(claude("user", 'Ticket PLAN-1234: {"api_key": "private-value"}'))
+    service = MemoryService(store)
+    fid = feed_records(service, ns, p, "s")["feed_id"]
+    old = [m.model_dump(mode="json") for m in records(p, redact_v1)]
+    assert old != [m.model_dump(mode="json") for m in records(p)]
+    store.transaction(
+        lambda tx: tx.run(
+            "MATCH (f:MemoryFeed {id:$id}) SET f.prefix_hash=$hash", id=fid, hash=digest(old)
+        ).consume()
+    )
+    assert cursor_matches(p, list(records(p)), 1, digest(old))
+    assert census(store, ns, [tmp_path])["gaps"]["prefix_mismatches"] == 0
+    with p.open("a") as f:
+        f.write(claude("assistant", "Noted."))
+    assert feed_records(service, ns, p, "s")["receipts"]
+    # A different file is still refused.
+    p.write_text(claude("user", "Something else.") + claude("assistant", "Noted."))
+    with pytest.raises(ValueError, match="prefix changed"):
+        feed_records(service, ns, p, "s")
+
+
+def test_any_from_agent_value_marks_a_relay(tmp_path):
+    path = tmp_path / "grok-bot" / "a.jsonl"
+    path.parent.mkdir()
+    lines = [
+        {"source_format": "grok-bot", "role": "user", "content": "Deploy is done.", "fromAgent": v}
+        for v in ({}, {"displayName": "Sand"}, "", " ", True, 42, ["sand"], {"id": 123})
+    ]
+    shaped = json.loads(claude("user", "Deploy is done."))
+    shaped["fromAgent"] = {"displayName": "Sand"}
+    path.write_text("".join(json.dumps(x) + "\n" for x in [*lines, shaped]))
+    parsed = list(records(path))
+    assert len(parsed) == 9
+    for m in parsed:
+        assert m.source_type == "context"
+        assert "delegated_instruction" in m.gaps
+        assert m.from_agent == "unknown-agent"
+
+
+def test_grok_bot_bad_timestamps_do_not_stop_the_file(tmp_path):
+    path = tmp_path / "grok-bot" / "a.jsonl"
+    path.parent.mkdir()
+    base = {"source_format": "grok-bot", "role": "user", "content": "Atlas uses MySQL."}
+    path.write_text(
+        "".join(
+            json.dumps({**base, **extra}) + "\n"
+            for extra in (
+                {"timestamp": "2026-09-28T10:00:00"},
+                {"timestamp": "yesterday"},
+                {"timestampMs": 1e20},
+                {"timestampMs": 1759053720000},
+            )
+        )
+    )
+    stamps = [m.timestamp for m in records(path)]
+    assert stamps[:3] == [None, None, None]
+    assert stamps[3] is not None and stamps[3].isoformat().startswith("2025-09-28T10:02:00")
+
+
+def test_grok_bot_labels_are_redacted(tmp_path):
+    path = tmp_path / "grok-bot" / "a.jsonl"
+    path.parent.mkdir()
+    path.write_text(
+        json.dumps(
+            {
+                "source_format": "grok-bot",
+                "role": "assistant",
+                "content": "hi",
+                "fromAgent": "bot password=hunter2 ghp_abcdefghijklmnopqrstuvwxyz",
+                "channel": {"name": "desk ?token=chansecret123"},
+            }
+        )
+        + "\n"
+    )
+    (m,) = records(path)
+    assert "hunter2" not in m.from_agent and "ghp_" not in m.from_agent
+    assert "chansecret123" not in m.channel
+
+
+def test_claude_string_content_without_role_keeps_the_line_type(tmp_path):
+    p = tmp_path / "s.jsonl"
+    p.write_text(json.dumps({"type": "user", "message": {"content": "Atlas uses MySQL."}}) + "\n")
+    (m,) = records(p)
+    assert (m.role, m.source_type) == ("user", "user_assertion")
+
+
+def test_episode_format_follows_the_root_label(tmp_path):
+    assert episode_format(tmp_path / "exports" / "a.jsonl", "grok-bot:a.jsonl") == "grok-bot"
+    nested = tmp_path / "claude" / "grok-bot" / "s.jsonl"
+    assert episode_format(nested, "claude:grok-bot/s.jsonl") == "session-records-v1"
+    assert episode_format(nested) == "grok-bot"

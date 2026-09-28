@@ -14,7 +14,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-from .importers import redact, text_content
+from pydantic import AwareDatetime, TypeAdapter, ValidationError
+
+from .importers import redact, redact_v1, text_content
 from .models import ArtifactTouch, Message, Transcript
 from .store import digest
 
@@ -108,14 +110,20 @@ def tool_touch(name, arguments) -> list[Touch]:
     return []
 
 
-def episode_format(path: Path) -> str:
-    """Episode evidence format. Feed cursors stay session-records-v1."""
+def episode_format(path: Path, source_key=None) -> str:
+    """Episode evidence format, from the feed's root label when the watcher named
+    one, else from the path. Feed cursors stay session-records-v1."""
+    if source_key:
+        return GROK_BOT if source_key.startswith(GROK_BOT + ":") else FORMAT
     return GROK_BOT if GROK_BOT in path.parts else FORMAT
 
 
 def agent_ref(item):
-    """Another agent named on the line, by id when the record has one."""
+    """Another agent named on the line, by id when the record has one. Any
+    fromAgent other than null names one, even without a usable id."""
     agent = item.get("fromAgent")
+    if agent is None:
+        return None
     if isinstance(agent, str) and agent.strip():
         return agent.strip()
     if isinstance(agent, dict):
@@ -123,7 +131,7 @@ def agent_ref(item):
             value = agent.get(key)
             if isinstance(value, str) and value.strip():
                 return value.strip()
-    return None
+    return "unknown-agent"
 
 
 def channel_name(item):
@@ -166,13 +174,24 @@ def is_grok_native(item):
     return any(key in item for key in ("fromAgent", "fromUser", "channel"))
 
 
-def grok_timestamp(item):
+AWARE_TIME = TypeAdapter(AwareDatetime)
+
+
+def record_time(item):
+    """The line's event time, or None. A timestamp without a zone, or one that
+    does not parse, is missing rather than a reason to stop reading the file."""
     stamp = item.get("timestamp")
-    if isinstance(stamp, str) and stamp.strip():
-        return stamp
+    if stamp is not None:
+        try:
+            return AWARE_TIME.validate_python(stamp)
+        except ValidationError:
+            return None
     ms = item.get("timestampMs")
     if isinstance(ms, (int, float)) and not isinstance(ms, bool) and ms > 0:
-        return datetime.fromtimestamp(ms / 1000, UTC).isoformat().replace("+00:00", "Z")
+        try:
+            return datetime.fromtimestamp(ms / 1000, UTC)
+        except (OverflowError, OSError, ValueError):
+            return None
     return None
 
 
@@ -200,7 +219,7 @@ def as_claude(item):
         return None
     shaped = {
         "type": role,
-        "timestamp": grok_timestamp(item),
+        "timestamp": record_time(item),
         "message": {"role": role, "content": blocks},
     }
     for key in ("isSidechain", "fromAgent", "fromUser", "channel", "sessionId", "cwd"):
@@ -209,8 +228,9 @@ def as_claude(item):
     return shaped
 
 
-def records(path: Path):
-    """Stable IDs use line/block/chunk positions, including tool arguments/results."""
+def records(path: Path, scrub=redact):
+    """Stable IDs use line/block/chunk positions, including tool arguments/results.
+    scrub is the redaction; only cursor checks pass an older one."""
     calls = {}
     cwd = None
     delegated = "subagents" in path.parts
@@ -251,7 +271,7 @@ def records(path: Path):
         elif kind in {"user", "assistant"} and isinstance(payload, dict):
             content = payload.get("content", [])
             if isinstance(content, str):
-                entries = [("text", payload)]
+                entries = [("text", {**payload, "role": payload.get("role", kind)})]
             elif isinstance(content, list):
                 for block in content:
                     if not isinstance(block, dict):
@@ -351,7 +371,7 @@ def records(path: Path):
                         ArtifactTouch(
                             path=p,
                             operation=op,
-                            content=redact(body)[:CHUNK],
+                            content=scrub(body)[:CHUNK],
                             captured=captured if body else "unavailable",
                             gap="execution_not_yet_observed",
                         )
@@ -409,7 +429,7 @@ def records(path: Path):
                         ArtifactTouch(
                             path=p,
                             operation=op,
-                            content=redact(captured_content)[:CHUNK],
+                            content=scrub(captured_content)[:CHUNK],
                             captured=("unavailable" if compound else "excerpt")
                             if op == "read"
                             else captured,
@@ -436,8 +456,9 @@ def records(path: Path):
             else:
                 role = entry.get("role", "note")
                 content = text_content(entry.get("content", ""))
-                agent = bounded_label(agent_ref(item))
-                desk = bounded_label(channel_name(item))
+                # Redacted before truncation, so a cut cannot split a secret.
+                agent = bounded_label(scrub(agent_ref(item) or ""))
+                desk = bounded_label(scrub(channel_name(item) or ""))
                 source_type = "user_assertion" if role == "user" else "assistant_report"
                 # Sidechain text and another agent's user-role line are relays.
                 # They are not the person's assertions.
@@ -454,7 +475,7 @@ def records(path: Path):
                     gaps.append(
                         "derived_context" if entry_kind == "context" else "non_text_attachment"
                     )
-            content = redact(content)
+            content = scrub(content)
             if not content.strip():
                 content = "[Empty tool or source record]"
             for offset in range(0, len(content), CHUNK):
@@ -469,7 +490,7 @@ def records(path: Path):
                     record_id=record_id,
                     role=role,
                     content=chunk,
-                    timestamp=item.get("timestamp"),
+                    timestamp=record_time(item),
                     source_type=source_type,
                     call_id=call_id,
                     tool_name=tool,
@@ -479,6 +500,27 @@ def records(path: Path):
                     from_agent=agent,
                     channel=desk,
                 )
+
+
+def cursor_matches(path: Path, messages, count, stored):
+    """Whether a cursor still describes the file's first count messages.
+
+    A cursor hashes redacted text, so it may predate shell output validating a
+    claim (before_shell_results) or the current redaction patterns (redact_v1).
+    Both forms of the file it was written from are accepted."""
+    if count > len(messages):
+        return False
+    if not count:
+        return True
+
+    def hashes(found):
+        prefix = [m if isinstance(m, dict) else m.model_dump(mode="json") for m in found[:count]]
+        return digest(prefix), digest([before_shell_results(m) for m in prefix])
+
+    if stored in hashes(messages):
+        return True
+    # Parsed again only on a mismatch, which is rare once cursors advance.
+    return stored in hashes(list(records(path, redact_v1)))
 
 
 def before_shell_results(message):
@@ -584,12 +626,7 @@ def feed_records(
         row = tx.run("MATCH (f:MemoryFeed {id:$id}) RETURN properties(f) AS f", id=fid).single()
         previous = row["f"] if row else {}
         count = previous.get("message_count", 0)
-        prefix = [m.model_dump(mode="json") for m in messages[:count]]
-        if count > len(messages) or (
-            count
-            and previous["prefix_hash"]
-            not in (digest(prefix), digest([before_shell_results(m) for m in prefix]))
-        ):
+        if not cursor_matches(path, messages, count, previous.get("prefix_hash")):
             raise ValueError(
                 "Transcript prefix changed; preserve old evidence and review a new source revision"
             )
@@ -601,7 +638,7 @@ def feed_records(
                 session_id=session_id,
                 source_id=f"records:{fid}:{count}",
                 source_uri=str(path),
-                source_format=episode_format(path),
+                source_format=episode_format(path, source_key),
                 title=title,
                 messages=selected,
                 memory_origins={m.id: origins[m.id] for m in selected if m.id in origins},
