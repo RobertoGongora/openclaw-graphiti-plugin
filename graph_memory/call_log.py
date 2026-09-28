@@ -93,8 +93,17 @@ _HEAVY_KEYS = {
 # Message content and evidence quotes: transcript text, never needed to debug recall.
 _ARG_PROSE = {"content", "quote"}
 # Result fields that are prose or that repeat the question (already in arguments,
-# and a tokenized copy would slip past the credential scrub).
-_RESULT_PROSE = _HEAVY_KEYS | {"question", "question_terms", "query", "certainty", "coverage"}
+# and a tokenized copy would slip past the credential scrub). An episode `name` is
+# its transcript title, which for a session feed is the first user message.
+_RESULT_PROSE = _HEAVY_KEYS | {
+    "question",
+    "question_terms",
+    "query",
+    "certainty",
+    "coverage",
+    "name",
+    "title",
+}
 # Lists of facts in any tool result; the rank order within each list is kept.
 _FACT_LISTS = (
     "facts",
@@ -130,11 +139,15 @@ _STRUCTURE = {
 
 
 def enabled_path():
-    """The configured log path, or None. `~` is expanded; a relative path is refused."""
+    """The configured log path, or None. `~` is expanded; a relative path, or a `~user`
+    whose home cannot be found, is refused."""
     raw = os.environ.get(ENV, "").strip()
     if not raw:
         return None
-    path = Path(raw).expanduser()
+    try:
+        path = Path(raw).expanduser()
+    except RuntimeError:
+        return None
     return path if path.is_absolute() else None
 
 
@@ -291,7 +304,8 @@ def append_jsonl(path, line):
 
 
 def _open_private(path, flags):
-    """Open a regular file owned by this user without following links or blocking on a FIFO."""
+    """Open a regular file owned by this user without following links or blocking on a FIFO.
+    A hard link would let the log append to (and chmod) another file of this user's."""
     fd = os.open(path, flags | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, 0o600)
     try:
         info = os.fstat(fd)
@@ -299,6 +313,8 @@ def _open_private(path, flags):
             raise OSError(errno.EINVAL, "call log path is not a regular file")
         if info.st_uid != os.getuid():
             raise OSError(errno.EPERM, "call log file belongs to another user")
+        if info.st_nlink != 1:
+            raise OSError(errno.EMLINK, "call log file has other hard links")
         if info.st_mode & 0o777 != 0o600:
             os.fchmod(fd, 0o600)
         os.set_blocking(fd, True)

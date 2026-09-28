@@ -611,6 +611,30 @@ def test_call_log_requires_an_absolute_path(monkeypatch, tmp_path, value):
     assert not (tmp_path / "~").exists()
 
 
+def test_call_log_is_off_for_a_home_it_cannot_find(monkeypatch, capsys):
+    monkeypatch.setenv("MEMORY_MCP_CALL_LOG", "~no-such-user-graph-memory/calls.jsonl")
+    assert call_log.enabled_path() is None
+    call_log.announce()
+    assert "must be an absolute path" in capsys.readouterr().err
+    assert protocol(namespace="personal").dispatch(search("unknown home"))[0] == 200
+
+
+def test_call_log_refuses_a_hard_link_to_another_file(monkeypatch, tmp_path, caplog):
+    import os
+
+    victim = tmp_path / "victim_rc"
+    victim.write_text("export PATH=$PATH\n", encoding="utf-8")
+    victim.chmod(0o644)
+    link = tmp_path / "calls.jsonl"
+    os.link(victim, link)
+    enable_log(monkeypatch, link)
+    with caplog.at_level(logging.ERROR, logger="graph_memory.mcp"):
+        assert protocol(namespace="personal").dispatch(search("$(touch x)"))[0] == 200
+    assert victim.read_text(encoding="utf-8") == "export PATH=$PATH\n"
+    assert victim.stat().st_mode & 0o777 == 0o644
+    assert "mcp call log failed" in caplog.text
+
+
 def test_call_log_refuses_links_fifos_and_loose_modes(monkeypatch, tmp_path, caplog):
     import os
 
@@ -762,6 +786,13 @@ def test_call_log_recall_debug_shapes():
     }
     compact = call_log.compact_output(evidence)
     assert compact["fact_ids"] == ["e1"] and compact["missing_fact_ids"] == ["e2"]
+
+    # A session feed's episode name is its first user message.
+    episode = {"episode_id": "ep", "status": "pending", "name": "Feed · my private first line"}
+    status = {"latest_episode": episode, "oldest_incomplete_episode": episode, "title": "x"}
+    compact = call_log.compact_output(status)
+    assert "private" not in json.dumps(compact) and "title" not in compact
+    assert compact["latest_episode"] == {"episode_id": "ep", "status": "pending"}
 
 
 def test_call_log_leaves_transcript_content_out_of_ingest(monkeypatch, tmp_path):
