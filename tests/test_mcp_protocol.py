@@ -856,3 +856,96 @@ def test_call_log_skips_a_directory_path_without_side_files(monkeypatch, tmp_pat
     enable_log(monkeypatch, target)
     assert protocol(namespace="personal").dispatch(search("dir"))[0] == 200
     assert sorted(p.name for p in tmp_path.iterdir()) == ["logs"]
+
+
+def test_call_log_pins_successful_live_reads_to_the_journal(monkeypatch, tmp_path):
+    path = tmp_path / "calls.jsonl"
+    enable_log(monkeypatch, path)
+    server = protocol(namespace="personal")
+    answering(server, "memory_search", {"status": "found", "as_of": "2026-09-01T00:00:00+00:00"})
+    heads = iter([7, 7, 8, 9, 0, 0])
+    monkeypatch.setattr(Protocol, "journal_head", lambda self, ns: next(heads))
+    server.dispatch(search("stable"))
+    server.dispatch(search("raced", request_id=2))
+    server.dispatch(search("x" * 2000 + " " * 50, request_id=3))
+    server.dispatch(search("pinned already", request_id=4, at_change=4))
+    server.dispatch(search("", request_id=5))  # rejected: no replay, no head read
+    stable, raced, padded, pinned, failed = logged(path)
+    assert stable["journal_head"] == 7
+    assert stable["replay"] == {
+        "at_change": 7,
+        "as_of": "2026-09-01T00:00:00+00:00",
+        "raced": False,
+        "intact": True,
+    }
+    assert raced["replay"]["raced"] is True
+    assert padded["journal_head"] == 0 and padded["replay"]["intact"] is False
+    assert "replay" not in pinned and "journal_head" not in pinned
+    assert "replay" not in failed
+
+    write = rpc("tools/call", name="memory_retract", arguments={"fact_id": "f", "reason": "r"})
+    monkeypatch.setattr(Protocol, "journal_head", lambda self, ns: pytest.fail("write read"))
+    server.dispatch(write)
+    monkeypatch.delenv("MEMORY_MCP_CALL_LOG")
+    monkeypatch.setattr(Protocol, "journal_head", lambda self, ns: pytest.fail("read while off"))
+    server.dispatch(search("off"))
+
+
+@pytest.mark.integration
+def test_logged_live_reads_replay_after_later_writes(graph, monkeypatch, tmp_path):
+    from .helpers import MYSQL, PG, PROJECT, ingest
+
+    store, ns = graph
+    fact = {"subject": PROJECT["key"], "relation": "uses_database", "slot": "primary"}
+    ingest(
+        store,
+        ns,
+        "s1",
+        "Atlas uses MySQL.",
+        [PROJECT, MYSQL],
+        [{**fact, "target": MYSQL["key"], "valid_at": "2026-09-01T00:00:00Z"}],
+    )
+    ingest(
+        store,
+        ns,
+        "s2",
+        "Atlas moved to Postgres.",
+        [PROJECT, PG],
+        [{**fact, "target": PG["key"], "valid_at": "2026-09-02T00:00:00Z"}],
+    )
+    path = tmp_path / "calls.jsonl"
+    enable_log(monkeypatch, path)
+    server = Protocol(MemoryService(store), ns)
+    calls = [
+        ("memory_search", {"question": "Atlas database", "include_history": True}),
+        ("memory_recall", {"entity": "Atlas", "question": "database", "detail": "full"}),
+        ("memory_latest", {"entity": "Atlas"}),
+        ("memory_search_entities", {"query": "atlas"}),
+    ]
+    live = []
+    for i, (name, arguments) in enumerate(calls):
+        message = rpc("tools/call", name=name, arguments=arguments)
+        message["id"] = i
+        live.append(server.dispatch(message)[1]["result"]["structuredContent"])
+    # A later write must not change what the replays return.
+    ingest(
+        store,
+        ns,
+        "s3",
+        "Atlas uses MySQL again.",
+        [PROJECT, MYSQL],
+        [{**fact, "target": MYSQL["key"], "valid_at": "2026-09-03T00:00:00Z"}],
+    )
+    monkeypatch.delenv("MEMORY_MCP_CALL_LOG")
+    for record, before in zip(logged(path), live, strict=True):
+        replay = record["replay"]
+        assert replay["raced"] is False and replay["intact"] is True
+        message = rpc("tools/call", name=record["tool"])
+        message["params"]["arguments"] = {
+            **record["arguments"],
+            **{k: v for k, v in replay.items() if k in ("at_change", "as_of")},
+        }
+        after = server.dispatch(message)[1]["result"]["structuredContent"]
+        for volatile in ("knowledge_history", "freshness", "revision", "as_of"):
+            before.pop(volatile, None), after.pop(volatile, None)
+        assert after == before

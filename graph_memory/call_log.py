@@ -36,13 +36,16 @@ KEY_LIMIT = 80
 ARG_JSON_LIMIT = 8000
 RESULT_JSON_LIMIT = 7000
 # Whole line, after everything else; a record past it keeps only who, when and how.
-LINE_LIMIT = 16_000
+# Room for a 2000-character non-ASCII question, which ensure_ascii writes 6 bytes each.
+LINE_LIMIT = 32_000
 # memory_recall returns up to 100 facts.
 ID_LIMIT = 100
 MAX_DEPTH = 6
 MARKER = "…[truncated]"
 # Server credentials a question or a result could quote back.
 SECRET_ENV = ("MEMORY_HTTP_TOKEN", "NEO4J_PASSWORD", "MEMORY_LLM_API_KEY", "TRANSCRIPT_MCP_TOKEN")
+# Read tools whose answer depends on as_of, which live reads default to now.
+_AS_OF_TOOLS = {"memory_search", "memory_recall", "memory_latest"}
 _LOCK = threading.Lock()
 _detail: ContextVar[dict | None] = ContextVar("mcp_call_detail", default=None)
 # Compiled credential pattern for this request; every _truncate scrubs with it first.
@@ -168,6 +171,11 @@ def start_call(message, headers=None):
         # Known before any text is cut, so a credential is never half-truncated.
         _pattern.set(_compile(secrets)),
     )
+
+
+def armed():
+    """Whether this request is being logged; extra work for the log waits on this."""
+    return _detail.get() is not None
 
 
 def note_call(**fields):
@@ -410,9 +418,39 @@ def _record(message, detail, status, response, started):
         result["http_status"] = status
     record["arguments"] = arguments
     record["result"] = _scrub(_cap_result(result), secrets)
+    replay = None if truncated else _replay(record, detail, arguments, result)
+    if replay:
+        record["replay"] = replay
     if truncated:
         record["arguments_truncated"] = True
     return _scrub(record, secrets)
+
+
+def _replay(record, detail, arguments, result):
+    """What to add to the logged arguments to ask the same read again at the same
+    journal change: `{"at_change": n, "as_of": t}`. Only for successful live reads.
+
+    `raced` is true when a write committed while the read ran, so the live answer may
+    hold changes the replay does not. `intact` is false when the logged arguments
+    differ from what the handler got (text cut or a credential redacted). Journal
+    replay is not guaranteed identical even then; see docs/operations.md.
+    """
+    head = detail.get("journal_head")
+    if not record["ok"] or not isinstance(head, int) or isinstance(head, bool):
+        return None
+    pin: dict[str, object] = {"at_change": head}
+    as_of = result.get("as_of")
+    if detail.get("tool") in _AS_OF_TOOLS and arguments.get("as_of") is None:
+        # Live reads default as_of to now; a replay would default to the change's time.
+        if not isinstance(as_of, str):
+            return None
+        pin["as_of"] = as_of
+    text = json.dumps(arguments, ensure_ascii=False)
+    return {
+        **pin,
+        "raced": detail.get("journal_head_after") != head,
+        "intact": MARKER not in text and "[redacted]" not in text,
+    }
 
 
 def _minimal(message, detail, status, response, started):
@@ -437,8 +475,8 @@ def _minimal(message, detail, status, response, started):
     client = _client(message, secrets)
     if client:
         record["client"] = client
-    for name in ("correlation_id", "note_failed"):
-        if detail.get(name):
+    for name in ("correlation_id", "note_failed", "journal_head"):
+        if detail.get(name) is not None:
             record[name] = detail[name]
     return _scrub(record, secrets)
 
@@ -498,10 +536,11 @@ def _bound_arguments(arguments, invalid, secrets):
     if invalid or not isinstance(arguments, dict):
         return {"_invalid": "arguments must be an object"}, False
     bounded = _walk(arguments, ARG_TEXT_LIMIT, secrets, drop_heavy=False)
-    if len(json.dumps(bounded, default=str)) <= ARG_JSON_LIMIT:
+    # Budgets count characters; the escaped line is bounded by LINE_LIMIT.
+    if _size(bounded) <= ARG_JSON_LIMIT:
         return bounded, False
     tighter = _walk(arguments, TEXT_LIMIT, secrets, drop_heavy=True)
-    if len(json.dumps(tighter, default=str)) <= ARG_JSON_LIMIT:
+    if _size(tighter) <= ARG_JSON_LIMIT:
         return tighter, True
     keys = [_key(k, secrets) for k in list(arguments)[:30]]
     return {"_truncated": True, "keys": keys}, True
@@ -776,7 +815,7 @@ def _cap_result(result):
 
 
 def _size(value):
-    return len(json.dumps(value, default=str))
+    return len(json.dumps(value, ensure_ascii=False, default=str))
 
 
 def _snapshot(value):

@@ -616,6 +616,14 @@ object:
 - arguments after namespace binding. Message `content` and evidence `quote`
   are omitted with their length; other large text is cut with `…[truncated]`
 - `ok` / `isError`, `timing_ms` for the whole call and `handler_ms` for the tool
+- for a successful live read that accepts `at_change`, `journal_head` (the
+  namespace's journal change when the read started) and `replay`:
+  `{at_change, as_of, raced, intact}`. Add `at_change` and `as_of` to the logged
+  `arguments` and send them to the same tool to ask the read again at that point,
+  after the graph has changed. `raced` is true when a write committed while the
+  read ran, so the live answer can hold a change the replay lacks. `intact` is
+  false when the logged arguments differ from what the tool got (text cut or a
+  credential redacted)
 - a compact result: `facts` as `[id, lane]` in the order the client got them,
   with `"related"` appended for a decision about another entity; `fact_ids`; the
   ids a result referred to but did not return (`conflict_fact_ids`,
@@ -633,7 +641,7 @@ Authorization headers and credential-shaped fields (`token`, `password`,
 including in keys, before any text is cut, when they are 8 characters or longer
 and not the public default `graph-memory`. Other headers are not treated as
 secrets, so a client cannot choose words to blank. Other credentials a user types into a question (an
-`sk-…` key pasted into a search) are written as typed. One line is at most 16,000
+`sk-…` key pasted into a search) are written as typed. One line is at most 32,000
 characters; a larger record keeps only the tool, id, status and timing.
 
 The file and a `<path>.lock` beside it are mode 0600. The process will not write
@@ -641,6 +649,14 @@ through a symbolic link, into a FIFO, or into a file another user owns. At 5 MiB
 the file is renamed to `<path>.1`, replacing the older copy, under a lock that the
 HTTP server and every stdio session share. If that rename fails, records are
 skipped rather than let the file grow.
+
+A replay reads the journal, not the live graph, and usually returns the same
+facts in the same order. Known differences: entity search ranks some keys with
+Unicode case or extra spaces differently when the alias index is in use; recall
+can pick different insights when more exist than `limit`, and can list
+`corroborating_fact_ids` or ambiguous candidates in another order; alias index
+rebuilds are not journaled; `freshness`, `revision` and `knowledge_history`
+differ by design, and `expand` and `suggested_call` carry the `at_change`.
 
 This file is not the Neo4j change journal. `MEMORY_JOURNAL_AUDIT` does not read
 it, and it is not worker JSONL or the OpenClaw debug log. Nothing here is sent

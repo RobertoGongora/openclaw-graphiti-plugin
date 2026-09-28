@@ -16,7 +16,7 @@ from pydantic import ValidationError
 
 from . import __version__
 from .admission import HistoryBusy, historical_read
-from .call_log import finish_call, note_call, start_call
+from .call_log import armed, finish_call, note_call, start_call
 
 VERSION = "2026-07-28"
 LEGACY_VERSIONS = ("2025-03-26", "2025-06-18", "2025-11-25")
@@ -124,6 +124,24 @@ class Protocol:
         else:
             arguments.setdefault("namespace", self.namespace)
         return arguments
+
+    def journal_head(self, namespace):
+        """The namespace's journal sequence, for replaying a logged live read. None when
+        the service has no store or journal; never fails the call."""
+        store = getattr(self.service, "store", None)
+        if store is None or not isinstance(namespace, str):
+            return None
+        try:
+            row = store.read(
+                lambda tx: tx.run(
+                    "MATCH (s:MemorySpace {id:$ns}) RETURN s.journal_sequence AS sequence",
+                    ns=namespace,
+                ).single()
+            )
+            return None if row is None else row["sequence"]
+        except Exception as exc:
+            log.error("mcp call log journal head failed: %s", type(exc).__name__)
+            return None
 
     def dispatch(self, message, headers=None):
         started = time.perf_counter()
@@ -276,12 +294,27 @@ class Protocol:
                     or getattr(request, "at_change", None) is not None
                 )
                 # Hold through projection/formatting, not just reconstruction.
+                # A logged live read records the journal change it ran at, so it can be
+                # replayed with at_change. Read before and after: a write committed in
+                # between means the replay is close but not exact.
+                pin = (
+                    armed()
+                    and name in READ_ONLY
+                    and not historical
+                    and "at_change" in type(request).model_fields
+                )
+                if pin:
+                    head = self.journal_head(request.namespace)
+                    pin = head is not None
+                    note_call(journal_head=head)
                 began = time.perf_counter()
                 try:
                     with historical_read() if historical else nullcontext():
                         output = handler(request)
                 finally:
                     note_call(handler_ms=(time.perf_counter() - began) * 1000)
+                if pin:
+                    note_call(journal_head_after=self.journal_head(request.namespace))
                 rendered_image = output.pop("image", None) if name == "memory_render" else None
                 note_call(output=output, image_omitted=rendered_image is not None)
                 result = {
