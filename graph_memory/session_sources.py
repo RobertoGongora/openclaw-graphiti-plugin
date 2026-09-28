@@ -523,12 +523,19 @@ def cursor_matches(path: Path, messages, count, stored):
     # Parsed again only on a mismatch. Inventory never advances a cursor, so an
     # idle file keeps its older hash; the answer is kept until the file changes.
     info = path.stat()
-    return legacy_match(str(path), info.st_mtime_ns, info.st_size, count, stored)
+    version = (info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+    ids = tuple(m["id"] if isinstance(m, dict) else m.id for m in messages[:count])
+    return legacy_match(str(path), version, ids, stored)
 
 
 @functools.lru_cache(maxsize=4096)
-def legacy_match(path, mtime_ns, size, count, stored):
-    prefix = [m.model_dump(mode="json") for m in list(records(Path(path), redact_v1))[:count]]
+def legacy_match(path, version, ids, stored):
+    """count is an index into the current parse, so the earlier parse must hold
+    the same message ids; shorter redacted text can move a chunk boundary."""
+    older = list(records(Path(path), redact_v1))[: len(ids)]
+    if tuple(m.id for m in older) != ids:
+        return False
+    prefix = [m.model_dump(mode="json") for m in older]
     return stored in (digest(prefix), digest([before_shell_results(m) for m in prefix]))
 
 
@@ -550,10 +557,11 @@ def as_stored(tx, namespace, session_id, path, selected, fed):
     changed = {ids[k].id: v for k, v in stored.items() if v != ids[k].content}
     if not changed:
         return selected
-    earlier = {m.id: m.content for m in records(path, redact_v1) if m.id in changed}
+    # The whole earlier message, so its artifact touches match what was stored too.
+    earlier = {m.id: m for m in records(path, redact_v1) if m.id in changed}
     return [
-        m.model_copy(update={"content": changed[m.id]})
-        if m.id in changed and earlier.get(m.id) == changed[m.id]
+        earlier[m.id]
+        if m.id in changed and m.id in earlier and earlier[m.id].content == changed[m.id]
         else m
         for m in selected
     ]

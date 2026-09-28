@@ -696,3 +696,65 @@ def test_feed_staged_under_earlier_redaction_keeps_appending(graph, tmp_path, mo
     )
     with pytest.raises(ValueError, match="changed"):
         feed_records(service, ns, p, "s")
+
+
+def test_earlier_redaction_that_moved_a_chunk_boundary_is_refused(graph, tmp_path, monkeypatch):
+    import functools
+
+    from graph_memory import session_sources
+    from graph_memory.importers import redact_v1
+
+    store, ns = graph
+    p = tmp_path / "s.jsonl"
+    p.write_text(claude("assistant", "x" * 23_950 + " GITHUB_TOKEN=" + "a" * 200))
+    service = MemoryService(store)
+    current = session_sources.records
+    monkeypatch.setattr(session_sources, "records", functools.partial(current, scrub=redact_v1))
+    feed_records(service, ns, p, "s")
+    monkeypatch.setattr(session_sources, "records", current)
+    with p.open("a") as f:
+        f.write(claude("user", "Atlas moved to Postgres."))
+    # Skipping the appended message silently would be worse than refusing.
+    with pytest.raises(ValueError, match="prefix changed"):
+        feed_records(service, ns, p, "s")
+
+
+def test_recarried_memory_write_keeps_one_observation(graph, tmp_path, monkeypatch):
+    import functools
+
+    from graph_memory import session_sources
+    from graph_memory.importers import redact_v1
+
+    store, ns = graph
+    p = tmp_path / "s.jsonl"
+    p.write_text(
+        claude(
+            "assistant",
+            [
+                {
+                    "type": "tool_use",
+                    "id": "w",
+                    "name": "Write",
+                    "input": {
+                        "file_path": "/x/memory/notes.md",
+                        "content": "GITHUB_TOKEN=abcd1234efgh",
+                    },
+                }
+            ],
+        )
+    )
+    service = MemoryService(store)
+    current = session_sources.records
+    monkeypatch.setattr(session_sources, "records", functools.partial(current, scrub=redact_v1))
+    feed_records(service, ns, p, "s")
+    monkeypatch.setattr(session_sources, "records", current)
+    for reply in ("First.", "Second."):
+        with p.open("a") as f:
+            f.write(claude("assistant", reply))
+        assert feed_records(service, ns, p, "s")["receipts"]
+    count = store.read(
+        lambda tx: tx.run(
+            "MATCH (o:MemoryArtifactObservation {namespace:$ns}) RETURN count(o) AS n", ns=ns
+        ).single()["n"]
+    )
+    assert count == 1
