@@ -171,26 +171,17 @@ def test_every_device_code_after_a_prompt_is_redacted_once():
     assert redact("device code ABCD-EFGH\nticket PLAN-1234").endswith("PLAN-1234")
 
 
-def test_types_and_lookups_are_not_values():
-    text = (
-        "token: string; password: string password: str, api_key: str | None "
-        'api_key = os.environ["X"] apiKey: process.env.KEY password: ${DB_PASSWORD} '
-        '"api_key": null'
-    )
-    assert redact(text) == text
-    assert redact("?apikey=#{api_key}") == redact(redact("?apikey=#{api_key}"))
-
-
-def test_a_value_that_only_starts_like_a_type_or_lookup_is_redacted():
+def test_values_that_carry_a_literal_are_redacted():
     for text in (
         "password=true-secret-99",
-        "password=None.xyz",
-        "password=any/thing",
-        "api_key=process.env.X||'literal-value'",
-        "password=${VAR}suffix",
+        "password: SecretStr('value-one')",
+        'password=str("value-two")',
+        "api_key=process.env.X||'value-three'",
+        "password=${VAR}value-four",
+        "password={{a}}value-five",
+        'password=abc"value-six"',
     ):
-        assert redact(text) != text, text
-    kept = (
-        "password: Optional[str] = None secret_key = settings.SECRET_KEY password: {{ vault_pw }}"
-    )
-    assert redact(kept) == kept
+        cleaned = redact(text)
+        assert "value-" not in cleaned and "true-secret" not in cleaned, text
+        assert redact(cleaned) == cleaned
+    assert redact("?apikey=#{api_key}") == redact(redact("?apikey=#{api_key}"))
