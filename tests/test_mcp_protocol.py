@@ -351,7 +351,11 @@ def test_call_log_omits_credentials_and_rejected_payloads(monkeypatch, tmp_path,
     server = protocol(namespace="personal")
     question = "What did we decide about CalPrivacy uploads?"
     leaked = f"{question} {TOKEN}"
-    answering(server, "memory_search", {"status": "found", "facts": [{"id": "fact-1", "lane": "current", "text": "ok"}]})
+    answering(
+        server,
+        "memory_search",
+        {"status": "found", "facts": [{"id": "fact-1", "lane": "current", "text": "ok"}]},
+    )
     message = search(leaked)
     message["params"]["arguments"]["token"] = TOKEN
     message["params"]["arguments"]["password"] = "hunter2-password"
@@ -463,7 +467,9 @@ def test_call_log_follows_http_and_stdio(monkeypatch, tmp_path, capsys):
             "Authorization": authorization,
         }
         try:
-            with urlopen(Request(url, data=json.dumps(message).encode(), headers=request_headers)) as response:
+            with urlopen(
+                Request(url, data=json.dumps(message).encode(), headers=request_headers)
+            ) as response:
                 return response.status, json.load(response)
         except HTTPError as exc:
             return exc.code, json.load(exc)
@@ -486,7 +492,12 @@ def test_call_log_follows_http_and_stdio(monkeypatch, tmp_path, capsys):
 
     stdio_path = tmp_path / "stdio.jsonl"
     enable_log(monkeypatch, stdio_path)
-    run_stdio(monkeypatch, capsys, server, json.dumps(search("stdio question", request_id=9)).encode() + b"\n")
+    run_stdio(
+        monkeypatch,
+        capsys,
+        server,
+        json.dumps(search("stdio question", request_id=9)).encode() + b"\n",
+    )
     assert logged(stdio_path)[0]["request_id"] == 9
     assert logged(stdio_path)[0]["arguments"]["question"] == "stdio question"
     assert logged(stdio_path)[0]["arguments"]["namespace"] == "personal"

@@ -117,9 +117,7 @@ def _note(detail, fields):
     if "output" in fields:
         output = fields.pop("output")
         detail["output_secrets"] = _secret_values(output)
-        detail["compact"] = compact_output(
-            output, image_omitted=bool(fields.get("image_omitted"))
-        )
+        detail["compact"] = compact_output(output, image_omitted=bool(fields.get("image_omitted")))
     if "validation" in fields:
         detail["validation"] = _validation(fields.pop("validation"))
     detail.update(fields)
@@ -140,7 +138,9 @@ def finish_call(token, message, headers, status, response, started):
             + _header_secrets(headers)
         )
         record = _record(message, detail, arguments, status, response, started, secrets)
-        append_jsonl(path, json.dumps(record, ensure_ascii=False, separators=(",", ":"), default=str))
+        append_jsonl(
+            path, json.dumps(record, ensure_ascii=False, separators=(",", ":"), default=str)
+        )
     except Exception as exc:
         # Type only: the record holds the question the operator opted into storing.
         log.error("mcp call log failed: %s", type(exc).__name__)
@@ -263,7 +263,11 @@ def _error_text(response):
     if not isinstance(result, dict) or not isinstance(result.get("content"), list):
         return None
     for block in result["content"]:
-        if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str):
+        if (
+            isinstance(block, dict)
+            and block.get("type") == "text"
+            and isinstance(block.get("text"), str)
+        ):
             return block["text"]
     return None
 
@@ -322,7 +326,12 @@ def _status_fields(value, depth=0):
     out = {}
     for key, item in value.items():
         name = str(key)
-        if _is_secret_key(name) or _is_blob_key(name) or name.lower() in _STATUS_SKIP or _is_image(item):
+        if (
+            _is_secret_key(name)
+            or _is_blob_key(name)
+            or name.lower() in _STATUS_SKIP
+            or _is_image(item)
+        ):
             continue
         if isinstance(item, bool) or item is None or isinstance(item, int):
             out[name] = item
@@ -334,11 +343,16 @@ def _status_fields(value, depth=0):
             child = _status_fields(item, depth + 1)
             if child:
                 out[name] = child
-        elif isinstance(item, list) and item and all(
-            isinstance(entry, (bool, int, float, str)) or entry is None for entry in item[:20]
+        elif (
+            isinstance(item, list)
+            and item
+            and all(
+                isinstance(entry, (bool, int, float, str)) or entry is None for entry in item[:20]
+            )
         ):
             out[name] = [
-                _truncate(entry, TEXT_LIMIT) if isinstance(entry, str) else entry for entry in item[:20]
+                _truncate(entry, TEXT_LIMIT) if isinstance(entry, str) else entry
+                for entry in item[:20]
             ]
             if len(item) > 20:
                 out[name + "_truncated"] = True
@@ -352,10 +366,23 @@ def _fact_ids(value, key=None):
             return found
         for name, item in value.items():
             if name in _ID_LIST_KEYS and isinstance(item, list):
-                found.extend(str(entry) for entry in item if isinstance(entry, (str, int)) and not isinstance(entry, bool))
-            elif name in {"fact_id", "latest_fact_id"} and isinstance(item, (str, int)) and not isinstance(item, bool):
+                found.extend(
+                    str(entry)
+                    for entry in item
+                    if isinstance(entry, (str, int)) and not isinstance(entry, bool)
+                )
+            elif (
+                name in {"fact_id", "latest_fact_id"}
+                and isinstance(item, (str, int))
+                and not isinstance(item, bool)
+            ):
                 found.append(str(item))
-            elif name == "id" and isinstance(item, (str, int)) and not isinstance(item, bool) and _factish(value):
+            elif (
+                name == "id"
+                and isinstance(item, (str, int))
+                and not isinstance(item, bool)
+                and _factish(value)
+            ):
                 found.append(str(item))
             elif name.lower() not in _BLOB_KEYS and not _is_image(item):
                 found.extend(_fact_ids(item, name))

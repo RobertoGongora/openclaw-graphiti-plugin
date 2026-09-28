@@ -140,8 +140,9 @@ class Protocol:
             else:
                 if isinstance(request_id, bool) or not isinstance(request_id, (str, int)):
                     request_id = None
-                status, response = 500, error(
-                    request_id, -32603, f"Internal error (request {request})"
+                status, response = (
+                    500,
+                    error(request_id, -32603, f"Internal error (request {request})"),
                 )
         finally:
             finish_call(token, message, headers, status, response, started)
