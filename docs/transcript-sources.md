@@ -207,7 +207,7 @@ they are never mistaken for Claude or Codex records. Every entry is read:
 | `message`, `role: user`, with `fromAgent`, or an `author` that is not `cursor_user` | `context`, gap `delegated_instruction`: another agent's message, never Roberto's claim |
 | `message`, `role: assistant` (`toAgent` when sent to another agent) | `assistant_report` |
 | `send-message`, `message.type: text` | `assistant_report`: the agent's reply |
-| `send-message`, `message.type: widget` | `assistant_report` with the prompt and options; `respondedValue` is a `user_assertion` with gap `widget_response` |
+| `send-message`, `message.type: widget` | `assistant_report` with the prompt and options; `respondedValue` is a `user_assertion` with gap `widget_response`, or `context` with gap `widget_skipped` when `widgetSkipped` or `widgetDismissed` is set |
 | `send-message` of any other type (`cursor-agent`, `secret-request`, `auto-review-approval`, `connector`) | a `context` note naming the type and its short fields; a secret's value is never in the entry |
 | `user-attachment` | `context`, gap `non_text_attachment`, with the file name |
 | `event`, `voice-call` | a `context` note (event type and action; call length and turns) |
@@ -215,6 +215,15 @@ they are never mistaken for Claude or Codex records. Every entry is read:
 
 `timestampMs` is Unix epoch milliseconds. `fromAgent.id` (or `name`) and
 `channel` are stored on the message, redacted like its text.
+
+Lines are append-only: the exporter never rewrites a written line. The app
+fills in a widget's answer after sending it, so the exporter may append the
+same entry `id` again once it changes. A repeated id yields only what was not
+read before (the answer); the prompt is not repeated. A line that does not have
+the expected shape becomes a `context` note with gap `malformed_native_entry`
+and the rest of the file is still read. Only `cursor_user` lines from the
+account owner are exported as the owner's; the parser does not compare
+`author.id` with the account.
 
 ### Claude-shaped and flat lines
 

@@ -922,3 +922,72 @@ def test_another_author_on_a_readtranscript_line_is_a_relay(tmp_path):
     )
     (m,) = records(path)
     assert (m.source_type, m.from_agent) == ("context", "agent-2")
+
+
+def test_malformed_readtranscript_entries_do_not_stop_the_file(tmp_path):
+    path = tmp_path / "grok-bot" / "desk.jsonl"
+    path.parent.mkdir()
+    bad = [
+        {"kind": "send-message", "message": {"type": "widget", "widget": {"options": 5}}},
+        {"kind": "send-message", "message": {"type": "secret-request", "secretRequest": "x"}},
+        {"kind": "send-message", "message": {"type": "auto-review-approval", "approval": [1]}},
+        {"kind": "send-message", "message": "text"},
+        {"kind": "event", "event": "x"},
+    ]
+    good = {
+        "kind": "message",
+        "role": "user",
+        "content": "Atlas uses MySQL.",
+        "isStreaming": False,
+        "timestampMs": 1_759_053_720_000,
+    }
+    path.write_text("".join(json.dumps(e) + "\n" for e in [*bad, good]))
+    parsed = list(records(path))
+    assert parsed[-1].source_type == "user_assertion"
+    assert all(m.source_type == "context" for m in parsed[:-1])
+
+
+def test_skipped_widget_value_is_not_an_answer(tmp_path):
+    path = tmp_path / "grok-bot" / "desk.jsonl"
+    path.parent.mkdir()
+    widget = {
+        "type": "widget",
+        "widget": {"prompt": "Deploy now?", "options": [{"label": "Yes", "value": "yes"}]},
+    }
+    path.write_text(
+        json.dumps(
+            {
+                "kind": "send-message",
+                "id": "w",
+                "message": widget,
+                "respondedValue": "yes",
+                "widgetSkipped": True,
+            }
+        )
+        + "\n"
+    )
+    prompt, value = records(path)
+    assert value.source_type == "context" and "widget_skipped" in value.gaps
+
+
+def test_a_widget_exported_again_once_answered_adds_only_the_answer(tmp_path):
+    path = tmp_path / "grok-bot" / "desk.jsonl"
+    path.parent.mkdir()
+    sent = {
+        "kind": "send-message",
+        "id": "w",
+        "seq": 5,
+        "timestampMs": 1_759_053_720_000,
+        "message": {"type": "widget", "widget": {"prompt": "Which database?"}},
+    }
+    path.write_text(json.dumps(sent) + "\n")
+    first = list(records(path))
+    assert [m.source_type for m in first] == ["assistant_report"]
+    with path.open("a") as f:
+        f.write(json.dumps({**sent, "respondedValue": "Postgres"}) + "\n")
+    again = list(records(path))
+    # The prefix is unchanged, so the feed cursor resumes; only the answer is new.
+    assert again[: len(first)] == first
+    assert [(m.role, m.source_type, m.content) for m in again[len(first) :]] == [
+        ("user", "user_assertion", "Postgres")
+    ]

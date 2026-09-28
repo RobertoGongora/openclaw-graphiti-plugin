@@ -244,15 +244,48 @@ def described(kind, parts):
     return f"[Grok Bot {kind}{': ' + shown if shown else ''}]"
 
 
-def from_readtranscript(item):
+def obj(value):
+    return value if isinstance(value, dict) else {}
+
+
+def from_readtranscript(item, seen):
     """A ReadTranscript entry as a record the parser reads. Text keeps its speaker;
     every other entry becomes a note, so nothing in the transcript is dropped
-    unseen. None only for a partial streaming message, which a final one follows."""
+    unseen. None for a partial streaming message, which a final one follows, and
+    for an entry exported again with nothing new.
+
+    seen maps an entry id to the parts already read. The app changes a widget
+    after sending it (the answer arrives later), so an exporter may append it
+    twice; only the part not read before is emitted, and earlier lines never
+    change meaning."""
+    try:
+        return readtranscript_entry(item, seen)
+    except (TypeError, AttributeError, ValueError):
+        # One malformed line must not stop the file.
+        return {
+            "type": "grok-native",
+            "timestamp": record_time(item),
+            "entries": [
+                (
+                    "context",
+                    {
+                        "role": "note",
+                        "content": described(str(item.get("kind")), []),
+                        "grok_gap": "malformed_native_entry",
+                    },
+                )
+            ],
+        }
+
+
+def readtranscript_entry(item, seen):
     kind = item.get("kind")
+    key = item.get("id") if isinstance(item.get("id"), str) else None
+    done = seen.setdefault(key, set()) if key else set()
     shaped = {"type": "grok-native", "timestamp": record_time(item)}
-    for key in ("fromAgent", "channel"):
-        if key in item:
-            shaped[key] = item[key]
+    for field in ("fromAgent", "channel"):
+        if field in item:
+            shaped[field] = item[field]
     author = item.get("author")
     if (
         isinstance(author, dict)
@@ -262,23 +295,29 @@ def from_readtranscript(item):
         # Any author that is not the account's own user is another speaker.
         shaped["fromAgent"] = {"id": author.get("id"), "name": author.get("name")}
     entries = []
-    message = item.get("message") if isinstance(item.get("message"), dict) else {}
+
+    def add(part, entry):
+        if part not in done:
+            done.add(part)
+            entries.append(entry)
+
+    message = obj(item.get("message"))
     if kind == "message":
-        if item.get("isStreaming"):
+        if item.get("isStreaming") is True:
             return None
         role = item.get("role")
         if role in {"user", "assistant"}:
-            entries.append(("text", {"role": role, "content": item.get("content") or ""}))
+            add("text", ("text", {"role": role, "content": item.get("content") or ""}))
         else:
-            entries.append(("context", {"role": "note", "content": described(kind, [])}))
+            add("text", ("context", {"role": "note", "content": described(kind, [])}))
     elif kind == "send-message" and message.get("type") == "text":
-        entries.append(("text", {"role": "assistant", "content": message.get("content") or ""}))
+        add("text", ("text", {"role": "assistant", "content": message.get("content") or ""}))
     elif kind == "send-message" and message.get("type") == "widget":
-        widget = message.get("widget")
-        widget = widget if isinstance(widget, dict) else {}
-        options = [
+        widget = obj(message.get("widget"))
+        options = widget.get("options")
+        labels = [
             o.get("label") or o.get("value")
-            for o in widget.get("options") or []
+            for o in (options if isinstance(options, list) else [])
             if isinstance(o, dict)
         ]
         asked = "\n".join(
@@ -286,37 +325,52 @@ def from_readtranscript(item):
             for x in (
                 widget.get("prompt"),
                 widget.get("helpText"),
-                *(f"- {o}" for o in options if isinstance(o, str)),
+                *(f"- {o}" for o in labels if isinstance(o, str)),
             )
             if isinstance(x, str) and x
         )
-        entries.append(("text", {"role": "assistant", "content": asked}))
+        add(
+            "prompt",
+            ("text", {"role": "assistant", "content": asked})
+            if asked
+            else ("context", {"role": "note", "content": described("widget", [])}),
+        )
         answer = item.get("respondedValue")
         if isinstance(answer, str) and answer.strip():
-            # The person's answer to the question above, as they gave it.
-            entries.append(
-                ("text", {"role": "user", "content": answer, "grok_gap": "widget_response"})
-            )
+            if item.get("widgetSkipped") or item.get("widgetDismissed"):
+                # A skipped widget keeps a value nobody chose.
+                add(
+                    "answer",
+                    ("context", {"role": "note", "content": answer, "grok_gap": "widget_skipped"}),
+                )
+            else:
+                # The person's answer to the question above, as they gave it.
+                add(
+                    "answer",
+                    ("text", {"role": "user", "content": answer, "grok_gap": "widget_response"}),
+                )
     elif kind == "send-message":
         kind_of = message.get("type") or "message"
+        request = obj(message.get("secretRequest"))
+        approval = obj(message.get("approval"))
         detail = {
             "cursor-agent": [("title", message.get("title")), ("agent", message.get("bcId"))],
             "secret-request": [
-                ("label", (message.get("secretRequest") or {}).get("label")),
+                ("label", request.get("label")),
                 ("provided", str(item.get("secretProvided", ""))),
             ],
             "auto-review-approval": [
-                (k, (message.get("approval") or {}).get(k))
-                for k in ("summary", "reason", "status", "proposedRule")
+                (k, approval.get(k)) for k in ("summary", "reason", "status", "proposedRule")
             ],
             "connector": [
                 ("connector", message.get("connector")),
                 ("variant", message.get("variant")),
             ],
-        }.get(kind_of, [])
-        entries.append(("context", {"role": "note", "content": described(kind_of, detail)}))
+        }.get(str(kind_of), [])
+        add("note", ("context", {"role": "note", "content": described(str(kind_of), detail)}))
     elif kind == "user-attachment":
-        entries.append(
+        add(
+            "note",
             (
                 "attachment",
                 {
@@ -325,16 +379,18 @@ def from_readtranscript(item):
                     + str(item.get("file_name") or "file")
                     + "]",
                 },
-            )
+            ),
         )
     elif kind == "event":
-        event = item.get("event") if isinstance(item.get("event"), dict) else {}
+        event = obj(item.get("event"))
         parts = [(k, event.get(k)) for k in ("type", "action", "automationName")]
-        entries.append(("context", {"role": "note", "content": described("event", parts)}))
+        add("note", ("context", {"role": "note", "content": described("event", parts)}))
     elif kind == "voice-call":
-        call = item.get("call") if isinstance(item.get("call"), dict) else {}
+        call = obj(item.get("call"))
         parts = [(k, call.get(k)) for k in ("durationMs", "turnCount", "ending")]
-        entries.append(("context", {"role": "note", "content": described("voice call", parts)}))
+        add("note", ("context", {"role": "note", "content": described("voice call", parts)}))
+    if not entries:
+        return None
     shaped["entries"] = entries
     return shaped
 
@@ -346,6 +402,7 @@ def records(path: Path, scrub=redact):
     cwd = None
     delegated = "subagents" in path.parts
     automated = False
+    native_seen = {}
     for line_number, line in enumerate(path.open(), 1):
         if not line.endswith("\n"):
             break  # writer may still be appending this record
@@ -358,7 +415,7 @@ def records(path: Path, scrub=redact):
         if not isinstance(item, dict):
             continue
         if is_readtranscript(item):
-            item = from_readtranscript(item)
+            item = from_readtranscript(item, native_seen)
             if item is None:
                 continue
         elif is_grok_native(item):
