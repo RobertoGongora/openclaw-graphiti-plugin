@@ -13,8 +13,9 @@
   keys (`"api_key": "…"`), prefixed names (`OPENAI_API_KEY=`, `GITHUB_TOKEN=`),
   webhook keys and secrets, `Authorization: Basic`, unterminated private keys,
   and `token`/`key`/`access_token`/`client_secret` query and fragment values.
-  Feed cursors written with the earlier redaction still resume; the text already
-  stored keeps its earlier redaction.
+  Feed cursors written with the earlier redaction still resume, and messages
+  already stored keep their earlier text when a later batch carries them again
+  as context.
 
 ### Fixed
 

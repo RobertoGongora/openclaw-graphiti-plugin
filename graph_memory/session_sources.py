@@ -7,6 +7,7 @@ user-role line from another agent is a relay, not a direct assertion.
 """
 
 import ast
+import functools
 import json
 import posixpath
 import re
@@ -519,8 +520,43 @@ def cursor_matches(path: Path, messages, count, stored):
 
     if stored in hashes(messages):
         return True
-    # Parsed again only on a mismatch, which is rare once cursors advance.
-    return stored in hashes(list(records(path, redact_v1)))
+    # Parsed again only on a mismatch. Inventory never advances a cursor, so an
+    # idle file keeps its older hash; the answer is kept until the file changes.
+    info = path.stat()
+    return legacy_match(str(path), info.st_mtime_ns, info.st_size, count, stored)
+
+
+@functools.lru_cache(maxsize=4096)
+def legacy_match(path, mtime_ns, size, count, stored):
+    prefix = [m.model_dump(mode="json") for m in list(records(Path(path), redact_v1))[:count]]
+    return stored in (digest(prefix), digest([before_shell_results(m) for m in prefix]))
+
+
+def as_stored(tx, namespace, session_id, path, selected, fed):
+    """Already-fed messages as the graph holds them. A message stored under the
+    earlier redaction keeps that text, so carrying it again as context does not
+    read as a changed source. Any other difference is left for the source graph
+    to refuse."""
+    ids = {digest([namespace, session_id, m.id]): m for m in selected if m.id in fed}
+    if not ids:
+        return selected
+    stored = {
+        r["id"]: r["content"]
+        for r in tx.run(
+            "MATCH (m:MemoryMessage) WHERE m.id IN $ids RETURN m.id AS id, m.content AS content",
+            ids=list(ids),
+        )
+    }
+    changed = {ids[k].id: v for k, v in stored.items() if v != ids[k].content}
+    if not changed:
+        return selected
+    earlier = {m.id: m.content for m in records(path, redact_v1) if m.id in changed}
+    return [
+        m.model_copy(update={"content": changed[m.id]})
+        if m.id in changed and earlier.get(m.id) == changed[m.id]
+        else m
+        for m in selected
+    ]
 
 
 def before_shell_results(message):
@@ -631,8 +667,10 @@ def feed_records(
                 "Transcript prefix changed; preserve old evidence and review a new source revision"
             )
         receipts = []
+        fed = {m.id for m in messages[:count]}
         while count < len(messages) and len(receipts) < max_batches:
             end, selected = batch(messages, count)
+            selected = as_stored(tx, namespace, session_id, path, selected, fed)
             t = Transcript(
                 namespace=namespace,
                 session_id=session_id,

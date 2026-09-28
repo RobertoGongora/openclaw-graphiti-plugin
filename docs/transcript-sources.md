@@ -231,7 +231,10 @@ A line that is not Claude or Codex JSONL is read when it sets
 ```
 
 `timestampMs` is Unix epoch milliseconds; `timestamp`, when present, wins. A
-user line with `fromAgent` is a relay, same as `isSidechain`. Lines with no role or no text are skipped.
+user line with `fromAgent` is a relay, same as `isSidechain`. As with
+Claude-shaped lines, a flat `user` line without `fromAgent` is read as
+Roberto's, whatever `fromUser` says; the exporter adds `fromAgent` to anyone
+else's line or drops it. Lines with no role or no text are skipped.
 Widgets, events, voice, attachments, and streaming chunks are not this
 contract; the exporter drops them. A full ReadTranscript sealed-union adapter
 is a follow-up if the exporter stops writing these lines.

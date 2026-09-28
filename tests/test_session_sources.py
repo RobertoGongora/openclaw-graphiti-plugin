@@ -649,3 +649,50 @@ def test_episode_format_follows_the_root_label(tmp_path):
     nested = tmp_path / "claude" / "grok-bot" / "s.jsonl"
     assert episode_format(nested, "claude:grok-bot/s.jsonl") == "session-records-v1"
     assert episode_format(nested) == "grok-bot"
+
+
+def test_feed_staged_under_earlier_redaction_keeps_appending(graph, tmp_path, monkeypatch):
+    import functools
+
+    from graph_memory import session_sources
+    from graph_memory.importers import redact_v1
+
+    store, ns = graph
+    p = tmp_path / "s.jsonl"
+    p.write_text(
+        claude("user", "export GITHUB_TOKEN=abcd1234efgh then run it")
+        + claude("user", 'curl -H "Authorization: Bearer $HARVEST_TOKEN" x')
+    )
+    service = MemoryService(store)
+    current = session_sources.records
+    monkeypatch.setattr(session_sources, "records", functools.partial(current, scrub=redact_v1))
+    fid = feed_records(service, ns, p, "s")["feed_id"]
+    monkeypatch.setattr(session_sources, "records", current)
+    for reply in ("First.", "Second."):
+        with p.open("a") as f:
+            f.write(claude("assistant", reply))
+        assert feed_records(service, ns, p, "s")["receipts"]
+    cursor = store.read(
+        lambda tx: tx.run(
+            "MATCH (f:MemoryFeed {id:$id}) RETURN f.message_count AS n", id=fid
+        ).single()["n"]
+    )
+    assert cursor == 4
+    # Stored text keeps its earlier redaction; nothing was rewritten in place.
+    stored = store.read(
+        lambda tx: [
+            r["c"]
+            for r in tx.run("MATCH (m:MemoryMessage {namespace:$ns}) RETURN m.content AS c", ns=ns)
+        ]
+    )
+    assert any("abcd1234efgh" in c for c in stored)
+    # A genuinely different earlier message is still refused.
+    p.write_text(
+        claude("user", "export GITHUB_TOKEN=zzzz9999yyyy then run it")
+        + claude("user", 'curl -H "Authorization: Bearer $HARVEST_TOKEN" x')
+        + claude("assistant", "First.")
+        + claude("assistant", "Second.")
+        + claude("assistant", "Third.")
+    )
+    with pytest.raises(ValueError, match="changed"):
+        feed_records(service, ns, p, "s")
