@@ -47,15 +47,16 @@ SECRET_KEYS = (
 QUERY_KEYS = (
     r"(?:token|key|api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|client[_-]?secret|secret)"
 )
+# A value runs to whitespace, a comma or a semicolon, as redact_v1's did, so a
+# quote or bracket inside a secret does not end it early. Closers the
+# surrounding JSON or code needs (a final quote, bracket or brace) are left.
+QUOTED = r"(?:\\\"(?:(?!\\\")[^\n])*+\\\"|\"[^\"\n]*+\"|'[^'\n]*+')"
+MORE = r"[^\s,;]*[^\s,;\"'}\])\\]"
 ASSIGNMENT = re.compile(
     r"(?i)((?<![A-Za-z0-9])" + SECRET_KEYS + r"\b(?:\\?[\"'])?\s*[=:]\s*"
     r"(?:(?:Bearer|Basic|Token)\s+)?)(?!(?:\\?[\"'])?\[REDACTED)"
     r"(?!(?i:Bearer|Basic|Token)\s)"
-    # A quoted value; else a bare one, which runs on through quoted parts and
-    # template braces (abc"x", {{a}}x). Possessive, so brace runs cannot backtrack.
-    r"(\\\"(?:(?!\\\")[^\n])*\\\"|\"[^\"\n]*\"|'[^'\n]*'"
-    r"|(?:[^\s,;\"'}\]\\]|\\(?![\"'])|\}+(?=[^\s,;\"'}\]\\])"
-    r"|\\\"(?:(?!\\\")[^\n])*\\\"|\"[^\"\n]*\"|'[^'\n]*')++)"
+    rf"((?:{QUOTED}(?:{MORE})?|{MORE}))"
 )
 QUERY = re.compile(r"(?i)([?&#]" + QUERY_KEYS + r"=)(?!\[REDACTED)[^&#\s\"'<>]+")
 # GitHub device-flow user codes (XXXX-XXXX), only shortly after a prompt for
@@ -71,7 +72,8 @@ DEVICE_CODE = re.compile(r"(?<![\w-])[A-Z0-9]{4}-[A-Z0-9]{4}(?![\w-])")
 def assignment(m):
     value = m[2]
     quote = '\\"' if value.startswith('\\"') else value[0] if value[0] in "\"'" else ""
-    return m[1] + quote + "[REDACTED]" + quote
+    close = quote if quote and len(value) >= 2 * len(quote) and value.endswith(quote) else ""
+    return m[1] + quote + "[REDACTED]" + close
 
 
 def device_codes(text):

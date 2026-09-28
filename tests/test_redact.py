@@ -185,3 +185,27 @@ def test_values_that_carry_a_literal_are_redacted():
         assert "value-" not in cleaned and "true-secret" not in cleaned, text
         assert redact(cleaned) == cleaned
     assert redact("?apikey=#{api_key}") == redact(redact("?apikey=#{api_key}"))
+
+
+def test_a_quote_or_bracket_inside_a_secret_does_not_end_it():
+    import json
+    import random
+    import string
+
+    from graph_memory.importers import redact_v1
+
+    for text in (
+        "password=pa]ss99word",
+        'secret: Xk"9mQ!2zP',
+        'password="abc"def123',
+        json.dumps({"command": 'export API_KEY=cec!3bg"hc2Z'}),
+    ):
+        cleaned = redact(text)
+        assert not any(part in cleaned for part in ("ss99", "9mQ", "def123", "hc2Z")), text
+    rng = random.Random(1)
+    chars = string.ascii_letters + string.digits + "!@#$%^&*()[]{}\"'<>/\\|-_+=.:"
+    for _ in range(2_000):
+        secret = "".join(rng.choice(chars) for _ in range(rng.randint(6, 16)))
+        text = f"password={secret}"
+        # Nothing the earlier redaction removed may come back.
+        assert secret in redact_v1(text) or secret not in redact(text)
