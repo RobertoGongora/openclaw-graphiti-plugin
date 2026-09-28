@@ -758,3 +758,167 @@ def test_recarried_memory_write_keeps_one_observation(graph, tmp_path, monkeypat
         ).single()["n"]
     )
     assert count == 1
+
+
+def test_grok_bot_readtranscript_entries_are_all_read(tmp_path):
+    """Entry shapes as the Grok Bot app replicates them; the text is invented."""
+    path = tmp_path / "grok-bot" / "desk.jsonl"
+    path.parent.mkdir()
+    ms = 1_759_053_720_000
+    entries = [
+        {
+            "kind": "message",
+            "id": "u1",
+            "role": "user",
+            "content": "Atlas uses MySQL.",
+            "isStreaming": False,
+            "timestampMs": ms,
+            "requestId": "r",
+            "seq": 1,
+        },
+        {
+            "kind": "send-message",
+            "id": "t1",
+            "message": {"type": "text", "content": "Noted."},
+            "timestampMs": ms + 1,
+            "requestId": "r",
+            "seq": 2,
+        },
+        {
+            "kind": "message",
+            "id": "u2",
+            "role": "user",
+            "content": "Atlas uses MySQL.",
+            "fromAgent": {"id": "agent-gm", "name": "graph-memory"},
+            "isStreaming": False,
+            "timestampMs": ms + 2,
+            "requestId": "r",
+            "seq": 3,
+        },
+        {
+            "kind": "message",
+            "id": "a1",
+            "role": "assistant",
+            "content": "Checked.",
+            "toAgent": {"id": "agent-gm", "name": "graph-memory", "kind": "agent"},
+            "isStreaming": False,
+            "timestampMs": ms + 3,
+            "requestId": "r",
+            "seq": 4,
+        },
+        {
+            "kind": "send-message",
+            "id": "w1",
+            "respondedValue": "Postgres",
+            "message": {
+                "type": "widget",
+                "widget": {
+                    "prompt": "Which database?",
+                    "options": [{"label": "MySQL", "value": "mysql"}],
+                },
+            },
+            "timestampMs": ms + 4,
+            "requestId": "r",
+            "seq": 5,
+        },
+        {
+            "kind": "message",
+            "id": "v1",
+            "role": "user",
+            "content": "Ship it Friday.",
+            "author": {"kind": "cursor_user", "id": "github|me", "name": "the call"},
+            "fromUser": {"name": "the call"},
+            "channel": "voice:call-1",
+            "isStreaming": False,
+            "timestampMs": ms + 5,
+            "seq": 6,
+        },
+        {
+            "kind": "message",
+            "id": "s1",
+            "role": "assistant",
+            "content": "Parti",
+            "isStreaming": True,
+            "timestampMs": ms + 6,
+            "seq": 7,
+        },
+        {
+            "kind": "send-message",
+            "id": "k1",
+            "secretProvided": True,
+            "message": {"type": "secret-request", "secretRequest": {"label": "GitHub token"}},
+            "timestampMs": ms + 7,
+            "seq": 8,
+        },
+        {
+            "kind": "user-attachment",
+            "id": "f1",
+            "file_name": "shot.png",
+            "file_path": "/tmp/shot.png",
+            "timestampMs": ms + 8,
+            "seq": 9,
+        },
+        {
+            "kind": "event",
+            "id": "e1",
+            "event": {"type": "automation", "action": "deleted", "automationName": "standup"},
+            "timestampMs": ms + 9,
+            "seq": 10,
+        },
+        {
+            "kind": "voice-call",
+            "id": "c1",
+            "call": {"durationMs": 60_000, "turnCount": 4},
+            "timestampMs": ms + 10,
+            "seq": 11,
+        },
+    ]
+    path.write_text("".join(json.dumps(e) + "\n" for e in entries))
+    parsed = list(records(path))
+    shape = [(m.record_id.split("-")[1], m.role, m.source_type) for m in parsed]
+    assert shape == [
+        ("1", "user", "user_assertion"),
+        ("2", "assistant", "assistant_report"),
+        ("3", "user", "context"),
+        ("4", "assistant", "assistant_report"),
+        ("5", "assistant", "assistant_report"),
+        ("5", "user", "user_assertion"),
+        ("6", "user", "user_assertion"),
+        # line 7 is a partial streaming message
+        ("8", "note", "context"),
+        ("9", "note", "context"),
+        ("10", "note", "context"),
+        ("11", "note", "context"),
+    ]
+    assert all(m.timestamp is not None for m in parsed)
+    relay = parsed[2]
+    assert "delegated_instruction" in relay.gaps and relay.from_agent == "agent-gm"
+    assert "Which database?" in parsed[4].content and "MySQL" in parsed[4].content
+    assert parsed[5].content == "Postgres" and "widget_response" in parsed[5].gaps
+    assert "Parti" not in "".join(m.content for m in parsed)
+    assert "GitHub token" in parsed[7].content and "non_text_attachment" in parsed[8].gaps
+    sourced = grok_transcript(parsed)
+    assert sourced.can_yield_facts()
+    extraction(parsed[0].id).validate_evidence(sourced)
+
+
+def test_another_author_on_a_readtranscript_line_is_a_relay(tmp_path):
+    path = tmp_path / "grok-bot" / "desk.jsonl"
+    path.parent.mkdir()
+    path.write_text(
+        json.dumps(
+            {
+                "kind": "message",
+                "id": "x",
+                "role": "user",
+                "content": "Deploy is done.",
+                "author": {"kind": "agent", "id": "agent-2", "name": "homelab"},
+                "isStreaming": False,
+                "timestampMs": 1_759_053_720_000,
+                "seq": 1,
+            }
+        )
+        + "\n"
+    )
+    (m,) = records(path)
+    assert (m.source_type, m.from_agent) == ("context", "agent-2")

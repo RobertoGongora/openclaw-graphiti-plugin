@@ -195,49 +195,50 @@ Claude or Codex root does not. Missing timestamps stay null, and so does a
 timestamp without a time zone or one that does not parse; the rest of the file
 is still read. File mtime is not an event time.
 
-### Claude-shaped lines
+### ReadTranscript entries
 
-This is the contract the exporter writes. Each complete line is Claude Code JSONL:
+The exporter appends the app's ReadTranscript entries unchanged, one JSON
+object per line, ordered by `seq`. These lines carry `kind` and no `type`, so
+they are never mistaken for Claude or Codex records. Every entry is read:
+
+| Entry | Stored as |
+|---|---|
+| `message`, `role: user`, no `fromAgent` | `user_assertion`: Roberto's own words, typed or spoken (`fromUser` / `author.kind: cursor_user` on a voice call) |
+| `message`, `role: user`, with `fromAgent`, or an `author` that is not `cursor_user` | `context`, gap `delegated_instruction`: another agent's message, never Roberto's claim |
+| `message`, `role: assistant` (`toAgent` when sent to another agent) | `assistant_report` |
+| `send-message`, `message.type: text` | `assistant_report`: the agent's reply |
+| `send-message`, `message.type: widget` | `assistant_report` with the prompt and options; `respondedValue` is a `user_assertion` with gap `widget_response` |
+| `send-message` of any other type (`cursor-agent`, `secret-request`, `auto-review-approval`, `connector`) | a `context` note naming the type and its short fields; a secret's value is never in the entry |
+| `user-attachment` | `context`, gap `non_text_attachment`, with the file name |
+| `event`, `voice-call` | a `context` note (event type and action; call length and turns) |
+| `message` with `isStreaming: true` | skipped: the final message follows |
+
+`timestampMs` is Unix epoch milliseconds. `fromAgent.id` (or `name`) and
+`channel` are stored on the message, redacted like its text.
+
+### Claude-shaped and flat lines
+
+Claude Code JSONL lines are also read under this root:
 
 ```json
 {"type":"user","timestamp":"2026-09-28T12:00:00Z","channel":"desk","message":{"role":"user","content":[{"type":"text","text":"Atlas uses MySQL."}]}}
-{"type":"assistant","timestamp":"2026-09-28T12:01:00Z","channel":"desk","message":{"role":"assistant","content":[{"type":"text","text":"Atlas uses MySQL."}]}}
 ```
 
-- A `user` line without `isSidechain` and without `fromAgent` is a `user_assertion`:
-  Roberto's own words. The exporter writes a plain `user` line only for his
-  messages. A message from anyone else, human or agent, is written with
-  `fromAgent` (or dropped). The parser does not check `fromUser` against an owner
-  id, so a `fromUser` line without `fromAgent` is read as his.
-- An `assistant` line is an `assistant_report`, including when it names `fromAgent`.
-  That report can yield a fact. An unvalidated assistant claim stays uncertain
-  and undated. It is not a user assertion.
-- `isSidechain: true`, or `fromAgent` with any value other than null on a `user`
-  line, is `context` with gap `delegated_instruction`. Those relays cannot
-  originate facts.
-- `channel` and `fromAgent.id` (or `fromAgent.name` when there is no id, or
-  `unknown-agent` when neither is a string) are stored on the message, redacted
-  like the message text.
-
-### Flat grok-bot lines
-
-A line that is not Claude or Codex JSONL is read when it sets
-`source_format` or `source` to `grok-bot`, or when it has `role` or text
-`content` plus `fromAgent`, `fromUser`, or `channel`:
+So are flat lines that set `source_format` or `source` to `grok-bot`, or have
+`role` or text `content` plus `fromAgent`, `fromUser` or `channel`:
 
 ```json
-{"source_format":"grok-bot","role":"assistant","content":"Atlas uses MySQL.","timestamp":"2026-09-28T12:01:00Z","channel":"desk"}
 {"source_format":"grok-bot","role":"user","content":"Check Atlas.","fromAgent":{"id":"fleet-agent","name":"Fleet"},"channel":"fleet","timestampMs":1759053720000}
 ```
 
-`timestampMs` is Unix epoch milliseconds; `timestamp`, when present, wins. A
-user line with `fromAgent` is a relay, same as `isSidechain`. As with
-Claude-shaped lines, a flat `user` line without `fromAgent` is read as
-Roberto's, whatever `fromUser` says; the exporter adds `fromAgent` to anyone
-else's line or drops it. Lines with no role or no text are skipped.
-Widgets, events, voice, attachments, and streaming chunks are not this
-contract; the exporter drops them. A full ReadTranscript sealed-union adapter
-is a follow-up if the exporter stops writing these lines.
+- A `user` line without `isSidechain` and without `fromAgent` is a
+  `user_assertion`.
+- `isSidechain: true`, or `fromAgent` with any value other than null on a
+  `user` line, is `context` with gap `delegated_instruction`. `fromAgent`
+  without a string id or name is stored as `unknown-agent`.
+- An `assistant` line is an `assistant_report`, including when it names
+  `fromAgent`. An unvalidated assistant claim stays uncertain and undated.
+- `timestamp`, when present, wins over `timestampMs`.
 
 The hourly path is this root. MCP `memory_ingest` / Remember is not the feed.
 The box exporter and its watermark (`desk-chat-graph-memory-ingest`) stay

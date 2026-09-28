@@ -229,6 +229,116 @@ def as_claude(item):
     return shaped
 
 
+# Grok Bot ReadTranscript entries, as the app replicates them. They carry `kind`
+# and never `type`, which every Claude and Codex record has.
+NATIVE_KINDS = {"message", "send-message", "user-attachment", "event", "voice-call"}
+
+
+def is_readtranscript(item):
+    return "type" not in item and item.get("kind") in NATIVE_KINDS
+
+
+def described(kind, parts):
+    """A bracketed note for an entry that is not conversational text."""
+    shown = "; ".join(f"{k}: {v}" for k, v in parts if isinstance(v, (str, int)) and v != "")
+    return f"[Grok Bot {kind}{': ' + shown if shown else ''}]"
+
+
+def from_readtranscript(item):
+    """A ReadTranscript entry as a record the parser reads. Text keeps its speaker;
+    every other entry becomes a note, so nothing in the transcript is dropped
+    unseen. None only for a partial streaming message, which a final one follows."""
+    kind = item.get("kind")
+    shaped = {"type": "grok-native", "timestamp": record_time(item)}
+    for key in ("fromAgent", "channel"):
+        if key in item:
+            shaped[key] = item[key]
+    author = item.get("author")
+    if (
+        isinstance(author, dict)
+        and author.get("kind") != "cursor_user"
+        and shaped.get("fromAgent") is None
+    ):
+        # Any author that is not the account's own user is another speaker.
+        shaped["fromAgent"] = {"id": author.get("id"), "name": author.get("name")}
+    entries = []
+    message = item.get("message") if isinstance(item.get("message"), dict) else {}
+    if kind == "message":
+        if item.get("isStreaming"):
+            return None
+        role = item.get("role")
+        if role in {"user", "assistant"}:
+            entries.append(("text", {"role": role, "content": item.get("content") or ""}))
+        else:
+            entries.append(("context", {"role": "note", "content": described(kind, [])}))
+    elif kind == "send-message" and message.get("type") == "text":
+        entries.append(("text", {"role": "assistant", "content": message.get("content") or ""}))
+    elif kind == "send-message" and message.get("type") == "widget":
+        widget = message.get("widget")
+        widget = widget if isinstance(widget, dict) else {}
+        options = [
+            o.get("label") or o.get("value")
+            for o in widget.get("options") or []
+            if isinstance(o, dict)
+        ]
+        asked = "\n".join(
+            x
+            for x in (
+                widget.get("prompt"),
+                widget.get("helpText"),
+                *(f"- {o}" for o in options if isinstance(o, str)),
+            )
+            if isinstance(x, str) and x
+        )
+        entries.append(("text", {"role": "assistant", "content": asked}))
+        answer = item.get("respondedValue")
+        if isinstance(answer, str) and answer.strip():
+            # The person's answer to the question above, as they gave it.
+            entries.append(
+                ("text", {"role": "user", "content": answer, "grok_gap": "widget_response"})
+            )
+    elif kind == "send-message":
+        kind_of = message.get("type") or "message"
+        detail = {
+            "cursor-agent": [("title", message.get("title")), ("agent", message.get("bcId"))],
+            "secret-request": [
+                ("label", (message.get("secretRequest") or {}).get("label")),
+                ("provided", str(item.get("secretProvided", ""))),
+            ],
+            "auto-review-approval": [
+                (k, (message.get("approval") or {}).get(k))
+                for k in ("summary", "reason", "status", "proposedRule")
+            ],
+            "connector": [
+                ("connector", message.get("connector")),
+                ("variant", message.get("variant")),
+            ],
+        }.get(kind_of, [])
+        entries.append(("context", {"role": "note", "content": described(kind_of, detail)}))
+    elif kind == "user-attachment":
+        entries.append(
+            (
+                "attachment",
+                {
+                    "role": "note",
+                    "content": "[Non-text attachment unavailable to transcript text extraction: "
+                    + str(item.get("file_name") or "file")
+                    + "]",
+                },
+            )
+        )
+    elif kind == "event":
+        event = item.get("event") if isinstance(item.get("event"), dict) else {}
+        parts = [(k, event.get(k)) for k in ("type", "action", "automationName")]
+        entries.append(("context", {"role": "note", "content": described("event", parts)}))
+    elif kind == "voice-call":
+        call = item.get("call") if isinstance(item.get("call"), dict) else {}
+        parts = [(k, call.get(k)) for k in ("durationMs", "turnCount", "ending")]
+        entries.append(("context", {"role": "note", "content": described("voice call", parts)}))
+    shaped["entries"] = entries
+    return shaped
+
+
 def records(path: Path, scrub=redact):
     """Stable IDs use line/block/chunk positions, including tool arguments/results.
     scrub is the redaction; only cursor checks pass an older one."""
@@ -247,7 +357,11 @@ def records(path: Path, scrub=redact):
             raise ValueError(f"Malformed transcript JSON at line {line_number}") from exc
         if not isinstance(item, dict):
             continue
-        if is_grok_native(item):
+        if is_readtranscript(item):
+            item = from_readtranscript(item)
+            if item is None:
+                continue
+        elif is_grok_native(item):
             item = as_claude(item)
             if item is None:
                 continue
@@ -261,7 +375,9 @@ def records(path: Path, scrub=redact):
         cwd = item.get("cwd", cwd)
         payload = item.get("payload", {}) if kind == "response_item" else item.get("message", {})
         entries = []
-        if kind == "response_item" and isinstance(payload, dict):
+        if kind == "grok-native":
+            entries = item["entries"]
+        elif kind == "response_item" and isinstance(payload, dict):
             t = payload.get("type")
             if t in {"function_call", "custom_tool_call"}:
                 entries = [("call", payload)]
@@ -331,6 +447,8 @@ def records(path: Path, scrub=redact):
             gaps = []
             agent = None
             desk = None
+            if entry.get("grok_gap"):
+                gaps.append(entry["grok_gap"])
             if entry_kind == "call":
                 tool = entry.get("name", "unknown tool")
                 args = entry.get("arguments", entry.get("input", {}))

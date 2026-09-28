@@ -12,10 +12,12 @@
   headers, credential fields and the server's own credentials are omitted;
   transcript content is left out. Separate from the Neo4j journal.
 - Grok Bot desk and fleet chats can be ingested from a `grok-bot` transcript
-  root (`<agentId>.jsonl`). Claude-shaped lines, and flat lines that name
-  `source_format`/`source` `grok-bot` or carry `fromAgent`, `fromUser` or
-  `channel`, become sourced messages with `source_format=grok-bot`. Sidechain
-  and `fromAgent` user relays stay context, not user assertions.
+  root (`<agentId>.jsonl`). The app's ReadTranscript entries are read as
+  exported: messages keep their speaker, replies and widget answers are
+  sourced, and attachments, events, voice calls and other message types become
+  context notes, so no entry is dropped unseen. Claude-shaped and flat lines are
+  also read. Messages from other agents (`fromAgent`, a non-user `author`, or
+  sidechain) stay context, not user assertions.
 - `importers.redact()` also covers GitHub device codes shown with a device-code
   prompt, `tskey-`, `xai-` keys, `crsr_` keys, `github_pat_`, JWTs, quoted JSON
   keys (`"api_key": "…"`), prefixed names (`OPENAI_API_KEY=`, `GITHUB_TOKEN=`),
