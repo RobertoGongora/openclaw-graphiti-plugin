@@ -59,9 +59,10 @@ empty. Set `MEMORY_MCP_CALL_LOG` to a local file path to append one JSONL record
 per `tools/call` (HTTP and stdio) for recall debugging. That is an explicit
 privacy flip: questions and compact results stay on this machine, can contain
 private content, and are not the Neo4j journal (`MEMORY_JOURNAL_AUDIT`). The
-process rotates the file at 5 MiB and keeps one older copy (`<path>.1`). Delete
-both when you are done. Authorization headers and credential-shaped fields are
-omitted; large text is truncated. See [operations](operations.md#mcp-call-log).
+process rotates the file at 5 MiB and keeps one older copy (`<path>.1`); nothing
+deletes them. Authorization headers, credential-shaped fields and the server's
+own credentials are omitted; transcript content and fact text are left out and
+other large text is truncated. See [operations](operations.md#mcp-call-log).
 
 For clients supporting subprocess MCP, configure an equivalent command:
 

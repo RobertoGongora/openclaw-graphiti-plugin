@@ -600,29 +600,62 @@ because an older image cannot write to a migrated journal.
 
 ## MCP call log
 
-The server does not record MCP requests unless `MEMORY_MCP_CALL_LOG` is set to a
-file path. Leaving it unset is the default: questions, arguments, and results
-are not written, and the HTTP access log stays empty. Failures still log only an
-exception type and a request id.
+The server does not record MCP requests unless `MEMORY_MCP_CALL_LOG` is set to an
+absolute file path. Leaving it unset is the default: questions, arguments, and
+results are not written, and the HTTP access log stays empty. Failures still log
+only an exception type and a request id. A relative path is refused and `~` is
+expanded to your home directory.
 
-Setting the variable is a privacy flip for local recall debugging. Each
-`tools/call` on HTTP and stdio appends one JSON object: time, request id, tool
-name, arguments after namespace binding, `ok` / `isError`, timing, and a compact
-result (fact ids, entity keys, counts, status). Large text is cut with
-`…[truncated]`. Render PNG bytes are left out. Authorization headers and
-credential-shaped fields (`token`, `password`, `api_key`, and similar) are not
-written. A credential value of 8 or more characters is also stripped if it shows up
-again in the question or the result. New files are mode 0600.
+Setting the variable is a privacy flip for local recall debugging. `graph-memory
+serve` prints the path to stderr at startup, and `graph-memory health --role mcp`
+run inside the MCP container reports it as `call_log`. Each `tools/call` on HTTP and stdio appends one JSON
+object:
+
+- `ts` (when the call started), request id, tool, transport, pid, server version
+  and the client's declared name and version
+- arguments after namespace binding. Message `content` and evidence `quote`
+  are omitted with their length; other large text is cut with `…[truncated]`
+- `ok` / `isError`, `timing_ms` for the whole call and `handler_ms` for the tool
+- a compact result: `facts` as `[id, lane]` in the order the client got them,
+  with `"related"` appended for a decision about another entity; `fact_ids`; the
+  ids a result referred to but did not return (`conflict_fact_ids`,
+  `derived_support_ids`, `missing_fact_ids`); `written_fact_ids` for writes;
+  entity keys (for `memory_search`, the subjects and targets of the returned
+  facts); counts, status, `revision` and `question_term_count` (0 means the
+  question held only stop words and the facts are unranked). No fact text,
+  question echo or render PNG bytes. A result over 7,000 characters keeps as many
+  ids as fit and says how many there were
+
+Authorization headers and credential-shaped fields (`token`, `password`,
+`api_key`, and similar) are not written. The bearer token and the values of
+`MEMORY_HTTP_TOKEN`, `NEO4J_PASSWORD`, `MEMORY_LLM_API_KEY` and
+`TRANSCRIPT_MCP_TOKEN` are also replaced wherever they appear, in any case,
+including in keys, before any text is cut, when they are 8 characters or longer
+and not the public default `graph-memory`. Other headers are not treated as
+secrets, so a client cannot choose words to blank. Other credentials a user types into a question (an
+`sk-…` key pasted into a search) are written as typed. One line is at most 16,000
+characters; a larger record keeps only the tool, id, status and timing.
+
+The file and a `<path>.lock` beside it are mode 0600. The process will not write
+through a symbolic link, into a FIFO, or into a file another user owns. At 5 MiB
+the file is renamed to `<path>.1`, replacing the older copy, under a lock that the
+HTTP server and every stdio session share. If that rename fails, records are
+skipped rather than let the file grow.
 
 This file is not the Neo4j change journal. `MEMORY_JOURNAL_AUDIT` does not read
 it, and it is not worker JSONL or the OpenClaw debug log. Nothing here is sent
-off the machine. Delete the file when you are done. The process also rotates it
-at 5 MiB, keeping one older copy at `<path>.1`.
+off the machine. Nothing deletes it either: unsetting the variable stops new
+records but leaves `<path>`, `<path>.1` and `<path>.lock` in place until you
+remove them.
 
 Compose runs MCP with a read-only root filesystem. Use `/tmp/mcp-calls.jsonl`
-(tmpfs, gone when the container is recreated) or mount a directory and point the
-variable at that path. A path the process cannot create is ignored; the call
-still succeeds.
+(tmpfs; gone whenever the container stops or restarts, and it counts against the
+service's memory limit) or mount a directory and point the variable at that
+path. The personal stack reads `MEMORY_MCP_CALL_LOG`; the transcripts stack reads
+`TRANSCRIPT_MCP_CALL_LOG`, so enabling one does not enable the other. Plugin
+sessions started with `docker exec` into an MCP container inherit its setting. On
+a host, prefer a private directory over `/tmp`, which other local users can
+write to. A path the process cannot write is skipped; the call still succeeds.
 
 ## Secrets
 

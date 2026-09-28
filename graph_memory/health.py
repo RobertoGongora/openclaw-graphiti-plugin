@@ -74,6 +74,14 @@ def check(role, namespace):
                 ),
             },
         )
+        from .call_log import enabled_path
+
         with urlopen(request, timeout=5) as response:
-            return response.status == 200, {"role": role, "status": response.status}
+            # Surfaces the call-log privacy flip wherever health is checked.
+            log_path = enabled_path()
+            return response.status == 200, {
+                "role": role,
+                "status": response.status,
+                "call_log": str(log_path) if log_path else "off",
+            }
     raise ValueError("role must be worker, inventory, or mcp")

@@ -127,7 +127,7 @@ class Protocol:
 
     def dispatch(self, message, headers=None):
         started = time.perf_counter()
-        token = start_call(message)
+        token = start_call(message, headers)
         status, response = 500, None
         try:
             status, response = self.route(message, headers)
@@ -145,7 +145,7 @@ class Protocol:
                     error(request_id, -32603, f"Internal error (request {request})"),
                 )
         finally:
-            finish_call(token, message, headers, status, response, started)
+            finish_call(token, message, status, response, started)
         return status, response
 
     def route(self, message, headers=None):
@@ -276,8 +276,12 @@ class Protocol:
                     or getattr(request, "at_change", None) is not None
                 )
                 # Hold through projection/formatting, not just reconstruction.
-                with historical_read() if historical else nullcontext():
-                    output = handler(request)
+                began = time.perf_counter()
+                try:
+                    with historical_read() if historical else nullcontext():
+                        output = handler(request)
+                finally:
+                    note_call(handler_ms=(time.perf_counter() - began) * 1000)
                 rendered_image = output.pop("image", None) if name == "memory_render" else None
                 note_call(output=output, image_omitted=rendered_image is not None)
                 result = {

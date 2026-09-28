@@ -222,6 +222,7 @@ def enable_log(monkeypatch, path):
 
 
 def logged(path):
+    # splitlines() also breaks on U+2028 and friends; records must survive it.
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
 
@@ -295,7 +296,11 @@ def test_call_log_records_bound_arguments_and_compact_results(monkeypatch, tmp_p
     assert record["result"]["status"] == "found"
     assert record["result"]["counts"]["returned"] == 2
     assert record["result"]["counts"]["stored_by_lane"]["current"] == 1
-    assert record["result"]["fact_ids"] == ["fact-1", "fact-2", "fact-9"]
+    # Only what the client received; the other side of a conflict is listed apart.
+    assert record["result"]["fact_ids"] == ["fact-1", "fact-2"]
+    assert record["result"]["facts"] == [["fact-1", "current"], ["fact-2", "history"]]
+    assert record["result"]["conflict_fact_ids"] == ["fact-9"]
+    assert record["transport"] == "stdio" and record["pid"] > 0
     assert record["result"]["entities"][0]["key"] == "calprivacy"
     assert PROSE not in path.read_text(encoding="utf-8")
     assert "GUIDANCEPROSE" not in path.read_text(encoding="utf-8")
@@ -501,3 +506,353 @@ def test_call_log_follows_http_and_stdio(monkeypatch, tmp_path, capsys):
     assert logged(stdio_path)[0]["request_id"] == 9
     assert logged(stdio_path)[0]["arguments"]["question"] == "stdio question"
     assert logged(stdio_path)[0]["arguments"]["namespace"] == "personal"
+
+
+def test_call_log_scrubs_keys_case_and_environment_secrets(monkeypatch, tmp_path):
+    path = tmp_path / "calls.jsonl"
+    enable_log(monkeypatch, path)
+    env_secret = "Neo4jPasswordValue77"
+    monkeypatch.setenv("NEO4J_PASSWORD", env_secret)
+    server = protocol(namespace="personal")
+    # A result that echoes the question in lower case, as memory_search does.
+    answering(
+        server,
+        "memory_render",
+        {
+            "status": "ok " + "x" * 220 + TOKEN,
+            TOKEN: True,
+            "question_terms": [TOKEN.lower()],
+            "nodes": 1,
+        },
+    )
+    render = rpc("tools/call", name="memory_render", arguments={"parameters": {TOKEN: 1}})
+    status, _ = server.dispatch(render, {**headers(render), "authorization": f"Bearer {TOKEN}"})
+    assert status == 200
+    over_stdio = search(f"why is {env_secret.upper()} rejected", request_id=2)
+    server.dispatch(over_stdio)
+    body = path.read_text(encoding="utf-8").lower()
+    assert TOKEN.lower() not in body and env_secret.lower() not in body
+    # Truncation happens after scrubbing, so no prefix of the token survives either.
+    assert TOKEN[:12].lower() not in body
+    assert logged(path)[1]["arguments"]["question"] == "why is [redacted] rejected"
+
+
+def test_call_log_ignores_client_chosen_secrets_and_the_public_default(monkeypatch, tmp_path):
+    path = tmp_path / "calls.jsonl"
+    enable_log(monkeypatch, path)
+    monkeypatch.setenv("MEMORY_HTTP_TOKEN", "graph-memory")
+    server = protocol(namespace="personal")
+    message = search("what is in the graph-memory repo about personal notes")
+    message["params"]["arguments"]["token"] = "personal"
+    server.dispatch(message)
+    [record] = logged(path)
+    assert record["arguments"]["token"] == "[redacted]"
+    assert (
+        record["arguments"]["question"] == "what is in the graph-memory repo about personal notes"
+    )
+    assert record["arguments"]["namespace"] == "personal"
+
+
+def test_call_log_bounds_every_line(monkeypatch, tmp_path):
+    path = tmp_path / "calls.jsonl"
+    enable_log(monkeypatch, path)
+    server = protocol(namespace="personal")
+    huge = "k" * 1_000_000
+    server.dispatch(rpc("tools/call", name=huge, arguments={}))
+    server.dispatch(rpc("tools/call", name="memory_nope", arguments={huge: 1}))
+    many = rpc(
+        "tools/call", name="memory_nope", arguments={f"{i}{huge[:100_000]}": 1 for i in range(30)}
+    )
+    server.dispatch(many)
+    long_id = rpc("tools/call", name="memory_status", arguments={})
+    long_id["id"] = huge
+    server.dispatch(long_id)
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 4
+    assert all(len(line) <= call_log.LINE_LIMIT for line in lines)
+    assert all(json.loads(line)["isError"] for line in lines)
+
+
+def test_call_log_keeps_a_record_for_deeply_nested_arguments(monkeypatch, tmp_path):
+    path = tmp_path / "calls.jsonl"
+    enable_log(monkeypatch, path)
+    server = protocol(namespace="personal")
+    answering(server, "memory_render", {"nodes": 0})
+    nested = {}
+    for _ in range(5000):
+        nested = {"a": nested}
+    message = rpc("tools/call", name="memory_render", arguments={"parameters": nested})
+    assert server.dispatch(message)[0] == 200
+    [record] = logged(path)
+    assert record["tool"] == "memory_render" and record["ok"] is True
+
+
+def test_call_log_escapes_line_separators(monkeypatch, tmp_path):
+    path = tmp_path / "calls.jsonl"
+    enable_log(monkeypatch, path)
+    server = protocol(namespace="personal")
+    server.dispatch(search("x\u2028{}\u2029[1]\u0085null\u202ey"))
+    [record] = logged(path)
+    assert record["arguments"]["question"] == "x\u2028{}\u2029[1]\u0085null\u202ey"
+    assert path.read_bytes().isascii()
+
+
+@pytest.mark.parametrize("value", ["~/calls.jsonl", "calls.jsonl", "logs/calls.jsonl"])
+def test_call_log_requires_an_absolute_path(monkeypatch, tmp_path, value):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("MEMORY_MCP_CALL_LOG", value)
+    server = protocol(namespace="personal")
+    server.dispatch(search("relative path question"))
+    if value.startswith("~"):
+        assert logged(tmp_path / "home" / "calls.jsonl")[0]["tool"] == "memory_search"
+    else:
+        assert not any(tmp_path.rglob("calls.jsonl"))
+    assert not (tmp_path / "~").exists()
+
+
+def test_call_log_refuses_links_fifos_and_loose_modes(monkeypatch, tmp_path, caplog):
+    import os
+
+    server = protocol(namespace="personal")
+    victim = tmp_path / "victim"
+    victim.write_text("VICTIM", encoding="utf-8")
+    link = tmp_path / "link.jsonl"
+    link.symlink_to(victim)
+    enable_log(monkeypatch, link)
+    with caplog.at_level(logging.ERROR, logger="graph_memory.mcp"):
+        assert server.dispatch(search("through a link"))[0] == 200
+    assert victim.read_text(encoding="utf-8") == "VICTIM"
+    assert "mcp call log failed" in caplog.text
+
+    fifo = tmp_path / "fifo.jsonl"
+    os.mkfifo(fifo)
+    enable_log(monkeypatch, fifo)
+    done = []
+    worker = threading.Thread(target=lambda: done.append(server.dispatch(search("fifo"))))
+    worker.start()
+    worker.join(5)
+    assert done and done[0][0] == 200
+
+    loose = tmp_path / "loose.jsonl"
+    loose.write_text("", encoding="utf-8")
+    loose.chmod(0o644)
+    enable_log(monkeypatch, loose)
+    server.dispatch(search("loose mode"))
+    assert loose.stat().st_mode & 0o777 == 0o600
+    assert logged(loose)[0]["tool"] == "memory_search"
+
+
+def test_call_log_never_grows_past_a_blocked_rotation(monkeypatch, tmp_path):
+    path = tmp_path / "calls.jsonl"
+    enable_log(monkeypatch, path)
+    monkeypatch.setattr(call_log, "MAX_CALL_LOG_BYTES", 200)
+    (tmp_path / "calls.jsonl.1").mkdir()
+    (tmp_path / "calls.jsonl.1" / "keep").write_text("x", encoding="utf-8")
+    server = protocol(namespace="personal")
+    for i in range(20):
+        assert server.dispatch(search(f"question {i}", request_id=i))[0] == 200
+    assert path.stat().st_size < 200 + call_log.LINE_LIMIT
+
+
+def test_call_log_repairs_a_torn_line(monkeypatch, tmp_path):
+    path = tmp_path / "calls.jsonl"
+    path.write_text('{"ts":"20', encoding="utf-8")
+    path.chmod(0o600)
+    enable_log(monkeypatch, path)
+    protocol(namespace="personal").dispatch(search("after a torn write"))
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == '{"ts":"20'
+    assert json.loads(lines[1])["tool"] == "memory_search"
+
+
+def test_call_log_rotation_is_safe_across_processes(tmp_path):
+    import multiprocessing
+
+    path = tmp_path / "calls.jsonl"
+    context = multiprocessing.get_context("spawn")
+    workers = [context.Process(target=_append_many, args=(str(path), n, 400)) for n in range(4)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(60)
+    rotated = tmp_path / "calls.jsonl.1"
+    records = [json.loads(line) for f in (rotated, path) for line in f.read_text().splitlines()]
+    # Each rotation moves a full file: the older generation is never a sliver.
+    assert rotated.stat().st_size >= 20_000
+    assert len(records) >= 20_000 // 120
+
+
+def _append_many(path, worker, count):
+    call_log.MAX_CALL_LOG_BYTES = 20_000
+    for i in range(count):
+        call_log.append_jsonl(path, json.dumps({"worker": worker, "i": i, "pad": "p" * 80}))
+
+
+def test_call_log_recall_debug_shapes():
+    full_recall = {
+        "entity": None,
+        "entities": [{"key": "project:atlas", "name": "Atlas", "kind": "project"}],
+        "current": [{"id": "c1", "summary": "a"}, {"id": "c2", "summary": "b"}],
+        "planned": [{"id": "p1", "summary": "c"}],
+        "conflicts": [],
+        "inferred": [{"summary": "i", "supporting_fact_ids": ["c1", "x9"]}],
+        "totals": {"current": 2, "planned": 1, "conflicts": 4},
+        "revision": 7,
+    }
+    compact = call_log.compact_output(full_recall)
+    assert compact["fact_ids"] == ["c1", "c2", "p1"]
+    assert compact["facts"][2] == ["p1", "planned"]
+    assert compact["derived_support_ids"] == ["c1", "x9"]
+    assert compact["totals"]["conflicts"] == 4
+    assert compact["entities"][0]["key"] == "project:atlas"
+
+    latest = {
+        "status": "conflict",
+        "entity": {"key": "project:atlas", "name": "Atlas", "kind": "project"},
+        "facts": [{"id": "l1", "lane": "conflicts"}, {"id": "l2", "lane": "latest"}],
+        "counts": {"latest": 1, "unresolved": 0, "conflicts_returned_by_engine": 1},
+    }
+    compact = call_log.compact_output(latest)
+    assert compact["counts"] == {"latest": 1, "unresolved": 0, "conflicts_returned_by_engine": 1}
+    assert compact["facts"] == [["l1", "conflicts"], ["l2", "latest"]]
+
+    # Full detail: facts carry subject and target; a decision about another entity is related.
+    related = {
+        "entities": [{"key": "project:atlas", "name": "Atlas", "kind": "project"}],
+        "facts": [
+            {"id": "r0", "lane": "current", "subject": "project:atlas", "target": "db:pg"},
+            {"id": "r1", "lane": "current", "subject": "project:ketch", "target": "db:pg"},
+        ],
+        "question_terms": [],
+    }
+    compact = call_log.compact_output(related)
+    assert compact["facts"] == [["r0", "current"], ["r1", "current", "related"]]
+    assert compact["question_term_count"] == 0
+
+    many = {
+        "status": "found",
+        "facts": [{"id": f"{i:064x}", "lane": "current"} for i in range(100)],
+        "counts": {"returned": 100},
+    }
+    compact = call_log.compact_output(many)
+    assert compact["result_truncated"] is True and compact["counts"]["returned"] == 100
+    assert len(compact["facts"]) > 20 and compact["facts_truncated"] == 100
+    assert len(json.dumps(compact)) <= call_log.RESULT_JSON_LIMIT
+    receipt = {"episode_id": "e", "entities": 9, "fact_ids": [f"{i:064x}" for i in range(120)]}
+    compact = call_log.compact_output(receipt)
+    assert compact["entities"] == 9 and compact["written_fact_ids"]
+
+    searched = {
+        "question": "calprivacy drop upload",
+        "question_terms": ["calprivacy", "drop", "upload"],
+        "status": "no_matching_facts",
+        "facts": [
+            {"id": "s1", "lane": "current", "subject": "project:drop", "target": "service:s3"}
+        ],
+    }
+    compact = call_log.compact_output(searched)
+    assert "question" not in compact and "question_terms" not in compact
+    assert [row["key"] for row in compact["entities"]] == ["project:drop", "service:s3"]
+
+    evidence = {
+        "facts": [{"fact": {"id": "e1", "summary": "q"}}],
+        "missing_fact_ids": ["e2"],
+        "expand": {"tool": "memory_evidence", "arguments": {"fact_ids": ["e1", "e2"]}},
+    }
+    compact = call_log.compact_output(evidence)
+    assert compact["fact_ids"] == ["e1"] and compact["missing_fact_ids"] == ["e2"]
+
+
+def test_call_log_leaves_transcript_content_out_of_ingest(monkeypatch, tmp_path):
+    path = tmp_path / "calls.jsonl"
+    enable_log(monkeypatch, path)
+    server = protocol(namespace="personal")
+    message = rpc(
+        "tools/call",
+        name="memory_ingest",
+        arguments={
+            "transcript": {
+                "session_id": "s",
+                "source_id": "src",
+                "messages": [{"id": "m1", "role": "user", "content": PROSE * 20}],
+            }
+        },
+    )
+    server.dispatch(message)
+    [record] = logged(path)
+    assert PROSE not in path.read_text(encoding="utf-8")
+    content = record["arguments"]["transcript"]["messages"][0]["content"]
+    assert content == {"omitted": True, "chars": len(PROSE) * 20}
+
+
+def test_call_log_scrub_is_linear_and_unicode_safe(monkeypatch, tmp_path):
+    import time as clock
+
+    path = tmp_path / "calls.jsonl"
+    enable_log(monkeypatch, path)
+    secret = "0123456789abcdef0123456789abcdef"
+    monkeypatch.setenv("MEMORY_HTTP_TOKEN", secret)
+    server = protocol(namespace="personal")
+    # lower() lengthens U+0130; an index-based scrub would leak or loop here.
+    server.dispatch(search("\u0130" * 40 + " " + secret + " tail"))
+    body = path.read_text(encoding="utf-8")
+    assert secret not in body.lower() and "tail" in body
+    monkeypatch.setenv("MEMORY_HTTP_TOKEN", "TOKEN\u0130abcdefgh")
+    monkeypatch.setenv("NEO4J_URI", "bolt://neo4j:UriPassword123@db:7687")
+    server.dispatch(search("x TOKEN\u0130abcdefgh and UriPassword123 y", request_id=5))
+    assert logged(path)[-1]["arguments"]["question"] == "x [redacted] and [redacted] y"
+    # A client-chosen header is not a secret: it cannot blank words or slow the scrub.
+    message = search("İ" * 12 + " redacted " + "a" * 1_000_000, request_id=2)
+    began = clock.perf_counter()
+    server.dispatch(message, {**headers(message), "x-api-key": "aaaaaaaa"})
+    assert clock.perf_counter() - began < 5
+    assert "aaaaaaaa" in path.read_text(encoding="utf-8")
+
+
+def test_call_log_scrubs_before_every_cut(monkeypatch, tmp_path):
+    path = tmp_path / "calls.jsonl"
+    enable_log(monkeypatch, path)
+    monkeypatch.setenv("MEMORY_HTTP_TOKEN", TOKEN)
+    server = protocol(namespace="personal")
+    pad = "r" * 70
+    answering(
+        server,
+        "memory_render",
+        {
+            "entities": [{"key": "k" * 110 + TOKEN, "name": "n", "kind": "project"}],
+            "facts": [{"id": pad + TOKEN, "lane": "current"}],
+            "conflict_fact_ids": [pad + TOKEN],
+        },
+    )
+    render = rpc("tools/call", name="memory_render", arguments={})
+    render["id"] = pad + TOKEN
+    server.dispatch(render)
+    unknown = search("q", request_id=3)
+    unknown["params"]["arguments"][pad + TOKEN] = 1
+    server.dispatch(unknown)
+    body = path.read_text(encoding="utf-8").lower()
+    assert TOKEN[:8].lower() not in body
+
+
+def test_call_log_records_handler_time_on_failure(monkeypatch, tmp_path):
+    path = tmp_path / "calls.jsonl"
+    enable_log(monkeypatch, path)
+    server = protocol(namespace="personal")
+    schema, _, description = server.tools["memory_status"]
+
+    def boom(_request):
+        raise RuntimeError("x")
+
+    server.tools["memory_status"] = (schema, boom, description)
+    server.dispatch(rpc("tools/call", name="memory_status", arguments={}))
+    [record] = logged(path)
+    assert record["handler_ms"] >= 0 and record["result"]["error_type"] == "RuntimeError"
+
+
+def test_call_log_skips_a_directory_path_without_side_files(monkeypatch, tmp_path):
+    target = tmp_path / "logs"
+    target.mkdir()
+    enable_log(monkeypatch, target)
+    assert protocol(namespace="personal").dispatch(search("dir"))[0] == 200
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["logs"]

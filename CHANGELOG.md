@@ -3,10 +3,13 @@
 
 ### Added
 
-- Opt-in local MCP `tools/call` JSONL (`MEMORY_MCP_CALL_LOG`) for recall debugging.
-  Off by default. Records the tool name, arguments, and a compact result (fact
-  ids, counts, status, timing) and rotates at 5 MiB. Authorization headers and
-  credential fields are omitted. This is separate from the Neo4j journal.
+- Opt-in local MCP `tools/call` JSONL (`MEMORY_MCP_CALL_LOG`, and
+  `TRANSCRIPT_MCP_CALL_LOG` for the transcripts stack) for recall debugging. Off
+  by default. Records the tool, arguments, client and transport, and a compact
+  result (returned fact ids by lane and rank, referenced ids, entity keys,
+  counts, status, timing). Rotates at 5 MiB across processes. Authorization
+  headers, credential fields and the server's own credentials are omitted;
+  transcript content is left out. Separate from the Neo4j journal.
 
 ### Fixed
 
