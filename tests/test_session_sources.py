@@ -991,3 +991,28 @@ def test_a_widget_exported_again_once_answered_adds_only_the_answer(tmp_path):
     assert [(m.role, m.source_type, m.content) for m in again[len(first) :]] == [
         ("user", "user_assertion", "Postgres")
     ]
+
+
+def test_an_entry_edited_after_it_was_read_is_kept_as_context(tmp_path):
+    path = tmp_path / "grok-bot" / "desk.jsonl"
+    path.parent.mkdir()
+    sent = {
+        "kind": "message",
+        "id": "m",
+        "role": "user",
+        "content": "Atlas uses MySQL.",
+        "isStreaming": False,
+        "timestampMs": 1_759_053_720_000,
+    }
+    path.write_text(
+        json.dumps(sent)
+        + "\n"
+        + json.dumps(sent)
+        + "\n"
+        + json.dumps({**sent, "content": "Atlas uses Postgres."})
+        + "\n"
+    )
+    first, revised = records(path)
+    assert first.source_type == "user_assertion" and first.content == "Atlas uses MySQL."
+    assert revised.source_type == "context" and "entry_revised_after_read" in revised.gaps
+    assert revised.content == "Atlas uses Postgres."

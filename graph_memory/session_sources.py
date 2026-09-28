@@ -254,10 +254,10 @@ def from_readtranscript(item, seen):
     unseen. None for a partial streaming message, which a final one follows, and
     for an entry exported again with nothing new.
 
-    seen maps an entry id to the parts already read. The app changes a widget
-    after sending it (the answer arrives later), so an exporter may append it
-    twice; only the part not read before is emitted, and earlier lines never
-    change meaning."""
+    seen maps an entry id to the parts already read and their text. The app
+    changes a widget after sending it (the answer arrives later), so an exporter
+    may append it again; only a part not read before is emitted, a changed part
+    is kept as a context note, and earlier lines never change meaning."""
     try:
         return readtranscript_entry(item, seen)
     except (TypeError, AttributeError, ValueError):
@@ -281,7 +281,7 @@ def from_readtranscript(item, seen):
 def readtranscript_entry(item, seen):
     kind = item.get("kind")
     key = item.get("id") if isinstance(item.get("id"), str) else None
-    done = seen.setdefault(key, set()) if key else set()
+    done = seen.setdefault(key, {}) if key else {}
     shaped = {"type": "grok-native", "timestamp": record_time(item)}
     for field in ("fromAgent", "channel"):
         if field in item:
@@ -297,9 +297,20 @@ def readtranscript_entry(item, seen):
     entries = []
 
     def add(part, entry):
+        text = entry[1].get("content")
         if part not in done:
-            done.add(part)
+            done[part] = text
             entries.append(entry)
+        elif done[part] != text:
+            # Changed after it was read: kept as context beside the original,
+            # which stays as first read so earlier evidence does not move.
+            done[part] = text
+            entries.append(
+                (
+                    "context",
+                    {"role": "note", "content": text, "grok_gap": "entry_revised_after_read"},
+                )
+            )
 
     message = obj(item.get("message"))
     if kind == "message":

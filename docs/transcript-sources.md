@@ -219,7 +219,9 @@ they are never mistaken for Claude or Codex records. Every entry is read:
 Lines are append-only: the exporter never rewrites a written line. The app
 fills in a widget's answer after sending it, so the exporter may append the
 same entry `id` again once it changes. A repeated id yields only what was not
-read before (the answer); the prompt is not repeated. A line that does not have
+read before (the answer); the prompt is not repeated. A part whose text changed
+after it was read (an edited message, a role change) is kept as a `context`
+note with gap `entry_revised_after_read`; the original stays as first read. A line that does not have
 the expected shape becomes a `context` note with gap `malformed_native_entry`
 and the rest of the file is still read. Only `cursor_user` lines from the
 account owner are exported as the owner's; the parser does not compare
