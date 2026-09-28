@@ -17,3 +17,10 @@ coverage.xml
 .env.*
 !.env.example
 .README.repo.md
+
+# Opt-in MCP call log (MEMORY_MCP_CALL_LOG): never commit one. Fixtures can opt back in.
+*.jsonl
+*.jsonl.1
+*.jsonl.lock
+!tests/**/*.jsonl
+!evals/**/*.jsonl

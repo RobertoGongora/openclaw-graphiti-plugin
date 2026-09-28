@@ -3,6 +3,14 @@
 
 ### Added
 
+- Opt-in local MCP `tools/call` JSONL (`MEMORY_MCP_CALL_LOG`, and
+  `TRANSCRIPT_MCP_CALL_LOG` for the transcripts stack) for recall debugging. Off
+  by default. Records the tool, arguments, client and transport, and a compact
+  result (returned fact ids by lane and rank, referenced ids, entity keys,
+  counts, status, timing) and, for successful live reads, the journal change and
+  `as_of` to ask the same read again later (`replay`, with `raced` and `intact`). Rotates at 5 MiB across processes. Authorization
+  headers, credential fields and the server's own credentials are omitted;
+  transcript content is left out. Separate from the Neo4j journal.
 - Grok Bot desk and fleet chats can be ingested from a `grok-bot` transcript
   root (`<agentId>.jsonl`). Claude-shaped lines, and flat lines that name
   `source_format`/`source` `grok-bot` or carry `fromAgent`, `fromUser` or
