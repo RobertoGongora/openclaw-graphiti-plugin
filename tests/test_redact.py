@@ -140,3 +140,42 @@ def test_redaction_is_idempotent():
     )
     once = redact(text)
     assert redact(once) == once
+
+
+def test_long_identifier_runs_do_not_backtrack():
+    import time
+
+    for text in ("A_" * 50_000, "A_B_" * 25_000, "snake_case_identifier_" * 5_000):
+        started = time.monotonic()
+        redact(text)
+        assert time.monotonic() - started < 1
+
+
+def test_escaped_quotes_in_json_encoded_tool_arguments_are_redacted():
+    import json
+
+    for command in (
+        'export DB_PASSWORD="value-one"',
+        'curl -d \'{"api_key":"value-two"}\'',
+    ):
+        cleaned = redact(json.dumps({"command": command}))
+        assert "value-" not in cleaned
+        assert redact(cleaned) == cleaned
+    assert "value-three" not in redact(json.dumps(json.dumps({"api_key": "value-three"})))
+
+
+def test_every_device_code_after_a_prompt_is_redacted_once():
+    cleaned = redact("device codes: ABCD-EFGH and WXYZ-2345")
+    assert "ABCD-EFGH" not in cleaned and "WXYZ-2345" not in cleaned
+    assert redact(cleaned) == cleaned
+    assert redact("device code ABCD-EFGH\nticket PLAN-1234").endswith("PLAN-1234")
+
+
+def test_types_and_lookups_are_not_values():
+    text = (
+        "token: string; password: string password: str, api_key: str | None "
+        'api_key = os.environ["X"] apiKey: process.env.KEY password: ${DB_PASSWORD} '
+        '"api_key": null'
+    )
+    assert redact(text) == text
+    assert redact("?apikey=#{api_key}") == redact(redact("?apikey=#{api_key}"))

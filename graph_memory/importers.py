@@ -1,5 +1,6 @@
 """Read-only adapters. Markdown is an import format, never a retrieval dependency."""
 
+import bisect
 import hashlib
 import json
 import re
@@ -32,18 +33,60 @@ def redact_v1(text: str) -> str:
     return text
 
 
-# Assignment keys whose value is a credential. A prefix such as OPENAI_ is part
-# of the name; a quote may close a JSON or dict key.
+# Assignment keys whose value is a credential. The lookbehind lets a prefix
+# such as OPENAI_ or GITHUB_ stand before the key; a repeated prefix group here
+# would backtrack exponentially on long runs of A_B_. A quote, escaped in
+# JSON-encoded tool arguments, may close the key.
 SECRET_KEYS = (
-    r"(?:[A-Za-z0-9]+_)*(?:password|passwd|passphrase|secret|client[_-]?secret"
+    r"(?:password|passwd|passphrase|secret|client[_-]?secret"
     r"|webhook[_-]?(?:key|secret)|api[_-]?key|apikey|access[_-]?token"
     r"|refresh[_-]?token|auth[_-]?token|private[_-]?key|authorization"
     # Environment names such as GITHUB_TOKEN; lowercase max_token is a setting.
-    r"|(?-i:[A-Z0-9]+_)*(?-i:TOKEN))"
+    r"|(?-i:TOKEN))"
 )
 QUERY_KEYS = (
     r"(?:token|key|api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|client[_-]?secret|secret)"
 )
+# A type, a null, or a lookup names where a credential comes from, not the credential.
+NOT_A_VALUE = (
+    r"(?:(?:str|string|bool|boolean|int|number|float|bytes|None|null|nil|true|false"
+    r"|undefined|any|SecretStr|Optional)\b|os\.environ|os\.getenv|process\.env"
+    r"|settings\.|config\.|\$\{|\{\{)"
+)
+ASSIGNMENT = re.compile(
+    r"(?i)((?<![A-Za-z0-9])" + SECRET_KEYS + r"\b(?:\\?[\"'])?\s*[=:]\s*"
+    r"(?:(?:Bearer|Basic|Token)\s+)?)(?!(?:\\?[\"'])?\[REDACTED)"
+    r"(?!(?i:Bearer|Basic|Token)\s)(?!(?:\\?[\"'])?" + NOT_A_VALUE + r")"
+    r"(\\\"(?:(?!\\\")[^\n])*\\\"|\"[^\"\n]*\"|'[^'\n]*'|(?:[^\s,;\"'}\]\\]|\\(?![\"']))+)"
+)
+QUERY = re.compile(r"(?i)([?&#]" + QUERY_KEYS + r"=)(?!\[REDACTED)[^&#\s\"'<>]+")
+# GitHub device-flow user codes (XXXX-XXXX), only shortly after a prompt for
+# one on the same line: a bare pattern also matches ticket keys, UUID parts and
+# year ranges. The marker itself is not a prompt, so a second pass is a no-op.
+DEVICE_CUE = re.compile(
+    r"(?i)(?<!\[REDACTED )\b(?:device|user[_ -]?code|one[- ]time code|login/device"
+    r"|enter (?:the |this |your )?code)\b"
+)
+DEVICE_CODE = re.compile(r"(?<![\w-])[A-Z0-9]{4}-[A-Z0-9]{4}(?![\w-])")
+
+
+def assignment(m):
+    value = m[2]
+    quote = '\\"' if value.startswith('\\"') else value[0] if value[0] in "\"'" else ""
+    return m[1] + quote + "[REDACTED]" + quote
+
+
+def device_codes(text):
+    ends = [m.end() for m in DEVICE_CUE.finditer(text)]
+    if not ends:
+        return text
+
+    def replace(m):
+        i = bisect.bisect_right(ends, m.start()) - 1
+        near = i >= 0 and m.start() - ends[i] <= 60 and "\n" not in text[ends[i] : m.start()]
+        return "[REDACTED DEVICE CODE]" if near else m[0]
+
+    return DEVICE_CODE.sub(replace, text)
 
 
 def redact(text: str) -> str:
@@ -70,25 +113,10 @@ def redact(text: str) -> str:
     # JWT and JWE: a JSON header, then two to four more segments. The last may be
     # empty (alg none).
     text = re.sub(r"\beyJ[A-Za-z0-9_-]{5,}(?:\.[A-Za-z0-9_-]*){2,4}", "[REDACTED TOKEN]", text)
-    text = re.sub(r"(?i)([?&#]" + QUERY_KEYS + r"=)[^&#\s\"'<>]+", r"\1[REDACTED]", text)
-    text = re.sub(
-        r"(?i)((?<![A-Za-z0-9])" + SECRET_KEYS + r"\b[\"']?\s*[=:]\s*"
-        r"(?:(?:Bearer|Basic|Token)\s+)?)(?![\"']?\[REDACTED)(?!(?i:Bearer|Basic|Token)\s)"
-        r"(\"[^\"\n]*\"|'[^'\n]*'|[^\s,;\"'}\]]+)",
-        lambda m: m[1] + (m[2][0] + "[REDACTED]" + m[2][0] if m[2][0] in "\"'" else "[REDACTED]"),
-        text,
-    )
+    text = QUERY.sub(r"\1[REDACTED]", text)
+    text = ASSIGNMENT.sub(assignment, text)
     text = re.sub(r"(?i)((?:Bearer|Basic)\s+)[A-Za-z0-9._~+/=-]{12,}", r"\1[REDACTED]", text)
-    # GitHub device-flow user codes (XXXX-XXXX), only where the text asks for
-    # one: a bare pattern also matches ticket keys, UUID parts and year ranges.
-    text = re.sub(
-        r"(?i:(\b(?:device|user[_ -]?code|one[- ]time code|login/device"
-        r"|enter (?:the |this |your )?code)\b[^\n]{0,40}?))"
-        r"(?<![\w-])[A-Z0-9]{4}-[A-Z0-9]{4}(?![\w-])",
-        r"\1[REDACTED DEVICE CODE]",
-        text,
-    )
-    return text
+    return device_codes(text)
 
 
 def text_content(content):

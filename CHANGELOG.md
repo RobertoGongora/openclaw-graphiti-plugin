@@ -11,7 +11,8 @@
 - `importers.redact()` also covers GitHub device codes shown with a device-code
   prompt, `tskey-`, `xai-` keys, `crsr_` keys, `github_pat_`, JWTs, quoted JSON
   keys (`"api_key": "…"`), prefixed names (`OPENAI_API_KEY=`, `GITHUB_TOKEN=`),
-  webhook keys and secrets, `Authorization: Basic`, unterminated private keys,
+  webhook keys and secrets, escaped quotes in JSON-encoded tool arguments,
+  `Authorization: Basic`, unterminated private keys,
   and `token`/`key`/`access_token`/`client_secret` query and fragment values.
   Feed cursors written with the earlier redaction still resume, and messages
   already stored keep their earlier text when a later batch carries them again
