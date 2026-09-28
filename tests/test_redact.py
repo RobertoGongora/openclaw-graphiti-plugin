@@ -179,3 +179,18 @@ def test_types_and_lookups_are_not_values():
     )
     assert redact(text) == text
     assert redact("?apikey=#{api_key}") == redact(redact("?apikey=#{api_key}"))
+
+
+def test_a_value_that_only_starts_like_a_type_or_lookup_is_redacted():
+    for text in (
+        "password=true-secret-99",
+        "password=None.xyz",
+        "password=any/thing",
+        "api_key=process.env.X||'literal-value'",
+        "password=${VAR}suffix",
+    ):
+        assert redact(text) != text, text
+    kept = (
+        "password: Optional[str] = None secret_key = settings.SECRET_KEY password: {{ vault_pw }}"
+    )
+    assert redact(kept) == kept

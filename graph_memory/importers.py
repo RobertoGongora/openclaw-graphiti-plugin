@@ -48,10 +48,13 @@ QUERY_KEYS = (
     r"(?:token|key|api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|client[_-]?secret|secret)"
 )
 # A type, a null, or a lookup names where a credential comes from, not the credential.
+# Each must end where the value ends: password=true-secret-99 and
+# api_key=process.env.X||'literal' are values.
 NOT_A_VALUE = (
     r"(?:(?:str|string|bool|boolean|int|number|float|bytes|None|null|nil|true|false"
-    r"|undefined|any|SecretStr|Optional)\b|os\.environ|os\.getenv|process\.env"
-    r"|settings\.|config\.|\$\{|\{\{)"
+    r"|undefined|any|SecretStr|Optional)(?=[\s,;()\]}|=?\[]|\\?[\"']|$)"
+    r"|(?:(?:os\.environ|os\.getenv|process\.env|settings|config)[\w.\[\]\"'()]*"
+    r"|\$\{\w+\}|\{\{[^}\n]*\}\})(?=[\s,;)\]}]|\\?[\"']|$))"
 )
 ASSIGNMENT = re.compile(
     r"(?i)((?<![A-Za-z0-9])" + SECRET_KEYS + r"\b(?:\\?[\"'])?\s*[=:]\s*"
