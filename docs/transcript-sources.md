@@ -38,6 +38,8 @@ stays context.
 Provider duplicate event mirrors, reasoning, and system/developer instructions
 are not claim sources. Delegated subagent instructions and automated Codex exec
 prompts are context, even when their provider role is `user`. Non-text attachments are gaps, not interpreted content.
+Grok Bot desk and fleet chats are a third root; see
+[Grok Bot desk and fleet chats](#grok-bot-desk-and-fleet-chats).
 
 A session stays a single source identity with multiple bounded episodes. Each
 batch contains at most eight new text chunks (90,000 characters), four preceding
@@ -170,6 +172,92 @@ RETURN p LIMIT 200;
 MATCH p=(f:MemoryFact)-[:CITES|VALIDATED_BY]->(m:MemoryMessage)
 RETURN p LIMIT 200;
 ```
+
+## Grok Bot desk and fleet chats
+
+Grok Bot (Sand) desk and fleet chats are a transcript feed. They are not Cursor
+agent transcripts under `~/.cursor/.../agent-transcripts`, and this feed is not
+a Tailscale push. The namespace stays `transcripts`. The feed label is
+`grok-bot`, from a root mounted at `/sessions/grok-bot`. One append-only file
+per agent id, not the display name:
+
+```text
+/sessions/grok-bot/<agentId>.jsonl
+```
+
+The source key is `grok-bot:<agentId>.jsonl`. Episodes from this root use
+`source_format=grok-bot`, which follows the same evidence rules as
+`session-records-v1` (facts, validation, and the source graph). The feed cursor
+node stays `source_format=session-records-v1` so identity and resume match the
+existing worker. Missing timestamps stay null. File mtime is not an event time.
+
+### Claude-shaped lines
+
+This is the contract the exporter writes. Each complete line is Claude Code JSONL:
+
+```json
+{"type":"user","timestamp":"2026-09-28T12:00:00Z","channel":"desk","message":{"role":"user","content":[{"type":"text","text":"Atlas uses MySQL."}]}}
+{"type":"assistant","timestamp":"2026-09-28T12:01:00Z","channel":"desk","message":{"role":"assistant","content":[{"type":"text","text":"Atlas uses MySQL."}]}}
+```
+
+- A `user` line without `isSidechain` and without `fromAgent` is a `user_assertion`.
+- An `assistant` line is an `assistant_report`, including when it names `fromAgent`.
+  That report can yield a fact. An unvalidated assistant claim stays uncertain
+  and undated. It is not a user assertion.
+- `isSidechain: true`, or `fromAgent` on a `user` line, is `context` with gap
+  `delegated_instruction`. Those relays cannot originate facts.
+- `channel` and `fromAgent.id` (or `fromAgent.name` when there is no id) are
+  stored on the message when present.
+
+### Flat grok-bot lines
+
+A line that is not Claude or Codex JSONL is read when it sets
+`source_format` or `source` to `grok-bot`, or when it has `role` or text
+`content` plus `fromAgent`, `fromUser`, or `channel`:
+
+```json
+{"source_format":"grok-bot","role":"assistant","content":"Atlas uses MySQL.","timestamp":"2026-09-28T12:01:00Z","channel":"desk"}
+{"source_format":"grok-bot","role":"user","content":"Check Atlas.","fromAgent":{"id":"fleet-agent","name":"Fleet"},"channel":"fleet","timestampMs":1759053720000}
+```
+
+`timestampMs` is Unix epoch milliseconds. A user line with `fromAgent` is a
+relay, same as `isSidechain`. Lines with no role or no text are skipped.
+Widgets, events, voice, attachments, and streaming chunks are not this
+contract; the exporter drops them. A full ReadTranscript sealed-union adapter
+is a follow-up if the exporter stops writing these lines.
+
+The hourly path is this root. MCP `memory_ingest` / Remember is not the feed.
+The box exporter and its watermark (`desk-chat-graph-memory-ingest`) stay
+outside this repository.
+
+### Compose example
+
+The default `compose.transcripts.yaml` does not mount this root. Do not edit a
+running host compose file from the repository change. When a deploy is
+approved, add the same read-only mount and `--transcripts` root to **both**
+the worker and the inventory service. A compose override replaces the whole
+`command` and `volumes` list, so repeat the Claude and Codex entries:
+
+```yaml
+# worker
+command: [daemon, --source-records, --transcripts, /sessions/claude, --transcripts, /sessions/codex, --transcripts, /sessions/grok-bot, --workers, '${TRANSCRIPT_WORKERS:-8}']
+volumes:
+  - '${CLAUDE_SESSIONS_PATH:?Set Claude session directory}:/sessions/claude:ro'
+  - '${CODEX_SESSIONS_PATH:?Set Codex session directory}:/sessions/codex:ro'
+  - '${GROK_BOT_SESSIONS_PATH:?Set Grok Bot JSONL directory}:/sessions/grok-bot:ro'
+  - '${TRANSCRIPT_AUTH_PATH:?Set Codex authentication directory}:/home/memory/.codex'
+
+# inventory
+command: [inventory, --transcripts, /sessions/claude, --transcripts, /sessions/codex, --transcripts, /sessions/grok-bot, --interval, '300']
+volumes:
+  - '${CLAUDE_SESSIONS_PATH:?Set Claude session directory}:/sessions/claude:ro'
+  - '${CODEX_SESSIONS_PATH:?Set Codex session directory}:/sessions/codex:ro'
+  - '${GROK_BOT_SESSIONS_PATH:?Set Grok Bot JSONL directory}:/sessions/grok-bot:ro'
+```
+
+After that mount exists, stamp feed identity the same way as the other roots,
+with `--root grok-bot=/sessions/grok-bot`. The container path's last component
+must stay `grok-bot`. Do not mount a model-worker home directory on this root.
 
 ## Deployment and validation
 

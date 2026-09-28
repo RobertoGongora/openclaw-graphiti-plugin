@@ -119,6 +119,10 @@ services:
       MEMORY_INTAKE_FILES: ${MEMORY_INTAKE_FILES:-4}
       MEMORY_FEED_ACCEPT_UNMATCHED: ${MEMORY_FEED_ACCEPT_UNMATCHED:-}
       MEMORY_JOURNAL_AUDIT: ${MEMORY_JOURNAL_AUDIT:-503}
+    # Grok Bot desk/fleet JSONL is a third root, label grok-bot. Not mounted here.
+    # When a deploy is approved, add --transcripts /sessions/grok-bot and a
+    # read-only GROK_BOT_SESSIONS_PATH mount on worker and inventory together.
+    # Example: docs/transcript-sources.md#grok-bot-desk-and-fleet-chats
     command: [daemon, --source-records, --transcripts, /sessions/claude, --transcripts, /sessions/codex, --workers, '${TRANSCRIPT_WORKERS:-8}']
     volumes:
       - '${CLAUDE_SESSIONS_PATH:?Set Claude session directory}:/sessions/claude:ro'
@@ -139,6 +143,7 @@ services:
     environment:
       <<: *neo4j-client
       MEMORY_LLM: caller
+    # Same grok-bot root as the worker, still not mounted. See the worker comment.
     command: [inventory, --transcripts, /sessions/claude, --transcripts, /sessions/codex, --interval, '300']
     volumes:
       - '${CLAUDE_SESSIONS_PATH:?Set Claude session directory}:/sessions/claude:ro'

@@ -1,13 +1,16 @@
 """Transcript evidence adapters. Never open files mentioned by a tool call.
 
 Only source JSONL is read. Reasoning, injected system/developer instructions and
-provider duplicate event mirrors are not conversational evidence.
+provider duplicate event mirrors are not conversational evidence. Grok Bot desk
+lines are Claude-shaped, or flat records that name fromAgent or channel. A
+user-role line from another agent is a relay, not a direct assertion.
 """
 
 import ast
 import json
 import posixpath
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -16,6 +19,7 @@ from .models import ArtifactTouch, Message, Transcript
 from .store import digest
 
 FORMAT = "session-records-v1"
+GROK_BOT = "grok-bot"
 CHUNK = 24_000
 MAX_BATCH_CHARS = 90_000
 # Earlier tool results of the turn in progress, carried into a batch as context: an
@@ -104,6 +108,107 @@ def tool_touch(name, arguments) -> list[Touch]:
     return []
 
 
+def episode_format(path: Path) -> str:
+    """Episode evidence format. Feed cursors stay session-records-v1."""
+    return GROK_BOT if GROK_BOT in path.parts else FORMAT
+
+
+def agent_ref(item):
+    """Another agent named on the line, by id when the record has one."""
+    agent = item.get("fromAgent")
+    if isinstance(agent, str) and agent.strip():
+        return agent.strip()
+    if isinstance(agent, dict):
+        for key in ("id", "name"):
+            value = agent.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
+def channel_name(item):
+    channel = item.get("channel")
+    if isinstance(channel, str) and channel.strip():
+        return channel.strip()
+    if isinstance(channel, dict):
+        for key in ("id", "name"):
+            value = channel.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
+def bounded_label(value):
+    if not value:
+        return None
+    return " ".join(value.split())[:200] or None
+
+
+def is_grok_native(item):
+    """A flat grok-bot line, not a Claude or Codex record."""
+    kind = item.get("type")
+    if kind in {
+        "user",
+        "assistant",
+        "response_item",
+        "session_meta",
+        "turn_context",
+        "compacted",
+        "event_msg",
+    }:
+        return False
+    if item.get("source_format") == GROK_BOT or item.get("source") == GROK_BOT:
+        return True
+    if item.get("role") not in {"user", "assistant"} and not isinstance(
+        item.get("content"), (str, list)
+    ):
+        return False
+    return any(key in item for key in ("fromAgent", "fromUser", "channel"))
+
+
+def grok_timestamp(item):
+    stamp = item.get("timestamp")
+    if isinstance(stamp, str) and stamp.strip():
+        return stamp
+    ms = item.get("timestampMs")
+    if isinstance(ms, (int, float)) and not isinstance(ms, bool) and ms > 0:
+        return datetime.fromtimestamp(ms / 1000, UTC).isoformat().replace("+00:00", "Z")
+    return None
+
+
+def grok_blocks(content):
+    if isinstance(content, str):
+        return [{"type": "text", "text": content}]
+    if not isinstance(content, list):
+        return []
+    blocks = []
+    for block in content:
+        if isinstance(block, str):
+            blocks.append({"type": "text", "text": block})
+        elif isinstance(block, dict):
+            blocks.append(block)
+    return blocks
+
+
+def as_claude(item):
+    """Flat grok-bot text as a Claude-shaped record. None when the line has no text."""
+    role = item.get("role")
+    if role not in {"user", "assistant"}:
+        return None
+    blocks = grok_blocks(item.get("content", item.get("text", "")))
+    if not text_content(blocks).strip():
+        return None
+    shaped = {
+        "type": role,
+        "timestamp": grok_timestamp(item),
+        "message": {"role": role, "content": blocks},
+    }
+    for key in ("isSidechain", "fromAgent", "fromUser", "channel", "sessionId", "cwd"):
+        if key in item:
+            shaped[key] = item[key]
+    return shaped
+
+
 def records(path: Path):
     """Stable IDs use line/block/chunk positions, including tool arguments/results."""
     calls = {}
@@ -121,6 +226,10 @@ def records(path: Path):
             raise ValueError(f"Malformed transcript JSON at line {line_number}") from exc
         if not isinstance(item, dict):
             continue
+        if is_grok_native(item):
+            item = as_claude(item)
+            if item is None:
+                continue
         kind = item.get("type")
         if kind in {"session_meta", "turn_context"}:
             cwd = item.get("payload", {}).get("cwd", cwd)
@@ -199,6 +308,8 @@ def records(path: Path):
             failed = None
             touches = []
             gaps = []
+            agent = None
+            desk = None
             if entry_kind == "call":
                 tool = entry.get("name", "unknown tool")
                 args = entry.get("arguments", entry.get("input", {}))
@@ -325,12 +436,17 @@ def records(path: Path):
             else:
                 role = entry.get("role", "note")
                 content = text_content(entry.get("content", ""))
+                agent = bounded_label(agent_ref(item))
+                desk = bounded_label(channel_name(item))
                 source_type = "user_assertion" if role == "user" else "assistant_report"
-                if role == "user" and (delegated or item.get("isSidechain") or automated):
+                # Sidechain text and another agent's user-role line are relays.
+                # They are not the person's assertions.
+                relay = delegated or bool(item.get("isSidechain")) or automated or bool(agent)
+                if role == "user" and relay:
                     source_type = "context"
                     gaps.append(
                         "delegated_instruction"
-                        if delegated or item.get("isSidechain")
+                        if delegated or item.get("isSidechain") or agent
                         else "automated_prompt_not_direct_user_assertion"
                     )
                 if entry_kind in {"context", "attachment"}:
@@ -360,6 +476,8 @@ def records(path: Path):
                     tool_failed=failed,
                     touches=touches if offset == 0 else [],
                     gaps=gaps + (["record_split_into_chunks"] if len(content) > CHUNK else []),
+                    from_agent=agent,
+                    channel=desk,
                 )
 
 
@@ -483,7 +601,7 @@ def feed_records(
                 session_id=session_id,
                 source_id=f"records:{fid}:{count}",
                 source_uri=str(path),
-                source_format=FORMAT,
+                source_format=episode_format(path),
                 title=title,
                 messages=selected,
                 memory_origins={m.id: origins[m.id] for m in selected if m.id in origins},

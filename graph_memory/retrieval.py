@@ -738,12 +738,12 @@ def evidence(store, r):
             for quote in json.loads(f.get(field) or "[]"):
                 message = messages.get(quote["message_id"], {})
                 source_ref = payload.get("verified_source_refs", {}).get(quote["message_id"])
-                if payload.get("source_format") == "session-records-v1" and message:
+                if payload.get("source_format") in m.SESSION_RECORD_FORMATS and message:
                     source_ref = digest(
                         [payload["namespace"], payload["session_id"], quote["message_id"]]
                     )
                 origin = payload.get("memory_origins", {}).get(quote["message_id"])
-                if origin and payload.get("source_format") == "session-records-v1":
+                if origin and payload.get("source_format") in m.SESSION_RECORD_FORMATS:
                     # Stored message IDs, the same form as source_message_id and
                     # as MemoryMessage.memory_read_refs.
                     origin = {

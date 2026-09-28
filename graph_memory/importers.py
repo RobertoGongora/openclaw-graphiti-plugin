@@ -10,6 +10,7 @@ from .models import Message, Transcript
 
 
 def redact(text: str) -> str:
+    """Strip credentials before any feed text is stored. Patterns apply to every source."""
     text = re.sub(
         r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----",
         "[REDACTED PRIVATE KEY]",
@@ -22,11 +23,24 @@ def redact(text: str) -> str:
         text,
     )
     text = re.sub(
-        r"(?i)(\b(?:password|passwd|api[_-]?key|access[_-]?token|secret|authorization)\b\s*[=:]\s*)[^\s,;]+",
+        r"\b(?:tskey-[A-Za-z0-9_-]{8,}|xai-[A-Za-z0-9_-]{16,}|crsr_[A-Za-z0-9_-]{16,})\b",
+        "[REDACTED TOKEN]",
+        text,
+    )
+    text = re.sub(
+        r"(?i)(\b(?:password|passwd|api[_-]?key|access[_-]?token|secret|authorization|webhook[_-]?key)\b\s*[=:]\s*)[^\s,;]+",
         r"\1[REDACTED]",
         text,
     )
     text = re.sub(r"(?i)(Bearer\s+)[A-Za-z0-9._~+/-]{12,}", r"\1[REDACTED]", text)
+    text = re.sub(r"(?i)([?&](?:token|key)=)[^&#\s]+", r"\1[REDACTED]", text)
+    text = re.sub(
+        r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b",
+        "[REDACTED TOKEN]",
+        text,
+    )
+    # GitHub device-flow user codes are shown as XXXX-XXXX.
+    text = re.sub(r"\b[A-Z0-9]{4}-[A-Z0-9]{4}\b", "[REDACTED DEVICE CODE]", text)
     return text
 
 

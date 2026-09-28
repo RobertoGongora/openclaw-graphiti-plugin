@@ -1,6 +1,15 @@
 # Changelog
 ## [Unreleased]
 
+### Added
+
+- Grok Bot desk and fleet chats can be ingested from a `grok-bot` transcript
+  root (`<agentId>.jsonl`). Claude-shaped lines and flat lines that carry
+  `fromAgent` or `channel` become sourced messages with `source_format=grok-bot`.
+  Sidechain and `fromAgent` user relays stay context, not user assertions.
+  `importers.redact()` also covers GitHub device codes, `tskey-`, `xai-`,
+  `crsr_` webhook keys, JWTs, and `token`/`key` query values.
+
 ### Fixed
 
 - Historical MCP calls share admission control across session processes; bounded

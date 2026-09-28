@@ -9,6 +9,7 @@ from graph_memory.session_sources import (
     OPAQUE_CALL,
     SHELL_OUTPUT,
     before_shell_results,
+    episode_format,
     feed_records,
     records,
 )
@@ -409,3 +410,142 @@ def test_claude_sidechain_instruction_is_context(tmp_path):
     r["isSidechain"] = True
     p.write_text(json.dumps(r) + "\n")
     assert list(records(p))[0].source_type == "context"
+
+
+def grok_transcript(messages, focus=None, source_format="grok-bot"):
+    return Transcript(
+        namespace="transcripts",
+        source_id="grok",
+        session_id="grok",
+        source_format=source_format,
+        messages=messages,
+        focus_message_ids=focus if focus is not None else [m.id for m in messages],
+    )
+
+
+def test_claude_dumps_omit_empty_grok_speaker_fields(tmp_path):
+    p = tmp_path / "s.jsonl"
+    p.write_text(claude("user", "Atlas uses MySQL."))
+    dumped = list(records(p))[0].model_dump(mode="json")
+    assert "from_agent" not in dumped
+    assert "channel" not in dumped
+
+
+def test_grok_bot_feed_yields_facts_and_relays_are_not_user_assertions(tmp_path):
+    from graph_memory.extraction_policy import extraction_payload
+    from graph_memory.feed_identity import parse_root, source_files
+    from graph_memory.llm import extraction_instructions
+
+    root = tmp_path / "sessions" / "grok-bot"
+    path = root / "desk-agent-7.jsonl"
+    path.parent.mkdir(parents=True)
+    person = json.loads(claude("user", "Atlas uses MySQL.", stamp="2026-09-28T12:00:00Z"))
+    person["channel"] = "desk"
+    person["message"]["content"] = [
+        {
+            "type": "text",
+            "text": "Atlas uses MySQL. token tskey-auth-kabcdefghijklmnopqrstuvwxyz",
+        }
+    ]
+    relay = json.loads(claude("user", "Atlas uses MySQL.", stamp="2026-09-28T12:00:01Z"))
+    relay["isSidechain"] = True
+    relay["fromAgent"] = {"id": "fleet-agent-2", "name": "Fleet"}
+    relay["channel"] = "fleet"
+    report = json.loads(claude("assistant", "Atlas uses MySQL.", stamp="2026-09-28T12:01:00Z"))
+    report["channel"] = "desk"
+    report["fromAgent"] = {"id": "desk-agent-7", "name": "Sand"}
+    path.write_text(
+        json.dumps(person) + "\n" + json.dumps(relay) + "\n" + json.dumps(report) + "\n"
+    )
+    said, forwarded, told = list(records(path))
+    assert said.source_type == "user_assertion"
+    assert said.timestamp.isoformat() == "2026-09-28T12:00:00+00:00"
+    assert said.channel == "desk"
+    assert said.from_agent is None
+    assert "tskey-auth-kabcdefghijklmnopqrstuvwxyz" not in said.content
+    assert "Atlas uses MySQL." in said.content
+    assert forwarded.source_type == "context"
+    assert forwarded.source_type != "user_assertion"
+    assert "delegated_instruction" in forwarded.gaps
+    assert forwarded.from_agent == "fleet-agent-2"
+    assert forwarded.channel == "fleet"
+    assert told.source_type == "assistant_report"
+    assert told.from_agent == "desk-agent-7"
+    assert told.timestamp.isoformat() == "2026-09-28T12:01:00+00:00"
+
+    sourced = grok_transcript([said, forwarded, told])
+    assert sourced.can_yield_facts()
+    extraction(said.id).validate_evidence(sourced)
+    extraction(told.id, status="uncertain").validate_evidence(sourced)
+    with pytest.raises(ValueError, match="unvalidated"):
+        extraction(told.id).validate_evidence(sourced)
+    with pytest.raises(ValueError, match="focus message|conversational claim"):
+        extraction(forwarded.id).validate_evidence(sourced)
+    assert grok_transcript([forwarded]).can_yield_facts() is False
+
+    reduced = extraction_payload({"transcript": sourced.model_dump(mode="json")})
+    hidden = next(m for m in reduced["transcript"]["messages"] if m["id"] == forwarded.id)
+    assert hidden["content"].startswith("[Context text omitted")
+    assert "user_assertion" in extraction_instructions(sourced)
+
+    assert parse_root(root).label == "grok-bot"
+    assert source_files([root])[str(path.resolve())] == "grok-bot:desk-agent-7.jsonl"
+    assert episode_format(path) == "grok-bot"
+    assert episode_format(tmp_path / "claude" / "s.jsonl") == "session-records-v1"
+
+
+def test_flat_grok_bot_lines_keep_channel_and_from_agent_relays(tmp_path):
+    path = tmp_path / "grok-bot" / "desk-agent-7.jsonl"
+    path.parent.mkdir()
+    path.write_text(
+        json.dumps(
+            {
+                "source_format": "grok-bot",
+                "role": "user",
+                "content": "Atlas uses MySQL.",
+                "timestamp": "2026-09-28T12:02:00Z",
+                "channel": "desk",
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "source_format": "grok-bot",
+                "role": "user",
+                "content": "Atlas uses MySQL.",
+                "fromAgent": {"id": "fleet-agent-2"},
+                "channel": "fleet",
+                "timestampMs": 1759053721000,
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "source_format": "grok-bot",
+                "role": "user",
+                "content": "Atlas uses MySQL.",
+                "fromUser": {"id": "roberto"},
+                "channel": "desk",
+                "timestamp": "2026-09-28T12:03:00Z",
+            }
+        )
+        + "\n"
+        + json.dumps({"source_format": "grok-bot", "kind": "widget", "channel": "desk"})
+        + "\n"
+    )
+    person, relay, human = list(records(path))
+    assert person.source_type == "user_assertion"
+    assert person.channel == "desk"
+    assert person.timestamp.isoformat() == "2026-09-28T12:02:00+00:00"
+    assert relay.source_type == "context"
+    assert "delegated_instruction" in relay.gaps
+    assert relay.from_agent == "fleet-agent-2"
+    assert relay.channel == "fleet"
+    assert relay.timestamp is not None
+    assert human.source_type == "user_assertion"
+    assert human.from_agent is None
+    assert human.channel == "desk"
+    sourced = grok_transcript([person])
+    assert sourced.can_yield_facts()
+    extraction(person.id).validate_evidence(sourced)
+    assert grok_transcript([relay]).can_yield_facts() is False

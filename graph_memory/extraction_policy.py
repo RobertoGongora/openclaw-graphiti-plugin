@@ -2,12 +2,14 @@
 
 from copy import deepcopy
 
+from .models import SOURCED_FORMATS
+
 
 def extraction_payload(payload):
     """Keep full durable evidence; omit ineligible opaque text only from model input."""
     reduced = deepcopy(payload)
     transcript = reduced["transcript"]
-    if transcript.get("source_format") not in {"session-records-v1", "direct-mcp-v1"}:
+    if transcript.get("source_format") not in SOURCED_FORMATS:
         return reduced
     from .recall_provenance import read_results
 
@@ -32,7 +34,7 @@ def extraction_payload(payload):
     return reduced
 
 
-CANDIDATE_SOURCE = """Evidence policy for session-records-v1 AND direct-mcp-v1.
+CANDIDATE_SOURCE = """Evidence policy for session-records-v1, grok-bot, AND direct-mcp-v1.
 Apply this decision procedure to EACH fact before choosing a date or status.
 
 1. Choose a durable conversational claim. evidence contains only exact quotes from
