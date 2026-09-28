@@ -162,6 +162,8 @@ services:
       # Extra Host names and browser Origins accepted besides loopback (comma lists).
       MEMORY_HTTP_HOSTS: ${TRANSCRIPT_MCP_HOSTS:-}
       MEMORY_HTTP_ORIGINS: ${TRANSCRIPT_MCP_ORIGINS:-}
+      # Opt-in tools/call JSONL. Empty stays off. Root is read-only; use /tmp or a mount.
+      MEMORY_MCP_CALL_LOG: ${MEMORY_MCP_CALL_LOG:-}
     command: [serve, --transport, http, --host, 0.0.0.0]
     ports:
       - '127.0.0.1:${TRANSCRIPT_MCP_PORT:-8766}:8765'

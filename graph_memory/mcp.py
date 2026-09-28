@@ -7,6 +7,7 @@ import logging
 import re
 import sys
 import threading
+import time
 import uuid
 from contextlib import nullcontext
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -15,6 +16,7 @@ from pydantic import ValidationError
 
 from . import __version__
 from .admission import HistoryBusy, historical_read
+from .call_log import finish_call, note_call, start_call
 
 VERSION = "2026-07-28"
 LEGACY_VERSIONS = ("2025-03-26", "2025-06-18", "2025-11-25")
@@ -110,17 +112,40 @@ class Protocol:
         hide_scope(result)
         return result
 
+    def bind_arguments(self, name, arguments):
+        """Copy tool arguments and apply this server's namespace, matching the call path."""
+        arguments = dict(arguments)
+        if self.namespace is None:
+            return arguments
+        if name == "memory_ingest":
+            if isinstance(arguments.get("transcript"), dict):
+                arguments["transcript"] = dict(arguments["transcript"])
+                arguments["transcript"].setdefault("namespace", self.namespace)
+        else:
+            arguments.setdefault("namespace", self.namespace)
+        return arguments
+
     def dispatch(self, message, headers=None):
+        started = time.perf_counter()
+        token = start_call(message)
+        status, response = 500, None
         try:
-            return self.route(message, headers)
+            status, response = self.route(message, headers)
         except Exception as exc:
             request = failure("dispatch", exc)
+            note_call(correlation_id=request)
             request_id = message.get("id") if isinstance(message, dict) else None
             if isinstance(message, dict) and "id" not in message:
-                return 202, None
-            if isinstance(request_id, bool) or not isinstance(request_id, (str, int)):
-                request_id = None
-            return 500, error(request_id, -32603, f"Internal error (request {request})")
+                status, response = 202, None
+            else:
+                if isinstance(request_id, bool) or not isinstance(request_id, (str, int)):
+                    request_id = None
+                status, response = 500, error(
+                    request_id, -32603, f"Internal error (request {request})"
+                )
+        finally:
+            finish_call(token, message, headers, status, response, started)
+        return status, response
 
     def route(self, message, headers=None):
         if (
@@ -212,22 +237,20 @@ class Protocol:
             result = {"tools": self.catalog, "ttlMs": 300000, "cacheScope": "public"}
         elif method == "tools/call":
             name, arguments = params.get("name"), params.get("arguments", {})
+            note_call(tool=name if isinstance(name, str) else None)
+            if isinstance(name, str) and isinstance(arguments, dict):
+                # Log the bound copy, including calls rejected before the handler runs.
+                arguments = self.bind_arguments(name, arguments)
+                note_call(arguments=arguments)
             if not isinstance(name, str) or name not in self.tools:
                 return 400, error(request_id, -32602, "Unknown tool")
             if self.read_only and name not in READ_ONLY:
                 return 403, error(request_id, DENIED, "This server permits retrieval only")
             if not isinstance(arguments, dict):
+                note_call(arguments_invalid=True)
                 return 400, error(request_id, -32602, "Tool arguments must be an object")
             # A bound endpoint supplies its scope; explicit legacy arguments must
             # still agree, so hiding the field never weakens authorization.
-            arguments = dict(arguments)
-            if self.namespace is not None:
-                if name == "memory_ingest":
-                    if isinstance(arguments.get("transcript"), dict):
-                        arguments["transcript"] = dict(arguments["transcript"])
-                        arguments["transcript"].setdefault("namespace", self.namespace)
-                else:
-                    arguments.setdefault("namespace", self.namespace)
             ns = arguments.get("namespace")
             if name == "memory_ingest" and isinstance(arguments.get("transcript"), dict):
                 ns = arguments["transcript"].get("namespace")
@@ -255,6 +278,7 @@ class Protocol:
                 with historical_read() if historical else nullcontext():
                     output = handler(request)
                 rendered_image = output.pop("image", None) if name == "memory_render" else None
+                note_call(output=output, image_omitted=rendered_image is not None)
                 result = {
                     "content": [{"type": "text", "text": json.dumps(output)}],
                     "structuredContent": output,
@@ -273,6 +297,7 @@ class Protocol:
                 detail = [
                     {"loc": e["loc"], "msg": e["msg"]} for e in exc.errors(include_input=False)
                 ]
+                note_call(validation=detail)
                 result = {
                     "content": [{"type": "text", "text": json.dumps(detail)}],
                     "isError": True,
@@ -283,9 +308,11 @@ class Protocol:
                 if type(exc) is ValueError:
                     text = str(exc)
                 else:
+                    correlation = failure(name, exc)
+                    note_call(correlation_id=correlation, error_type=type(exc).__name__)
                     text = (
                         "Operation failed; durable receipts can be retried. Check service "
-                        f"connectivity and model configuration. Request id: {failure(name, exc)}"
+                        f"connectivity and model configuration. Request id: {correlation}"
                     )
                 result = {"content": [{"type": "text", "text": text}], "isError": True}
             finally:
@@ -355,7 +382,7 @@ def http_server(protocol, host="127.0.0.1", port=8765, token=None, origins=(), h
             self.connection.settimeout(30)
 
         def log_message(self, *_):
-            pass  # Never log request data or credentials.
+            pass  # Access log stays empty. Opt-in call records are MEMORY_MCP_CALL_LOG only.
 
         def respond(self, status, response):
             body = json.dumps(response).encode() if response is not None else b""

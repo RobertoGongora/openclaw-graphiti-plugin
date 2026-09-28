@@ -598,6 +598,32 @@ Neo4j image as the stack. The dump holds full transcript text. Store it like the
 source sessions. Keep the image tag that wrote the data next to the dump,
 because an older image cannot write to a migrated journal.
 
+## MCP call log
+
+The server does not record MCP requests unless `MEMORY_MCP_CALL_LOG` is set to a
+file path. Leaving it unset is the default: questions, arguments, and results
+are not written, and the HTTP access log stays empty. Failures still log only an
+exception type and a request id.
+
+Setting the variable is a privacy flip for local recall debugging. Each
+`tools/call` on HTTP and stdio appends one JSON object: time, request id, tool
+name, arguments after namespace binding, `ok` / `isError`, timing, and a compact
+result (fact ids, entity keys, counts, status). Large text is cut with
+`…[truncated]`. Render PNG bytes are left out. Authorization headers and
+credential-shaped fields (`token`, `password`, `api_key`, and similar) are not
+written. A credential value of 8 or more characters is also stripped if it shows up
+again in the question or the result. New files are mode 0600.
+
+This file is not the Neo4j change journal. `MEMORY_JOURNAL_AUDIT` does not read
+it, and it is not worker JSONL or the OpenClaw debug log. Nothing here is sent
+off the machine. Delete the file when you are done. The process also rotates it
+at 5 MiB, keeping one older copy at `<path>.1`.
+
+Compose runs MCP with a read-only root filesystem. Use `/tmp/mcp-calls.jsonl`
+(tmpfs, gone when the container is recreated) or mount a directory and point the
+variable at that path. A path the process cannot create is ignored; the call
+still succeeds.
+
 ## Secrets
 
 The personal stack starts with no `.env`: `NEO4J_PASSWORD` and `MEMORY_HTTP_TOKEN` both
@@ -626,8 +652,9 @@ transcripts stack has no default and requires both values.
   password or the MCP token.
 - `claude-config` writes `${NEO4J_PASSWORD}` as a reference for the client to
   expand. It never copies the value. The files are mode 0600.
-- The MCP server does not log requests, arguments or credentials. Failures log
-  an exception type and a request id.
+- MCP failures log an exception type and a request id. Request bodies stay out of
+  that log. `MEMORY_MCP_CALL_LOG` is the only switch that records calls, and it
+  is off unless you set it. See [MCP call log](#mcp-call-log).
 - The MCP port is bound to loopback. To reach it under another host name, add
   the name to `MEMORY_HTTP_HOSTS` or `TRANSCRIPT_MCP_HOSTS`. Do not publish the
   port on a public interface. The bearer token is a private-service option.
