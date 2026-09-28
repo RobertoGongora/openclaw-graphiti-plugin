@@ -631,7 +631,8 @@ object:
   entity keys (for `memory_search`, the subjects and targets of the returned
   facts); counts, status, `revision` and `question_term_count` (0 means the
   question held only stop words and the facts are unranked). No fact text,
-  question echo or render PNG bytes. A result over 7,000 characters keeps as many
+  question echo, episode names (a session feed's is its first user message) or
+  render PNG bytes. A result over 7,000 characters keeps as many
   ids as fit and says how many there were
 
 Authorization headers and credential-shaped fields (`token`, `password`,
@@ -645,7 +646,8 @@ secrets, so a client cannot choose words to blank. Other credentials a user type
 characters; a larger record keeps only the tool, id, status and timing.
 
 The file and a `<path>.lock` beside it are mode 0600. The process will not write
-through a symbolic link, into a FIFO, or into a file another user owns. At 5 MiB
+through a symbolic link, into a FIFO, into a file with other hard links, or into a
+file another user owns. At 5 MiB
 the file is renamed to `<path>.1`, replacing the older copy, under a lock that the
 HTTP server and every stdio session share. If that rename fails, records are
 skipped rather than let the file grow.
