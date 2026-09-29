@@ -187,6 +187,14 @@ def test_rejected_episode_still_spends_budget_with_growing_backoff(graph, tmp_pa
     assert not service.breaker.open  # the provider answered every time
 
 
+# stderr from codex exec (codex-cli 0.154.0) after the refresh token was revoked.
+REVOKED_CODEX_LOGIN = """\
+2026-09-29T13:25:15.511057Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: HTTP error: 401 Unauthorized, url: wss://chatgpt.com/backend-api/codex/responses
+2026-09-29T13:25:15.539579Z ERROR codex_login::auth::manager: Failed to refresh token: Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again.
+ERROR: Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again.
+"""
+
+
 def fake_codex(tmp_path, body):
     script = tmp_path / "bin" / "codex"
     script.parent.mkdir()
@@ -211,6 +219,42 @@ def test_codex_failures_are_classified_without_leaking_text(tmp_path, monkeypatc
     assert "secret" not in str(caught.value)
     assert invocation_reason("ERROR: stream disconnected before completion") == "network"
     assert invocation_reason("something nobody anticipated") == "unknown"
+
+
+def test_a_revoked_codex_login_is_authentication():
+    assert invocation_reason(REVOKED_CODEX_LOGIN) == "authentication"
+    # Prompt text echoed into stderr is not a CLI error line, even when it
+    # contains the same words or a bare "ERROR" and "401".
+    echoed = (
+        "Please log out and sign in again. The refresh token was revoked. ERROR 401 Unauthorized"
+    )
+    assert invocation_reason(echoed) == "unknown"
+    assert invocation_reason(echoed + "\nERROR: stream disconnected before completion") == "network"
+
+
+def test_a_revoked_login_opens_the_breaker_on_the_first_failure(graph, tmp_path, monkeypatch):
+    store, ns = graph
+    for i in range(3):
+        (tmp_path / f"{i}.md").write_text(f"Note {i} holds no durable information.")
+    monkeypatch.setenv(
+        "PATH",
+        fake_codex(tmp_path, "cat >&2 <<'END'\n" + REVOKED_CODEX_LOGIN + "END\nexit 1\n")
+        + ":/usr/bin:/bin",
+    )
+    clock = [0.0]
+    service = MemoryService(store, CodexLLM(timeout=30))
+    service.breaker = Breaker(clock=lambda: clock[0])
+    scan_bank(service, ns, [tmp_path], {})
+    first = worker_tick(service, ns)
+    # Persistent: the first failure opens the break, so the other episodes are not tried.
+    assert len(first["receipts"]) == 1
+    receipt = first["receipts"][0]
+    assert receipt["diagnostic"]["provider_reason"] == "authentication"
+    assert receipt["breaker"]["open"] and receipt["breaker"]["reason"] == "authentication"
+    assert receipt["failed_attempts"] == 0
+    assert worker_tick(service, ns)["receipts"] == []
+    rows = episodes(store, ns)
+    assert {r["status"] for r in rows} == {"pending"} and {r["attempts"] for r in rows} == {0}
 
 
 def test_timeout_kills_the_whole_process_group(tmp_path, monkeypatch):

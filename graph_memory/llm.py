@@ -166,7 +166,8 @@ INVOCATION_REASONS = (
     ("rate_limit", r"rate limit|too many requests|\b429\b"),
     (
         "authentication",
-        r"not logged in|log ?in again|unauthorized|\b401\b|\b403\b|token (is )?expired",
+        r"not logged in|log ?in again|sign ?in again|unauthorized|\b401\b|\b403\b|"
+        r"refresh token (was |has been )?revoked|token (is )?expired",
     ),
     (
         "model_unavailable",

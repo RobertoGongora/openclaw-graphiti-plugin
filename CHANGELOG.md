@@ -14,6 +14,8 @@
 
 ### Fixed
 
+- A revoked Codex refresh token is classified as `authentication`. The breaker
+  opens on the first failure, and the outage log tells the operator to log in again.
 - Historical MCP calls share admission control across session processes; bounded
   entity/evidence reconstruction retains fewer nodes without skipping journal
   integrity checks. Busy callers can retry without losing their connection.
