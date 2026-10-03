@@ -9,6 +9,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from .call_log import announce as announce_call_log
 from .importers import memory_files, transcripts
 from .llm import configured_llm
 from .mcp import Protocol, http_server, stdio
@@ -298,6 +299,7 @@ def run():
     try:
         if args.command == "serve":
             protocol = Protocol(service, namespace=args.namespace, read_only=args.read_only)
+            announce_call_log()
             if args.transport == "stdio":
 
                 def leave(*_):

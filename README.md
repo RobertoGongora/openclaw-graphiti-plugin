@@ -252,6 +252,7 @@ automatically. See [revision workflow](docs/revisions.md).
 | `MEMORY_INTAKE_QUEUE` | `32` due episodes at which transcript intake stops staging |
 | `MEMORY_INTAKE_FILES` | `4` files with work that one transcript scan may open |
 | `MEMORY_JOURNAL_AUDIT` | `0` (off). `N` checks every Nth journal write against the whole graph |
+| `MEMORY_MCP_CALL_LOG` | Unset (off). Local JSONL path for MCP `tools/call` debugging. A privacy flip; see [operations](docs/operations.md#mcp-call-log) |
 | `MEMORY_FEED_ACCEPT_UNMATCHED` | Unset. `1` lets transcript intake continue when older feeds cannot be matched to the current roots. It can stage known sessions a second time; see [operations](docs/operations.md#feed-identity) |
 | `MEMORY_ALLOW_DEFAULT_PASSWORD` | Unset. `1` accepts the default `graph-memory` password and token of the personal stack for a throwaway graph |
 

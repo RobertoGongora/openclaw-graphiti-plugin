@@ -48,7 +48,9 @@ For a remote transcript source over Tailscale, see [remote-push.md](remote-push.
 
 The `worker` and `mcp` services run with a read-only root filesystem, a tmpfs
 `/tmp`, all capabilities dropped, `no-new-privileges`, and memory and pid limits.
-The image writes only to `/tmp` and to the mounted Codex home. Each service has a
+The image writes only to `/tmp` and to the mounted Codex home. An opt-in MCP call
+log (`MEMORY_MCP_CALL_LOG`) has to use `/tmp` or a path you mount; see
+[operations](operations.md#mcp-call-log). Each service has a
 healthcheck: Neo4j answers a Cypher query, and the others run
 `graph-memory health --role worker|mcp`. Services wait for a healthy Neo4j and
 restart when it is recreated. `GRAPH_MEMORY_TAG` selects the image tag (default
