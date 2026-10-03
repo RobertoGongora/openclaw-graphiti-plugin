@@ -634,6 +634,79 @@ def test_two_machines_with_qualified_labels_keep_separate_cursors(
     assert parsed == [] and feeds(store, ns) == found and episodes(store, ns) == staged
 
 
+@pytest.mark.parametrize(
+    "filename", ["journal.jsonl", "0138dd13-1c43-4517-84bc-416fc7aac737.jsonl"]
+)
+@pytest.mark.parametrize("same_path", [True, False])
+def test_remote_identity_fallback_and_caught_up_stamps_stay_with_the_label(
+    graph, tmp_path, monkeypatch, filename, same_path
+):
+    import os
+
+    store, ns = graph
+    service = MemoryService(store)
+    monkeypatch.setenv("NEO4J_URI", "bolt://ct-160:27687")
+    root = tmp_path / "Users" / "rob" / ".claude" / "projects"
+    first = root / "workflow" / filename
+    first.parent.mkdir(parents=True)
+    original = claude("user", "Mac A uses MySQL.")
+    first.write_text(original)
+    stat = first.stat()
+    root_a = Path(f"rob-mbp.claude={root}")
+    drain(service, ns, [root_a])
+    before, staged = feeds(store, ns), episodes(store, ns)
+
+    # Separate machines can expose the exact same absolute path, size and mtime.
+    other_root = root if same_path else tmp_path / "mini" / "projects"
+    second = other_root / "workflow" / filename
+    second.parent.mkdir(parents=True, exist_ok=True)
+    second.write_text(claude("user", "Mac B uses MySQL."))
+    os.utime(second, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    root_b = Path(f"rob-mini.claude={other_root}")
+    result = follow_once(service, ns, [root_b], {}, source_records=True)
+    assert len(result) == 1 and len(result[0]["receipts"]) == 1
+    found = feeds(store, ns)
+    assert len(found) == 2 and episodes(store, ns) == staged + 1
+    assert all(found[fid] == props for fid, props in before.items())
+    assert {f["source_key"] for f in found.values()} == {
+        f"rob-mbp.claude:workflow/{filename}",
+        f"rob-mini.claude:workflow/{filename}",
+    }
+    assert census(store, ns, [root_b])["gaps"]["prefix_mismatches"] == 0
+
+    # Returning to the first host must still resolve its original feed.
+    first.write_text(original)
+    os.utime(first, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    assert follow_once(service, ns, [root_a], {}, source_records=True) == []
+    with first.open("a") as stream:
+        stream.write(claude("user", "Mac A moved to Postgres."))
+    result = follow_once(service, ns, [root_a], {}, source_records=True)
+    assert len(result) == 1 and result[0]["feed_id"] in before
+
+
+@pytest.mark.parametrize("apply", [False, True])
+def test_relabel_cli_reports_a_refused_apply_as_failure(monkeypatch, capsys, apply):
+    from types import SimpleNamespace
+
+    from graph_memory import cli, feed_identity
+
+    monkeypatch.setattr(
+        cli, "build_service", lambda: SimpleNamespace(store=SimpleNamespace(close=lambda: None))
+    )
+    monkeypatch.setattr(
+        feed_identity, "relabel", lambda *args: dict(feeds=1, conflicts=1, relabelled=0)
+    )
+    argv = ["graph-memory", "feeds", "relabel", "--from", "claude", "--to", "rob-mbp.claude"]
+    monkeypatch.setattr(cli.sys, "argv", argv + (["--apply"] if apply else []))
+    if apply:
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+        assert exc.value.code == 1
+    else:
+        cli.main()
+    assert json.loads(capsys.readouterr().out) == dict(feeds=1, conflicts=1, relabelled=0)
+
+
 def test_follow_cli_accepts_label_path_and_refuses_bare_labels_remotely(
     monkeypatch, tmp_path, capsys
 ):

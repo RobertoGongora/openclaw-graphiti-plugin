@@ -243,6 +243,7 @@ class Feeds:
 
     def __init__(self, store, namespace, roots=None):
         self.store, self.namespace = store, namespace
+        self.shared = shared_graph()
         self.roots = validate_roots(roots) if roots is not None else []
         self.by_key, self.by_uri, self.by_name = {}, {}, {}
         rows = store.read(feed_rows, namespace)
@@ -250,17 +251,26 @@ class Feeds:
             if row["key"]:
                 self.by_key[row["key"]] = row
             if row["uri"]:
-                held = self.by_uri.get(row["uri"])
+                uri = self.lookup_key(row["key"], row["uri"])
+                name = self.lookup_key(row["key"], PurePosixPath(row["uri"]).name)
+                held = self.by_uri.get(uri)
                 # The watcher's own feed for a path wins over one a direct caller made.
                 if not held or row["session"] == "host:" + digest(row["uri"]):
-                    self.by_uri[row["uri"]] = row
-                self.by_name.setdefault(PurePosixPath(row["uri"]).name, {})[row["id"]] = row
+                    self.by_uri[uri] = row
+                self.by_name.setdefault(name, {})[row["id"]] = row
         # Older feeds these roots cannot name: their files would all read as new.
         self.blocked = {}
         if roots is not None and not accept_unmatched():
             counts = plan(rows, self.roots)[1]
             if counts["unmatched"] or counts["conflicts"]:
                 self.blocked = counts
+
+    def lookup_key(self, key, name):
+        # Absolute paths and even UUID filenames can recur on another host.
+        # Remote roots keep their label through remounts; crossing labels is an
+        # explicit relabel operation, never an inference from a local path.
+        label = (key or "").partition(":")[0] if self.shared else None
+        return label, name
 
     def present(self, row, name):
         """Is the file this feed was fed from still there? Its stored path may be
@@ -272,7 +282,7 @@ class Feeds:
                 places.add(str((root.given.parent if root.is_file() else root.given) / relative))
         return any(place != name and Path(place).exists() for place in places)
 
-    def renamed(self, name, messages):
+    def renamed(self, key, name, messages):
         """The known feed this file continues after its directory was renamed.
 
         A file that is new by key and by path but carries a known name is a copy
@@ -281,7 +291,8 @@ class Feeds:
         rejects different content; any other name must also begin with exactly the
         messages the feed holds."""
         known = sorted(
-            self.by_name.get(PurePosixPath(name).name, {}).values(), key=lambda r: r["id"]
+            self.by_name.get(self.lookup_key(key, PurePosixPath(name).name), {}).values(),
+            key=lambda r: r["id"],
         )
         parent = PurePosixPath(name).parts[-2:-1]
         if not unique_name(name):
@@ -315,9 +326,9 @@ class Feeds:
 
     def resolve(self, key, name, messages=None) -> Identity:
         """messages: how to get the file's parsed records, when they are already at hand."""
-        row = self.by_key.get(key) or self.by_uri.get(name)
+        row = self.by_key.get(key) or self.by_uri.get(self.lookup_key(key, name))
         if not row and not accept_unmatched():
-            row = self.renamed(name, messages or (lambda: list(records(Path(name)))))
+            row = self.renamed(key, name, messages or (lambda: list(records(Path(name)))))
         if row:
             return Identity(row["id"], row["session"], key, True)
         session = "source:" + digest(key)
@@ -335,8 +346,11 @@ class Feeds:
                 del index[mark]
         for rows in self.by_name.values():
             rows.pop(identity.feed_id, None)
-        self.by_key[identity.source_key] = self.by_uri[name] = row
-        self.by_name.setdefault(PurePosixPath(name).name, {})[identity.feed_id] = row
+        self.by_key[identity.source_key] = row
+        self.by_uri[self.lookup_key(identity.source_key, name)] = row
+        self.by_name.setdefault(self.lookup_key(identity.source_key, PurePosixPath(name).name), {})[
+            identity.feed_id
+        ] = row
 
     def rekey(self, store, files):
         """Name by today's roots every feed found by its path alone. A fully fed
@@ -344,7 +358,7 @@ class Feeds:
         it kept would not find the feed after the next move."""
         changed = []
         for name, key in files.items():
-            row = self.by_uri.get(name)
+            row = self.by_uri.get(self.lookup_key(key, name))
             if row and row["key"] != key and key not in self.by_key:
                 changed.append((Identity(row["id"], row["session"], key, True), name))
         if changed:

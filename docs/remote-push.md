@@ -163,21 +163,22 @@ inside the container. In order:
 
    `feeds stamp` does not do this: it names only feeds that have no key, and the
    Mac's worker keyed every feed on its first scan. Without the relabel the Mac's
-   first `follow` finds no feed by key and none by path, and the feeds that
-   survive are the ones a unique file name matches. The `journal.jsonl` files of
-   workflows would be staged again as new sessions.
+   first `follow` finds no feed under the new label. Remote path and filename
+   matching never crosses labels, so those files would be staged as new
+   sessions. A refused `--apply` prints its conflict counts and exits 1;
+   resolve those conflicts before continuing.
 6. **Start the receiver**: `gmr up -d`. The worker watches no transcripts, so it
    logs no `transcript_scan` events; it only works the queue.
 7. **Match versions.** Install the Mac's CLI from the same commit as the
    receiver's image, and compare `graph-memory --version` on both. The engine
    hash must be equal, or episodes staged by the Mac are extracted under
    different code than the ones staged before. Upgrade both together.
-8. **Inventory once from the Mac**, with the roots `follow` will use:
+8. **Inventory once from the Mac.** Set up the Keychain and wrapper in
+   [Mac forwarder](#mac-forwarder) first, then use its inventory mode. Both modes
+   connect to the same receiver with the same credentials and roots:
 
    ```sh
-   graph-memory --namespace transcripts inventory --once \
-     --transcripts rob-mbp.claude=$HOME/.claude/projects \
-     --transcripts rob-mbp.codex=$HOME/.codex/sessions
+   ~/.local/bin/graph-memory-push inventory
    ```
 
    Expect `"state": "available"` and zero `gaps.identity_refused`. The unstaged
@@ -203,7 +204,9 @@ prompts for it, so the value never reaches shell history:
 security add-generic-password -a "$USER" -s graph-memory-transcripts -w
 ```
 
-A wrapper reads it at start and hands it to the process environment only:
+A wrapper reads it at start and hands it to the process environment only.
+Save it as `~/.local/bin/graph-memory-push` and make it executable with
+`chmod 700 ~/.local/bin/graph-memory-push`:
 
 ```sh
 #!/bin/sh
@@ -213,9 +216,22 @@ NEO4J_PASSWORD=$(security find-generic-password -a "$USER" -s graph-memory-trans
 export NEO4J_PASSWORD
 export NEO4J_URI=bolt://graph-memory.taild00569.ts.net:27687
 export MEMORY_FEED_REMOTE_RECEIVER=1
-exec graph-memory --namespace transcripts follow --source-records \
-  "rob-mbp.claude=$HOME/.claude/projects" \
-  "rob-mbp.codex=$HOME/.codex/sessions"
+case "${1:-follow}" in
+  inventory)
+    exec graph-memory --namespace transcripts inventory --once \
+      --transcripts "rob-mbp.claude=$HOME/.claude/projects" \
+      --transcripts "rob-mbp.codex=$HOME/.codex/sessions"
+    ;;
+  follow)
+    exec graph-memory --namespace transcripts follow --source-records \
+      "rob-mbp.claude=$HOME/.claude/projects" \
+      "rob-mbp.codex=$HOME/.codex/sessions"
+    ;;
+  *)
+    printf 'usage: graph-memory-push [inventory|follow]\n' >&2
+    exit 2
+    ;;
+esac
 ```
 
 The guards against bare labels and `MEMORY_FEED_ACCEPT_UNMATCHED` apply when
@@ -287,11 +303,14 @@ Give each Mac its own host prefix (`rob-mbp.claude`, `rob-mini.claude`). Each
 follows only its own roots. Another machine's feeds carry keys under another
 label, so they do not block this Mac's intake.
 
-Push each session from one Mac only. A session file copied or synced to a second
-Mac has the same unique name (session uuid, Codex rollout name), and the first
-Mac's copy is not visible from the second, so the second Mac takes over the
-first one's feed: its key moves to the second Mac's label. Nothing deduplicates
-content across machines.
+Paths, filenames and caught-up stamps are scoped to the root label on a shared
+graph. Two Macs can have identical absolute paths and filenames without taking
+over each other's feeds. Moving a session to another machine or changing its
+label requires an explicit `feeds relabel` with both followers stopped.
+
+Push each session from one Mac only. A session copied or synced to another Mac
+under a different label becomes a separate feed; content is not deduplicated
+across machines.
 
 ## Troubleshooting
 

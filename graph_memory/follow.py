@@ -43,7 +43,10 @@ def seed_seen(service, namespace, roots, files, seen):
         ).data()
     )
     for row in rows:
-        for mark in (row["key"], row["uri"]):
+        # On a shared graph the same absolute path can belong to another host.
+        # Only its stable label-qualified key can establish that a file is fed.
+        marks = (row["key"],) if feeds.shared else (row["key"], row["uri"])
+        for mark in marks:
             if mark:
                 seen.setdefault(mark, (row["mtime"], row["size"]))
     seen[FEEDS] = feeds

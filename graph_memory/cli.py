@@ -528,6 +528,13 @@ def run():
         else:
             result = service.store.repair(args.namespace)
         print(json.dumps(result, indent=2))
+        if (
+            args.command == "feeds"
+            and args.action == "relabel"
+            and args.apply
+            and result.get("conflicts")
+        ):
+            raise SystemExit(1)
         if result.get("failures") or any(
             r.get("status") == "failed" for r in result.get("receipts", [])
         ):
