@@ -163,10 +163,13 @@ inside the container. In order:
 
    `feeds stamp` does not do this: it names only feeds that have no key, and the
    Mac's worker keyed every feed on its first scan. Without the relabel the Mac's
-   first `follow` finds no feed under the new label. Remote path and filename
-   matching never crosses labels, so those files would be staged as new
-   sessions. A refused `--apply` prints its conflict counts and exits 1;
-   resolve those conflicts before continuing.
+   first `follow` finds no feed under the new label. If the stored paths fall
+   under the Mac's roots, intake and inventory block until ownership is resolved.
+   Paths that also changed cannot identify a missed relabel: always complete this
+   step and check the counts before continuing. Remote path and filename matching
+   never crosses labels. `--apply` exits 1 for conflicts **or zero matching feeds**;
+   check the source label and resolve conflicts before continuing. A dry run may
+   exit 0 with zero feeds, for example if that consumer has never been used.
 6. **Start the receiver**: `gmr up -d`. The worker watches no transcripts, so it
    logs no `transcript_scan` events; it only works the queue.
 7. **Match versions.** Install the Mac's CLI from the same commit as the
@@ -183,8 +186,10 @@ inside the container. In order:
 
    Expect `"state": "available"` and zero `gaps.identity_refused`. The unstaged
    counts should be what the Mac wrote after step 2. `identity_blocked` means
-   some feeds have no key and are stored under paths these roots cannot name:
-   stamp them (see [operations.md](operations.md#feed-identity)), never
+   either unkeyed legacy feeds need explicit stamping with their known owning
+   machine's label and stored paths, or the new label overlaps another label's
+   stored paths. Follow the reported action: stamp legacy feeds or complete step 5.
+   Do not acknowledge the cutover as a new source, or use
    `MEMORY_FEED_ACCEPT_UNMATCHED`.
 9. **Start `follow`** on the Mac (next section).
 
@@ -222,13 +227,16 @@ case "${1:-follow}" in
       --transcripts "rob-mbp.claude=$HOME/.claude/projects" \
       --transcripts "rob-mbp.codex=$HOME/.codex/sessions"
     ;;
-  follow)
-    exec graph-memory --namespace transcripts follow --source-records \
+  follow|once)
+    mode=${1:-follow}
+    set --
+    if [ "$mode" = once ]; then set -- --once; fi
+    exec graph-memory --namespace transcripts follow --source-records "$@" \
       "rob-mbp.claude=$HOME/.claude/projects" \
       "rob-mbp.codex=$HOME/.codex/sessions"
     ;;
   *)
-    printf 'usage: graph-memory-push [inventory|follow]\n' >&2
+    printf 'usage: graph-memory-push [inventory|follow|once]\n' >&2
     exit 2
     ;;
 esac
@@ -300,13 +308,44 @@ Nothing is queued on the Mac. Catch-up is a rescan of the files:
 ## Several Macs
 
 Give each Mac its own host prefix (`rob-mbp.claude`, `rob-mini.claude`). Each
-follows only its own roots. Another machine's feeds carry keys under another
-label, so they do not block this Mac's intake.
+follows only its own roots. Already keyed feeds from other machines do not block
+an established label. Unkeyed legacy feeds block intake on the shared graph even
+when their paths match: stop followers and explicitly run `feeds stamp` with the
+known owning machine's qualified label and stored path prefix. Shared followers
+never auto-stamp. `feed --source-records` is refused before connecting on a shared
+graph because it creates no key; use `follow LABEL=PATH --source-records --once`.
 
 Paths, filenames and caught-up stamps are scoped to the root label on a shared
 graph. Two Macs can have identical absolute paths and filenames without taking
 over each other's feeds. Moving a session to another machine or changing its
 label requires an explicit `feeds relabel` with both followers stopped.
+
+A label with no keyed feeds needs a one-time acknowledgement if another label
+has stored paths under its root. A new Mac with the same home directory and an
+accidentally renamed existing Mac are indistinguishable by paths. For an existing
+source, use `feeds relabel`; never acknowledge it as new. A new Mac with different,
+nonoverlapping paths needs no acknowledgement.
+
+For a genuinely new Mac, first edit its wrapper to use that Mac's qualified
+labels. Then run inventory and one scan with those exact labels acknowledged:
+
+```sh
+MEMORY_FEED_NEW_SOURCE_LABELS=rob-mini.claude,rob-mini.codex \
+  ~/.local/bin/graph-memory-push inventory
+MEMORY_FEED_NEW_SOURCE_LABELS=rob-mini.claude,rob-mini.codex \
+  ~/.local/bin/graph-memory-push once
+# Confirm inventory works without acknowledgement before starting launchd:
+~/.local/bin/graph-memory-push inventory
+```
+
+The wrapper inherits this transient environment value. It is a comma-separated
+list of exact labels (surrounding spaces allowed); wildcards, empty entries and
+bare consumer labels are refused. Do not add it to the wrapper, `.env`, or the
+launchd plist. Each acknowledged label must create at least one feed before it
+can restart without acknowledgement; if the queue is full or no file exists yet,
+repeat the one-time scan when it can stage work. Inventory does not register a
+label. The acknowledgement only permits new feeds under the listed labels; it
+never adopts another label's feeds and never bypasses unkeyed legacy feeds.
 
 Push each session from one Mac only. A session copied or synced to another Mac
 under a different label becomes a separate feed; content is not deduplicated
@@ -318,7 +357,8 @@ across machines.
 | --- | --- | --- |
 | `follow` exits 69 | Receiver unreachable, or wrong password | `tailscale status`, `nc -zv graph-memory.taild00569.ts.net 27687`, the tailnet policy, the Keychain item |
 | `follow` exits 2, "machine-qualified" | A bare label with a remote `NEO4J_URI` | Name the root `HOST.CONSUMER=PATH` |
-| `feed_identity_blocked` | Feeds with no key, stored under paths these roots cannot name | `feeds stamp --root LABEL=STORED_PREFIX`; see [operations.md](operations.md#feed-identity) |
-| `feed_identity_refused` for most files | The keys still carry the old label | `feeds relabel` (cutover step 5), with `follow` stopped |
+| `feed_identity_blocked` / inventory `identity_blocked`, `unkeyed` | Shared graph contains feeds with no known owning label | Stop followers; `feeds stamp --root LABEL=STORED_PREFIX` with the known owner's qualified label; see [operations.md](operations.md#feed-identity) |
+| `feed_identity_blocked` / inventory `identity_blocked`, `new_source_labels` | A label has no feeds, but its root overlaps paths stored under other labels | Existing source: `feeds relabel` (cutover step 5), with followers stopped. Genuinely new Mac: transient acknowledgement as above |
+| `feed_identity_refused` | A known file name under the same label appears copied beside its original | Keep one authoritative source; inspect the reported known feed and key |
 | Worker exits 2 at start | `MEMORY_FEED_ACCEPT_UNMATCHED=1` reached a receiver | Remove it from the env file |
 | Episodes stay pending | Worker down, model login expired, or provider outage | `gmr ps worker`, `gmr logs worker`; see [operations.md](operations.md#provider-outage) |

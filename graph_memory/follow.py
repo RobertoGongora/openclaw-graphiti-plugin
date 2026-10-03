@@ -15,23 +15,21 @@ CURSOR, SEEDED, FEEDS = "\0cursor", "\0seeded", "\0feeds"
 def seed_seen(service, namespace, roots, files, seen):
     """Restore which files were fully fed, so a restart does not reparse them all.
     Returns why nothing may be fed, if older feeds cannot be told from new files."""
-    from .feed_identity import Feeds, stamp_existing
+    from .feed_identity import Feeds, shared_graph, stamp_existing
 
-    # A fully fed file is never opened again, so it would never be adopted one at a
-    # time: name every older feed now, while its stored path still says where it is.
-    stamped = stamp_existing(service.store, namespace, roots)
-    if stamped["stamped"]:
-        print(json.dumps({"event": "feed_identity", **stamped}), flush=True)
+    # Only a local graph can infer legacy ownership from paths. Shared graphs
+    # require an explicit feeds stamp with the known owning machine's roots.
+    if not shared_graph():
+        stamped = stamp_existing(service.store, namespace, roots)
+        if stamped["stamped"]:
+            print(json.dumps({"event": "feed_identity", **stamped}), flush=True)
     feeds = Feeds(service.store, namespace, roots)
     if feeds.blocked:
         # Not seeded: the next scan looks again, so stamping from outside unblocks it.
         return {
             "status": "feed_identity_blocked",
             **feeds.blocked,
-            "action": "Older feeds are stored under paths outside these roots, so their "
-            "files would be fed again as new. Stamp them with the roots they were written "
-            "under (graph-memory feeds stamp --root LABEL=STORED_PREFIX), or set "
-            "MEMORY_FEED_ACCEPT_UNMATCHED=1 to feed regardless.",
+            "action": feeds.blocked_action,
         }
     feeds.rekey(service.store, files)
     rows = service.store.read(

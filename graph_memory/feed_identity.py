@@ -8,10 +8,13 @@ hosts use, so ``/sessions/claude`` and ``~/.claude/projects`` are both
 every component is generic or has no letters (``/``, ``/sessions``) is labelled
 ``root``: state a label for it, since two such roots clash.
 
-A change of roots must never mint a feed for a file already known. A feed is found
-by key, then by the path it was last stored with; a file that is new by both but
-carries the name of a known feed is refused, and nothing at all is staged while
-older feeds cannot be named under the current roots (``blocked``).
+A change of roots must never silently mint a feed for a file already known.
+On a shared graph, path and filename matching stay within the source label.
+A new label whose root contains another label's stored paths is blocked until
+explicitly acknowledged as a new source, or the old label is relabelled. Unkeyed
+legacy feeds on a shared graph require explicit stamping, never path inference.
+Locally, a feed is found by key, then by its stored path; a new file carrying a
+known name is refused, and unmatchable older feeds block intake (``blocked``).
 
 Feeds staged before source keys existed keep the ids derived from their absolute
 path: episodes, messages and the journal already reference them.
@@ -38,6 +41,7 @@ UNIQUE_NAME = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-|[0-9a-f]{12,}")
 ACCEPT_UNMATCHED = "MEMORY_FEED_ACCEPT_UNMATCHED"
 # Set on a graph that other machines push into; see docs/remote-push.md.
 REMOTE_RECEIVER = "MEMORY_FEED_REMOTE_RECEIVER"
+NEW_SOURCE_LABELS = "MEMORY_FEED_NEW_SOURCE_LABELS"
 
 # Bare labels that must be machine-qualified in remote mode.
 # These are host-local names that would collide across machines.
@@ -92,6 +96,26 @@ def validate_remote_label(label: str, remote: bool | None = None) -> None:
         )
 
 
+def new_source_labels() -> set[str]:
+    """Transient acknowledgement of exact labels for new machines, never adoption.
+
+    Empty/unset means none. Reject malformed lists instead of quietly ignoring a
+    typo; whitespace around comma-separated labels is allowed, wildcards are not.
+    """
+    value = os.environ.get(NEW_SOURCE_LABELS, "").strip()
+    if not value:
+        return set()
+    labels = {label.strip() for label in value.split(",")}
+    if any(not LABEL.fullmatch(label) for label in labels):
+        raise ValueError(
+            f"{NEW_SOURCE_LABELS} must contain comma-separated exact feed labels "
+            "(e.g. rob-mini.claude,rob-mini.codex), without empty entries or wildcards"
+        )
+    for label in sorted(labels):
+        validate_remote_label(label)
+    return labels
+
+
 class Root(NamedTuple):
     label: str
     given: Path  # as mounted, links unresolved: what a walk yields paths under
@@ -109,6 +133,12 @@ class Root(NamedTuple):
 
     def is_file(self):
         return self.given.is_file()
+
+    def contains_uri(self, uri):
+        """Match stored paths lexically against both mount and resolved roots."""
+        if self.is_file():
+            return PurePosixPath(uri) in (self.given, self.given.resolve())
+        return uri_key([self], uri) is not None
 
 
 def derived_label(directory: Path):
@@ -245,6 +275,7 @@ class Feeds:
         self.store, self.namespace = store, namespace
         self.shared = shared_graph()
         self.roots = validate_roots(roots) if roots is not None else []
+        acknowledged = new_source_labels()
         self.by_key, self.by_uri, self.by_name = {}, {}, {}
         rows = store.read(feed_rows, namespace)
         for row in rows:
@@ -258,12 +289,53 @@ class Feeds:
                 if not held or row["session"] == "host:" + digest(row["uri"]):
                     self.by_uri[uri] = row
                 self.by_name.setdefault(name, {})[row["id"]] = row
-        # Older feeds these roots cannot name: their files would all read as new.
-        self.blocked = {}
+        self.blocked: dict[str, object] = {}
+        self.blocked_action = (
+            "Older feeds cannot be matched safely. Stamp them with the roots they were "
+            "written under (graph-memory feeds stamp --root LABEL=STORED_PREFIX), or set "
+            "MEMORY_FEED_ACCEPT_UNMATCHED=1 on a local graph to feed regardless."
+        )
         if roots is not None and not accept_unmatched():
-            counts = plan(rows, self.roots)[1]
-            if counts["unmatched"] or counts["conflicts"]:
-                self.blocked = counts
+            if self.shared:
+                # A stored path cannot establish which machine owns a legacy feed.
+                unkeyed = sum(not row["key"] for row in rows)
+                if unkeyed:
+                    self.blocked = {"feeds": len(rows), "unkeyed": unkeyed}
+                    self.blocked_action = (
+                        "Unkeyed feeds on a shared graph require explicit ownership. "
+                        "With followers stopped, run graph-memory feeds stamp --root "
+                        "LABEL=STORED_PREFIX using the known owning machine's label and "
+                        "stored paths. New-source acknowledgement does not bypass this."
+                    )
+                else:
+                    labels = {key.partition(":")[0] for key in self.by_key}
+                    collisions = {}
+                    for root in self.roots:
+                        if root.label in labels or root.label in acknowledged:
+                            continue
+                        owners = {
+                            row["key"].partition(":")[0]
+                            for row in rows
+                            if row["uri"] and root.contains_uri(row["uri"])
+                        }
+                        if owners:
+                            collisions[root.label] = sorted(owners)
+                    if collisions:
+                        self.blocked = {"feeds": len(rows), "new_source_labels": collisions}
+                        self.blocked_action = (
+                            "These labels have no feeds, but their roots contain paths "
+                            "stored under other labels. With followers stopped, run "
+                            "graph-memory feeds relabel --from OLD --to NEW --apply "
+                            "for the same source. Only for a genuinely new machine, "
+                            f"set {NEW_SOURCE_LABELS}={','.join(sorted(collisions))} "
+                            "temporarily for inventory and follow --once; remove it "
+                            "after each acknowledged label has created its first feed."
+                        )
+            else:
+                # Local legacy feeds can still be named by their stored paths.
+                counts = plan(rows, self.roots)[1]
+                if counts["unmatched"] or counts["conflicts"]:
+                    self.blocked.update(counts)
 
     def lookup_key(self, key, name):
         # Absolute paths and even UUID filenames can recur on another host.

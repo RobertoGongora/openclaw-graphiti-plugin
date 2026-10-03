@@ -287,13 +287,22 @@ def run():
             parser.error("All transcript paths must exist")
     if args.command in ("work", "daemon") and os.environ.get("MEMORY_LLM", "caller") == "caller":
         parser.error(f"{args.command} requires MEMORY_LLM=codex or compatible")
+    if args.command == "feed" and args.source_records:
+        from .feed_identity import shared_graph
+
+        if shared_graph():
+            parser.error(
+                "feed --source-records cannot create an unkeyed feed on a shared graph; "
+                "use follow LABEL=PATH --source-records --once with the owning machine's label"
+            )
     if args.command in ("follow", "inventory", "daemon"):
-        from .feed_identity import accept_unmatched, validate_roots
+        from .feed_identity import accept_unmatched, new_source_labels, validate_roots
 
         # Before connecting: clashing or bare labels, and MEMORY_FEED_ACCEPT_UNMATCHED
         # on a shared graph, even for a receiver's daemon that watches no transcripts.
         validate_roots(args.paths if args.command == "follow" else args.transcripts)
         accept_unmatched()
+        new_source_labels()
     service = build_service()
     result: dict[str, Any]
     try:
@@ -532,7 +541,7 @@ def run():
             args.command == "feeds"
             and args.action == "relabel"
             and args.apply
-            and result.get("conflicts")
+            and (result.get("conflicts") or result.get("feeds") == 0)
         ):
             raise SystemExit(1)
         if result.get("failures") or any(
