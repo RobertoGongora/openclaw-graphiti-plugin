@@ -19,6 +19,26 @@ def native(**fields):
     return {"kind": "message", "role": "user", "content": "Atlas uses MySQL.", **fields}
 
 
+@pytest.mark.parametrize("key", ["Password", "api_key", "DB_PASSWORD"])
+@pytest.mark.parametrize("quote", ['"', "'"])
+@pytest.mark.parametrize("depth", [0, 1, 2])
+def test_quoted_credential_labels_preserve_following_claims(key, quote, depth):
+    text = f"The {quote}{key}: {quote} field is optional. Atlas moved to Postgres."
+    for _ in range(depth):
+        text = json.dumps(text)
+    assert redact(text) == text
+
+
+def test_label_does_not_hide_real_credentials_later_on_the_line(tmp_path):
+    text = 'The "Password:" field is optional. password="private value" Atlas uses MySQL.'
+    message = next(records(transcript(tmp_path, [native(content=text)])))
+    assert message.source_type == "user_assertion"
+    assert '"Password:" field is optional.' in message.content
+    assert "Atlas uses MySQL." in message.content
+    assert "private" not in message.content and "value" not in message.content
+    assert redact(message.content) == message.content
+
+
 @pytest.mark.parametrize("extra", [{}, {"channel": "desk"}, {"source_format": "grok-bot"}])
 def test_unknown_native_kind_keeps_agent_attribution_as_context(tmp_path, extra):
     from graph_memory.session_sources import is_cursor_format

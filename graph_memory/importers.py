@@ -61,8 +61,15 @@ QUOTED = (
 # when there is a non-punctuation value. The final assignment alternative below
 # also covers values made entirely of closers, which redact_v1 removed.
 MORE = r"[^\s,;]*[^\s,;\"'}\])\\]"
+# A complete quoted label such as "Password:" has no credential value. Consume
+# it before assignment matching, so its closing quote cannot open an unterminated
+# value that swallows the rest of the line. Later assignments still get scrubbed.
+LABEL = (
+    rf'\\?"[A-Za-z0-9_]*{SECRET_KEYS}\b\s*[=:]\s*\\*"(?!\w)'
+    rf"|\\?'[A-Za-z0-9_]*{SECRET_KEYS}\b\s*[=:]\s*\\*'(?!\w)"
+)
 ASSIGNMENT = re.compile(
-    r"(?i)((?<![A-Za-z0-9])" + SECRET_KEYS + r"\b(?:\\?[\"'])?\s*[=:]\s*"
+    r"(?i)(?:" + LABEL + r")|((?<![A-Za-z0-9])" + SECRET_KEYS + r"\b(?:\\?[\"'])?\s*[=:]\s*"
     r"(?:(?:Bearer|Basic|Token)\s+)?)(?!(?:\\?[\"'])?\[REDACTED)"
     r"(?!(?i:Bearer|Basic|Token)\s)"
     rf"((?:{QUOTED})(?:{MORE})?|{MORE}|[^\s,;]+)"
@@ -79,6 +86,8 @@ DEVICE_CODE = re.compile(r"(?<![\w-])[A-Z0-9]{4}-[A-Z0-9]{4}(?![\w-])")
 
 
 def assignment(m):
+    if m[1] is None:
+        return m[0]
     value = m[2]
     quote = '\\"' if value.startswith('\\"') else value[0] if value[0] in "\"'" else ""
     close = quote if quote and len(value) >= 2 * len(quote) and value.endswith(quote) else ""
