@@ -235,7 +235,13 @@ NATIVE_KINDS = {"message", "send-message", "user-attachment", "event", "voice-ca
 
 
 def is_readtranscript(item):
-    return "type" not in item and item.get("kind") in NATIVE_KINDS
+    # Non-string discriminators need a context gap, not a set-membership error.
+    kind = item.get("kind")
+    return (
+        "type" not in item
+        and "kind" in item
+        and (not isinstance(kind, str) or kind in NATIVE_KINDS)
+    )
 
 
 def described(kind, parts):
@@ -254,34 +260,36 @@ def from_readtranscript(item, seen):
     unseen. None for a partial streaming message, which a final one follows, and
     for an entry exported again with nothing new.
 
-    seen maps an entry id to the parts already read and their text. The app
-    changes a widget after sending it (the answer arrives later), so an exporter
+    seen maps an entry id to the parts already read and their evidence identity.
+    The app changes a widget after sending it (the answer arrives later), so an exporter
     may append it again; only a part not read before is emitted, a changed part
     is kept as a context note, and earlier lines never change meaning."""
     try:
         return readtranscript_entry(item, seen)
     except (TypeError, AttributeError, ValueError):
-        # One malformed line must not stop the file.
-        return {
-            "type": "grok-native",
-            "timestamp": record_time(item),
-            "entries": [
-                (
-                    "context",
-                    {
-                        "role": "note",
-                        "content": described(str(item.get("kind")), []),
-                        "grok_gap": "malformed_native_entry",
-                    },
-                )
-            ],
-        }
+        # Keep usable source content, but never promote malformed text to a
+        # claim. records() redacts and chunks this context like every other entry.
+        content = item.get("content", item.get("message", ""))
+        if not isinstance(content, str):
+            content = json.dumps(content, ensure_ascii=False)
+        kind = item.get("kind")
+        note = described(kind if isinstance(kind, str) else "entry", [])
+        shaped = native_record(item)
+        shaped["entries"] = [
+            (
+                "context",
+                {
+                    "role": "note",
+                    "content": note + ("\n" + content if content else ""),
+                    "grok_gap": "malformed_native_entry",
+                },
+            )
+        ]
+        return shaped
 
 
-def readtranscript_entry(item, seen):
-    kind = item.get("kind")
-    key = item.get("id") if isinstance(item.get("id"), str) else None
-    done = seen.setdefault(key, {}) if key else {}
+def native_record(item):
+    """Keep native attribution on both valid entries and malformed context."""
     shaped = {"type": "grok-native", "timestamp": record_time(item)}
     for field in ("fromAgent", "channel"):
         if field in item:
@@ -294,17 +302,46 @@ def readtranscript_entry(item, seen):
     ):
         # Any author that is not the account's own user is another speaker.
         shaped["fromAgent"] = {"id": author.get("id"), "name": author.get("name")}
+    return shaped
+
+
+def native_content(content):
+    """Validate before deduplication; text_content's join must not fail later."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list) and all(
+        isinstance(block, dict)
+        and block.get("type") in ("text", "input_text", "output_text")
+        and isinstance(block.get("text", ""), str)
+        for block in content
+    ):
+        # Keep the original representation in the re-export comparison.
+        return content
+    raise ValueError("Malformed native content")
+
+
+def readtranscript_entry(item, seen):
+    kind = item.get("kind")
+    if not isinstance(kind, str) or kind not in NATIVE_KINDS:
+        raise ValueError("Malformed native kind")
+    key = item.get("id") if isinstance(item.get("id"), str) else None
+    # Do not mark a partial conversion as read when a later part is malformed.
+    done = dict(seen.get(key, {})) if key else {}
+    shaped = native_record(item)
     entries = []
 
     def add(part, entry):
         text = entry[1].get("content")
+        identity = (entry, agent_ref(shaped), channel_name(shaped))
         if part not in done:
-            done[part] = text
+            done[part] = identity
             entries.append(entry)
-        elif done[part] != text:
+        elif done[part] != identity:
             # Changed after it was read: kept as context beside the original,
             # which stays as first read so earlier evidence does not move.
-            done[part] = text
+            done[part] = identity
             entries.append(
                 (
                     "context",
@@ -313,16 +350,20 @@ def readtranscript_entry(item, seen):
             )
 
     message = obj(item.get("message"))
+    if kind == "send-message" and not isinstance(message.get("type"), str):
+        raise ValueError("Malformed native message type")
     if kind == "message":
         if item.get("isStreaming") is True:
             return None
         role = item.get("role")
-        if role in {"user", "assistant"}:
-            add("text", ("text", {"role": role, "content": item.get("content") or ""}))
-        else:
-            add("text", ("context", {"role": "note", "content": described(kind, [])}))
+        if role not in ("user", "assistant"):
+            raise ValueError("Malformed native role")
+        add("text", ("text", {"role": role, "content": native_content(item.get("content"))}))
     elif kind == "send-message" and message.get("type") == "text":
-        add("text", ("text", {"role": "assistant", "content": message.get("content") or ""}))
+        add(
+            "text",
+            ("text", {"role": "assistant", "content": native_content(message.get("content"))}),
+        )
     elif kind == "send-message" and message.get("type") == "widget":
         widget = obj(message.get("widget"))
         options = widget.get("options")
@@ -400,6 +441,8 @@ def readtranscript_entry(item, seen):
         call = obj(item.get("call"))
         parts = [(k, call.get(k)) for k in ("durationMs", "turnCount", "ending")]
         add("note", ("context", {"role": "note", "content": described("voice call", parts)}))
+    if key:
+        seen[key] = done
     if not entries:
         return None
     shaped["entries"] = entries
@@ -769,7 +812,7 @@ def cursor_matches(path: Path, messages, count, stored):
 
     A cursor hashes redacted text, so it may predate shell output validating a
     claim (before_shell_results) or the current redaction patterns (redact_v1).
-    Both forms of the file it was written from are accepted."""
+    Earlier forms are accepted only when chunk identities and coverage agree."""
     if count > len(messages):
         return False
     if not count:
@@ -786,46 +829,77 @@ def cursor_matches(path: Path, messages, count, stored):
     info = path.stat()
     version = (info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
     ids = tuple(m["id"] if isinstance(m, dict) else m.id for m in messages[:count])
-    return legacy_match(str(path), version, ids, stored)
+    return legacy_match(str(path), version, ids, cursor_boundary(messages, count), stored)
+
+
+def cursor_boundary(messages, count):
+    """Whether the cursor splits a record, and that whole record's fingerprint.
+
+    Both transcript parsers end chunk IDs with their character offset. Include
+    unread chunks: the consumed IDs alone cannot prove that no text moved across
+    the cursor when redaction changed the chunk boundaries.
+    """
+
+    def record(m):
+        return (m["id"] if isinstance(m, dict) else m.id).rsplit("-", 1)[0]
+
+    key = record(messages[count - 1])
+    start, end = count - 1, count
+    while start and record(messages[start - 1]) == key:
+        start -= 1
+    while end < len(messages) and record(messages[end]) == key:
+        end += 1
+    return end > count, digest(
+        [m if isinstance(m, dict) else m.model_dump(mode="json") for m in messages[start:end]]
+    )
 
 
 @functools.lru_cache(maxsize=4096)
-def legacy_match(path, version, ids, stored):
-    """count is an index into the current parse, so the earlier parse must hold
-    the same message ids; shorter redacted text can move a chunk boundary."""
-    older = list(records(Path(path), redact_v1))[: len(ids)]
-    if tuple(m.id for m in older) != ids:
+def legacy_match(path, version, ids, boundary, stored):
+    """Keep consumed identities and prove coverage of any partly consumed record."""
+    older = list(records(Path(path), redact_v1))
+    count = len(ids)
+    if tuple(m.id for m in older[:count]) != ids:
         return False
-    prefix = [m.model_dump(mode="json") for m in older]
+    previous = cursor_boundary(older, count)
+    if (boundary[0] or previous[0]) and boundary != previous:
+        return False
+    prefix = [m.model_dump(mode="json") for m in older[:count]]
     return stored in (digest(prefix), digest([before_shell_results(m) for m in prefix]))
 
 
 def as_stored(tx, namespace, session_id, path, selected, fed):
     """Already-fed messages as the graph holds them. A message stored under the
     earlier redaction keeps that text, so carrying it again as context does not
-    read as a changed source. Any other difference is left for the source graph
-    to refuse."""
+    read as a changed source. Artifact observations must match too, even when
+    the message text is unchanged. Other differences require a source revision."""
     ids = {digest([namespace, session_id, m.id]): m for m in selected if m.id in fed}
     if not ids:
         return selected
     stored = {
-        r["id"]: r["content"]
+        r["id"]: r
         for r in tx.run(
-            "MATCH (m:MemoryMessage) WHERE m.id IN $ids RETURN m.id AS id, m.content AS content",
+            "MATCH (m:MemoryMessage) WHERE m.id IN $ids "
+            "OPTIONAL MATCH (o:MemoryArtifactObservation {message_ref:m.id}) "
+            "RETURN m.id AS id, m.content AS content, collect(o.id) AS observations",
             ids=list(ids),
         )
     }
-    changed = {ids[k].id: v for k, v in stored.items() if v != ids[k].content}
+
+    def matches(m, row):
+        return m.content == row["content"] and {
+            digest([row["id"], index, touch.model_dump()]) for index, touch in enumerate(m.touches)
+        } == set(row["observations"])
+
+    changed = {ids[k].id: row for k, row in stored.items() if not matches(ids[k], row)}
     if not changed:
         return selected
-    # The whole earlier message, so its artifact touches match what was stored too.
+    # A write result can retain its text while its captured request changes.
+    # Restore the whole earlier message only when its text AND touches match.
     earlier = {m.id: m for m in records(path, redact_v1) if m.id in changed}
-    return [
-        earlier[m.id]
-        if m.id in changed and m.id in earlier and earlier[m.id].content == changed[m.id]
-        else m
-        for m in selected
-    ]
+    if any(mid not in earlier or not matches(earlier[mid], row) for mid, row in changed.items()):
+        raise ValueError("Source message identity changed; use a reviewed source revision")
+    return [earlier[m.id] if m.id in changed else m for m in selected]
 
 
 def before_shell_results(message):

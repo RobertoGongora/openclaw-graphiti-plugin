@@ -47,16 +47,25 @@ SECRET_KEYS = (
 QUERY_KEYS = (
     r"(?:token|key|api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|client[_-]?secret|secret)"
 )
-# A value runs to whitespace, a comma or a semicolon, as redact_v1's did, so a
-# quote or bracket inside a secret does not end it early. Closers the
-# surrounding JSON or code needs (a final quote, bracket or brace) are left.
-QUOTED = r"(?:\\\"(?:(?!\\\")[^\n])*+\\\"|\"[^\"\n]*+\"|'[^'\n]*+')"
+# Quoted values consume escaped delimiters as content. The first alternative
+# handles a quoted value inside JSON-encoded tool arguments (\"...\"). Its
+# interior distinguishes an encoded backslash (\\\\) from an escaped quote
+# (\\\"). Disjoint, possessive repeats keep long escape runs linear. An
+# unterminated quote consumes to the end of the line rather than leaking a tail.
+QUOTED = (
+    r'\\"(?:\\\\(?:\\\\|\\[^\n]|[^\\\n])|\\[^"\\\n]|[^\\\n])*+(?:\\"|(?=\n|\Z))'
+    r'|"(?:\\[^\n]|[^"\\\n])*+(?:"|(?=\n|\Z))'
+    r"|'(?:\\[^\n]|[^'\\\n])*+(?:'|(?=\n|\Z))"
+)
+# Interior punctuation is part of a secret; leave trailing structural closers
+# when there is a non-punctuation value. The final assignment alternative below
+# also covers values made entirely of closers, which redact_v1 removed.
 MORE = r"[^\s,;]*[^\s,;\"'}\])\\]"
 ASSIGNMENT = re.compile(
     r"(?i)((?<![A-Za-z0-9])" + SECRET_KEYS + r"\b(?:\\?[\"'])?\s*[=:]\s*"
     r"(?:(?:Bearer|Basic|Token)\s+)?)(?!(?:\\?[\"'])?\[REDACTED)"
     r"(?!(?i:Bearer|Basic|Token)\s)"
-    rf"((?:{QUOTED}(?:{MORE})?|{MORE}))"
+    rf"((?:{QUOTED})(?:{MORE})?|{MORE}|[^\s,;]+)"
 )
 QUERY = re.compile(r"(?i)([?&#]" + QUERY_KEYS + r"=)(?!\[REDACTED)[^&#\s\"'<>]+")
 # GitHub device-flow user codes (XXXX-XXXX), only shortly after a prompt for

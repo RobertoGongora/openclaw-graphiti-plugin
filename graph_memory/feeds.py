@@ -52,8 +52,15 @@ def feed(service, namespace: str, path: Path, session_id: str):
         # A cursor written before the current redaction patterns hashes the older text.
         if stored == digest([m.model_dump(mode="json") for m in messages[:count]]):
             return True
-        older = list(read_messages(path, allow_incomplete=True, scrub=redact_v1))[:count]
-        return stored == digest([m.model_dump(mode="json") for m in older])
+        from .session_sources import cursor_boundary
+
+        older = list(read_messages(path, allow_incomplete=True, scrub=redact_v1))
+        if [m.id for m in older[:count]] != [m.id for m in messages[:count]]:
+            return False
+        boundary, previous = cursor_boundary(messages, count), cursor_boundary(older, count)
+        if (boundary[0] or previous[0]) and boundary != previous:
+            return False
+        return stored == digest([m.model_dump(mode="json") for m in older[:count]])
 
     def run(tx):
         service.store.lock(tx, namespace)
