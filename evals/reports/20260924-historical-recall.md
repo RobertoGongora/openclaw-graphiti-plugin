@@ -9,6 +9,8 @@
 > the measured code; `graph_memory/journal.py` and the runner have changed since,
 > so neither hash matches the current files. The numbers below were not
 > re-measured on that routing and are not a measurement of the current runtime.
+> A [separate synthetic runtime check](20261004-historical-recall-runtime.md)
+> validates the new default against the old ordinary service.
 
 Issue [#191](https://github.com/RobertoGongora/openclaw-graphiti-plugin/issues/191).
 The recall projection reduced median peak process memory **50.7%** on the frozen

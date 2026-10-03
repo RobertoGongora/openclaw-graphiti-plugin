@@ -14,9 +14,10 @@
   answers. Evidence, entity search, `history snapshot`, replay and verify
   still read complete nodes. Memory still grows with the namespace and with the
   nodes changed since the last checkpoint, and reading the events after it takes
-  a second pass. The [2026-09-24 benchmark](evals/reports/20260924-historical-recall.md)
-  measured the opt-in version of this projection at older code; the default
-  routing has not been re-measured.
+  a second pass. A [fresh synthetic runtime check](evals/reports/20261004-historical-recall-runtime.md)
+  measured 28.15% lower peak process memory with 72 identical response pairs;
+  this is not a production estimate. The [2026-09-24 benchmark](evals/reports/20260924-historical-recall.md)
+  remains separate evidence for the earlier opt-in version.
 - Evidence supports compact excerpts and a short source index, with full batched
   expansion. Truncation is explicit and exact-source writes still require full evidence.
 - Source-reviewed compatible alternatives can have erroneous exclusive slots

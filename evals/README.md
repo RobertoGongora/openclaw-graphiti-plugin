@@ -258,3 +258,5 @@ The 2026-09-24 report measured the same projection while it was still opt-in, at
 older code hashes. It is historical benchmark evidence, not a measurement of the
 current runtime routing.
 Results and limitations: [2026-09-24 benchmark](reports/20260924-historical-recall.md).
+The [2026-10-04 runtime check](reports/20261004-historical-recall-runtime.md)
+separately compares the old and new ordinary handlers on a frozen synthetic graph.
