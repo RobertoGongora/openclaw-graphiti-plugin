@@ -92,7 +92,7 @@ result, and the evidence case does not use the projection.
 
 Deterministic integration tests cover mixed journal versions, knowledge/event
 cutoffs, no future decision leakage, projected episode changes, corrupted delta
-shape hashes and corrupt checkpoint data. Final validation: **410 passed,
+shape hashes and corrupt checkpoint data. Original benchmark validation: **410 passed,
 1 skipped**, Ruff check/format clean, Pyright zero errors, and clean diff checks.
 One new corruption test initially selected an already-pending episode and made
 no change; it now explicitly selects a completed episode and asserts that a new
