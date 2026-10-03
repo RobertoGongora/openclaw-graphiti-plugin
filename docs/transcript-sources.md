@@ -219,7 +219,7 @@ is still read. File mtime is not an event time.
 
 The exporter appends the app's ReadTranscript entries unchanged, one JSON
 object per line, ordered by `seq`. These lines carry `kind` and no `type`, so
-they are never mistaken for Claude or Codex records. Every entry is read:
+they are never mistaken for Claude, Codex or Cursor records. Every entry is read:
 
 | Entry | Stored as |
 |---|---|
@@ -232,6 +232,7 @@ they are never mistaken for Claude or Codex records. Every entry is read:
 | `user-attachment` | `context`, gap `non_text_attachment`, with the file name |
 | `event`, `voice-call` | a `context` note (event type and action; call length and turns) |
 | `message` with `isStreaming: true` | skipped: the final message follows |
+| unknown or malformed `kind` | redacted `context` with gap `malformed_native_entry`, preserving agent/channel attribution |
 
 `timestampMs` is Unix epoch milliseconds. `fromAgent.id` (or `name`) and
 `channel` are stored on the message, redacted like its text.
@@ -243,7 +244,9 @@ read before (the answer); the prompt is not repeated. A part whose text changed
 after it was read (an edited message, a role change) is kept as a `context`
 note with gap `entry_revised_after_read`; the original stays as first read. A line that does not have
 the expected shape becomes a `context` note with gap `malformed_native_entry`
-and the rest of the file is still read. Only `cursor_user` lines from the
+and the rest of the file is still read. A raw `type: grok-native` line is also
+malformed: that shape is internal to the parser, not an exporter format.
+Only `cursor_user` lines from the
 account owner are exported as the owner's; the parser does not compare
 `author.id` with the account.
 
@@ -270,6 +273,8 @@ So are flat lines that set `source_format` or `source` to `grok-bot`, or have
 - An `assistant` line is an `assistant_report`, including when it names
   `fromAgent`. An unvalidated assistant claim stays uncertain and undated.
 - `timestamp`, when present, wins over `timestampMs`.
+- Content blocks retain tool calls/results and non-text attachment context,
+  using the same block handling as Cursor-shaped records.
 
 The hourly path is this root. MCP `memory_ingest` / Remember is not the feed.
 The box exporter and its watermark (`desk-chat-graph-memory-ingest`) stay

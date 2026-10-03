@@ -19,6 +19,47 @@ def native(**fields):
     return {"kind": "message", "role": "user", "content": "Atlas uses MySQL.", **fields}
 
 
+@pytest.mark.parametrize("extra", [{}, {"channel": "desk"}, {"source_format": "grok-bot"}])
+def test_unknown_native_kind_keeps_agent_attribution_as_context(tmp_path, extra):
+    from graph_memory.session_sources import is_cursor_format
+
+    entry = {
+        **native(kind="agent-note", id="u1"),
+        "author": {"kind": "agent", "id": "fleet-7"},
+        "timestampMs": 1759053720000,
+        **extra,
+    }
+    assert not is_cursor_format(entry)
+    note, good = records(transcript(tmp_path, [entry, native()]))
+    assert note.source_type == "context" and note.role == "note"
+    assert note.from_agent == "fleet-7"
+    assert "malformed_native_entry" in note.gaps
+    assert "Atlas uses MySQL." in note.content
+    assert good.source_type == "user_assertion"
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {},
+        {"entries": None},
+        {"entries": 7},
+        {"entries": ["malformed"]},
+        {"entries": [["text", {"role": "user", "content": "Invented claim."}]]},
+        {"kind": "message", "role": "user"},
+    ],
+)
+def test_raw_internal_native_shape_is_context_and_cannot_abort_file(tmp_path, extra):
+    raw = {"type": "grok-native", "content": "password=private-value", **extra}
+    note, good = records(transcript(tmp_path, [raw, native()]))
+    assert note.source_type == "context" and note.role == "note"
+    assert "malformed_native_entry" in note.gaps
+    assert "private-value" not in note.content
+    assert "[REDACTED]" in note.content
+    assert good.source_type == "user_assertion"
+    assert good.id == "line-2-block-0-0"
+
+
 @pytest.mark.parametrize("secret", ["]]]]]]", "}}}}}}", "))))))", "\\" * 6, "}])\\"])
 def test_punctuation_only_assignments_keep_v1_coverage(secret):
     text = f"password={secret}"

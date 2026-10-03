@@ -235,13 +235,9 @@ NATIVE_KINDS = {"message", "send-message", "user-attachment", "event", "voice-ca
 
 
 def is_readtranscript(item):
-    # Non-string discriminators need a context gap, not a set-membership error.
-    kind = item.get("kind")
-    return (
-        "type" not in item
-        and "kind" in item
-        and (not isinstance(kind, str) or kind in NATIVE_KINDS)
-    )
+    # Unknown kinds remain native context; they must not fall through to Cursor
+    # or flat Grok and lose the author. The internal shape is never trusted as input.
+    return ("type" not in item and "kind" in item) or item.get("type") == "grok-native"
 
 
 def described(kind, parts):
@@ -324,7 +320,7 @@ def native_content(content):
 
 def readtranscript_entry(item, seen):
     kind = item.get("kind")
-    if not isinstance(kind, str) or kind not in NATIVE_KINDS:
+    if "type" in item or not isinstance(kind, str) or kind not in NATIVE_KINDS:
         raise ValueError("Malformed native kind")
     key = item.get("id") if isinstance(item.get("id"), str) else None
     # Do not mark a partial conversion as read when a later part is malformed.
@@ -511,7 +507,7 @@ def is_cursor_format(item):
     either 'message' or 'content' as a sibling. Does not match Claude Code (type=user/assistant)
     or Codex (type=response_item) records.
     """
-    if not isinstance(item, dict):
+    if not isinstance(item, dict) or "kind" in item:
         return False
     kind = item.get("type")
     if kind in {"user", "assistant", "response_item", "session_meta", "turn_context", "compacted"}:

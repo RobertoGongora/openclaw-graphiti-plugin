@@ -537,7 +537,7 @@ def test_flat_grok_bot_lines_keep_channel_and_from_agent_relays(tmp_path):
         + json.dumps({"source_format": "grok-bot", "kind": "widget", "channel": "desk"})
         + "\n"
     )
-    person, relay, human = list(records(path))
+    person, relay, human, unknown = list(records(path))
     assert person.source_type == "user_assertion"
     assert person.channel == "desk"
     assert person.timestamp.isoformat() == "2026-09-28T12:02:00+00:00"
@@ -549,6 +549,9 @@ def test_flat_grok_bot_lines_keep_channel_and_from_agent_relays(tmp_path):
     assert human.source_type == "user_assertion"
     assert human.from_agent is None
     assert human.channel == "desk"
+    assert unknown.source_type == "context"
+    assert "malformed_native_entry" in unknown.gaps
+    assert unknown.channel == "desk"
     sourced = grok_transcript([person])
     assert sourced.can_yield_facts()
     extraction(person.id).validate_evidence(sourced)
