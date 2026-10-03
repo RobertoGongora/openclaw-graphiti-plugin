@@ -1201,3 +1201,51 @@ def test_cursor_string_blocks_in_content(tmp_path):
     ms = list(records(p))
     assert len(ms) == 1
     assert ms[0].content == "Plain string block."
+
+
+def test_cursor_metadata_preserves_messages_and_tools_beside_native_grok(tmp_path):
+    path = tmp_path / "mixed.jsonl"
+    lines = [
+        {
+            "role": "user",
+            "message": {"content": "A relay from another agent."},
+            "fromAgent": {"id": "helper"},
+        },
+        {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "read-1",
+                    "name": "Read",
+                    "input": {"file_path": "/tmp/status.txt"},
+                }
+            ],
+            "channel": "desk",
+        },
+        {
+            "role": "user",
+            "message": {
+                "content": [
+                    {"type": "tool_result", "tool_use_id": "read-1", "content": "Service ready."}
+                ]
+            },
+            "channel": "desk",
+        },
+        {
+            "kind": "message",
+            "id": "native-1",
+            "role": "user",
+            "content": "Native human statement.",
+            "isStreaming": False,
+        },
+    ]
+    path.write_text("".join(json.dumps(line) + "\n" for line in lines))
+    relay, call, result, native = records(path)
+    assert relay.content == "A relay from another agent."
+    assert relay.source_type == "context" and relay.from_agent == "helper"
+    assert "delegated_instruction" in relay.gaps
+    assert call.source_type == "tool_call" and call.call_id == "read-1"
+    assert result.source_type == "tool_result" and result.call_id == call.call_id
+    assert result.content == "Service ready."
+    assert native.source_type == "user_assertion" and native.content == "Native human statement."

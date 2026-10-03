@@ -502,7 +502,7 @@ def records(path: Path, scrub=redact):
             item = from_readtranscript(item, native_seen)
             if item is None:
                 continue
-        elif is_grok_native(item):
+        elif is_grok_native(item) and not is_cursor_format(item):
             item = as_claude(item)
             if item is None:
                 continue
