@@ -64,15 +64,17 @@ MORE = r"[^\s,;]*[^\s,;\"'}\])\\]"
 # A complete quoted label such as "Password:" has no credential value. Consume
 # it before assignment matching, so its closing quote cannot open an unterminated
 # value that swallows the rest of the line. Later assignments still get scrubbed.
+# Both quotes must have the same escape level: a JSON string's opening quote
+# must not pair with the escaped quote that opens a credential value inside it.
 LABEL = (
-    rf'\\?"[A-Za-z0-9_]*{SECRET_KEYS}\b\s*[=:]\s*\\*"(?!\w)'
-    rf"|\\?'[A-Za-z0-9_]*{SECRET_KEYS}\b\s*[=:]\s*\\*'(?!\w)"
+    rf"(?<!\\)(?P<lq>\\*)(?P<q>[\"'])[A-Za-z0-9_]*{SECRET_KEYS}\b\s*[=:]\s*"
+    r"(?P=lq)(?P=q)(?=\s|\Z)"
 )
 ASSIGNMENT = re.compile(
-    r"(?i)(?:" + LABEL + r")|((?<![A-Za-z0-9])" + SECRET_KEYS + r"\b(?:\\?[\"'])?\s*[=:]\s*"
+    r"(?i)(?:" + LABEL + r")|(?P<key>(?<![A-Za-z0-9])" + SECRET_KEYS + r"\b(?:\\?[\"'])?\s*[=:]\s*"
     r"(?:(?:Bearer|Basic|Token)\s+)?)(?!(?:\\?[\"'])?\[REDACTED)"
     r"(?!(?i:Bearer|Basic|Token)\s)"
-    rf"((?:{QUOTED})(?:{MORE})?|{MORE}|[^\s,;]+)"
+    rf"(?P<value>(?:{QUOTED})(?:{MORE})?|{MORE}|[^\s,;]+)"
 )
 QUERY = re.compile(r"(?i)([?&#]" + QUERY_KEYS + r"=)(?!\[REDACTED)[^&#\s\"'<>]+")
 # GitHub device-flow user codes (XXXX-XXXX), only shortly after a prompt for
@@ -86,12 +88,12 @@ DEVICE_CODE = re.compile(r"(?<![\w-])[A-Z0-9]{4}-[A-Z0-9]{4}(?![\w-])")
 
 
 def assignment(m):
-    if m[1] is None:
+    if m["key"] is None:
         return m[0]
-    value = m[2]
+    value = m["value"]
     quote = '\\"' if value.startswith('\\"') else value[0] if value[0] in "\"'" else ""
     close = quote if quote and len(value) >= 2 * len(quote) and value.endswith(quote) else ""
-    return m[1] + quote + "[REDACTED]" + close
+    return m["key"] + quote + "[REDACTED]" + close
 
 
 def device_codes(text):

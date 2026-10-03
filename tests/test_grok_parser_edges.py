@@ -39,6 +39,38 @@ def test_label_does_not_hide_real_credentials_later_on_the_line(tmp_path):
     assert redact(message.content) == message.content
 
 
+@pytest.mark.parametrize("prefix", ["!", "+", "#", " "])
+@pytest.mark.parametrize("tool", ["Bash", "Write", "Edit"])
+def test_json_tool_values_are_not_mistaken_for_quoted_labels(tmp_path, prefix, tool):
+    secret = prefix + "SyntheticCredential123"
+    assignment = f'PASSWORD="{secret}"'
+    args = {
+        "Bash": {"command": assignment + " ./deploy.sh"},
+        "Write": {"file_path": "/x/memory/config.md", "content": assignment},
+        "Edit": {
+            "file_path": "/x/memory/config.md",
+            "old_string": "old setting",
+            "new_string": assignment,
+        },
+    }[tool]
+    row = {
+        "type": "assistant",
+        "message": {
+            "role": "assistant",
+            "content": [{"type": "tool_use", "id": "t", "name": tool, "input": args}],
+        },
+    }
+    message = next(records(transcript(tmp_path, [row])))
+    assert "SyntheticCredential123" not in message.content
+    assert "[REDACTED]" in message.content
+    assert redact(message.content) == message.content
+    if tool != "Bash":
+        assert message.touches
+        for touch in message.touches:
+            assert "SyntheticCredential123" not in touch.content
+            assert "[REDACTED]" in touch.content
+
+
 @pytest.mark.parametrize("extra", [{}, {"channel": "desk"}, {"source_format": "grok-bot"}])
 def test_unknown_native_kind_keeps_agent_attribution_as_context(tmp_path, extra):
     from graph_memory.session_sources import is_cursor_format
