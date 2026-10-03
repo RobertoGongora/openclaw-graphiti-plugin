@@ -12,6 +12,10 @@
   URI counts as remote. `follow` accepts `LABEL=PATH` roots whose PATH
   exists. `feeds relabel` renames a label in every source key without changing
   feed ids or cursors.
+- Cursor agent transcripts can be ingested through an optional read-only mount,
+  retaining tools and delegated subagent context. Missing or malformed source
+  timestamps stay undated; sourced claims without any dated claim evidence must
+  remain uncertain with no event date.
 - Opt-in local MCP `tools/call` JSONL (`MEMORY_MCP_CALL_LOG`, and
   `TRANSCRIPT_MCP_CALL_LOG` for the transcripts stack) for recall debugging. Off
   by default. Records the tool, arguments, client and transport, and a compact

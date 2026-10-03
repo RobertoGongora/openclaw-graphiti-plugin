@@ -379,6 +379,7 @@ def test_promoted_facts_cite_the_live_messages(graph):
                 "role": "assistant",
                 "source_type": "assistant_report",
                 "content": "Atlas uses MySQL.",
+                "timestamp": "2026-09-16T10:00:00Z",
             },
             {
                 "id": "v",

@@ -1,0 +1,14 @@
+# Optional Cursor agent-transcript mount.
+# Usage: docker compose -f compose.transcripts.yaml -f compose.transcripts.cursor.yaml up -d
+# Requires CURSOR_SESSIONS_PATH to point at the Cursor agent-transcripts root.
+
+services:
+  worker:
+    command: [daemon, --source-records, --transcripts, /sessions/claude, --transcripts, /sessions/codex, --transcripts, /sessions/cursor, --workers, '${TRANSCRIPT_WORKERS:-8}']
+    volumes:
+      - '${CURSOR_SESSIONS_PATH:?Set Cursor session directory}:/sessions/cursor:ro'
+
+  inventory:
+    command: [inventory, --transcripts, /sessions/claude, --transcripts, /sessions/codex, --transcripts, /sessions/cursor, --interval, '300']
+    volumes:
+      - '${CURSOR_SESSIONS_PATH:?Set Cursor session directory}:/sessions/cursor:ro'

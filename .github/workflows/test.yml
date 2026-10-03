@@ -67,11 +67,13 @@ jobs:
           GRAPH_MEMORY_TAG: ci
           CLAUDE_SESSIONS_PATH: /tmp/claude
           CODEX_SESSIONS_PATH: /tmp/codex
+          CURSOR_SESSIONS_PATH: /tmp/cursor
           TRANSCRIPT_AUTH_PATH: /tmp/auth
           TRANSCRIPT_MCP_TOKEN: ci-validation-only
         run: |
           docker compose -f compose.yaml config -q
           docker compose -f compose.transcripts.yaml config -q
+          docker compose -f compose.transcripts.yaml -f compose.transcripts.cursor.yaml config -q
           docker compose -f compose.test.yaml config -q
           docker compose -f compose.yaml --env-file .env.example config -q
           docker compose -f compose.transcripts.yaml --env-file .env.example config -q
