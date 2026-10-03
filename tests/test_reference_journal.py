@@ -24,7 +24,7 @@ from .helpers import MYSQL, PG, PROJECT, ingest
 BODY = " ".join(["The quick brown fox keeps a long and unmistakable body of source text."] * 100)
 
 
-def transcript(ns, source, claim="Atlas uses MySQL.", messages=3):
+def transcript(ns, source, claim="Atlas uses MySQL.", messages=3, stamp="2026-09-14T10:00:00Z"):
     return Transcript.model_validate(
         {
             "namespace": ns,
@@ -37,7 +37,7 @@ def transcript(ns, source, claim="Atlas uses MySQL.", messages=3):
                     "role": "user",
                     "source_type": "user_assertion",
                     "content": claim,
-                    "timestamp": "2026-09-14T10:00:00Z",
+                    "timestamp": stamp,
                 },
                 *(
                     {

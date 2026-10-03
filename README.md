@@ -147,7 +147,9 @@ recall uses the current graph; optional `known_at` or `at_change` inputs reconst
 past identities, facts, corrections, and published insights. `as_of` remains the
 event-time cutoff. Existing data starts with a dated baseline, not invented past
 history. A write journals only the nodes it changes, and long source text is
-journaled by hash and read back from the live node when needed. Once the current
+journaled by hash and read back from the live node when needed. Historical
+recall, search and latest keep facts, entities, insights, episode status and
+message timestamps, not source text, while they reconstruct. Once the current
 code has written to a namespace, older engines refuse to write to it. [History commands and
 examples](docs/history.md) describe the routine `verify-live` check, the full
 audit, checkpoints and read-only

@@ -1,9 +1,10 @@
-"""Historical recall experiment on an explicitly supplied frozen database copy.
+"""Historical recall reconstruction benchmark on an explicitly supplied frozen copy.
 
-The candidate is opt-in here only. It retains all facts/entities/insights (and
-thus complete temporal roles), episode statuses, and message timestamps. Source
-bodies remain available through ordinary historical evidence retrieval. Private
-queries and responses belong under .local/, never in a committed report.
+`--mode projected` runs the ordinary GraphStore, so historical recall, search and
+latest use the runtime recall projection. `--mode full` is the baseline: the same
+handlers, with every journaled node restored complete, as historical recall did
+before the projection. Private queries and responses belong under .local/, never
+in a committed report.
 
 Run each mode in a fresh process/container against the same restored backup.
 First-request timings are process-cold, not necessarily database-cache-cold.
@@ -26,36 +27,15 @@ from graph_memory.journal import Journal
 from graph_memory.service import MemoryService
 from graph_memory.store import GraphStore
 
-RECALL_LABELS = frozenset(
-    {"MemoryEntity", "MemoryFact", "MemoryInsight", "MemoryEpisode", "MemoryMessage"}
-)
+
+class FullJournal(Journal):
+    def recall_snapshot(self, namespace, *, known_at=None, sequence=None):
+        return self.snapshot(namespace, known_at=known_at, sequence=sequence)
 
 
-def recall_node(label, node):
-    if label == "MemoryEpisode":
-        return {key: node[key] for key in ("id", "status") if key in node}
-    if label == "MemoryMessage":
-        return {key: node[key] for key in ("id", "timestamp") if key in node}
-    return node
+class FullStore(GraphStore):
+    """The unprojected baseline; entity search, evidence and writes are unchanged."""
 
-
-class RecallJournal(Journal):
-    def snapshot(self, namespace, **kwargs):
-        return super().snapshot(
-            namespace,
-            **kwargs,
-            select=lambda label, node: label in RECALL_LABELS,
-            project_node=recall_node,
-        )
-
-    def _complete_only(self, *args, **kwargs):
-        raise NotImplementedError("RecallJournal serves projected recall only")
-
-    # Both would write or compare a projected state as if it were complete.
-    replay = verify = _complete_only
-
-
-class ProjectedStore(GraphStore):
     def recall(
         self,
         namespace,
@@ -70,8 +50,8 @@ class ProjectedStore(GraphStore):
         _related_question=None,
     ):
         if known_at is None and at_change is None:
-            raise ValueError("This experiment requires a fixed historical cutoff")
-        return RecallJournal(self).recall(
+            raise ValueError("The full baseline requires a fixed historical cutoff")
+        return FullJournal(self).recall(
             namespace,
             query,
             as_of,
@@ -184,7 +164,7 @@ def main():
         )
     if args.repeats < 1:
         parser.error("--repeats must be positive")
-    store = (ProjectedStore if args.mode == "projected" else GraphStore)(
+    store = (FullStore if args.mode == "full" else GraphStore)(
         args.uri, password=os.environ.get("NEO4J_PASSWORD")
     )
     try:

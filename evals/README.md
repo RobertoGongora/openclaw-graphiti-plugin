@@ -198,11 +198,14 @@ The deterministic tests separately cover commit enforcement, cache/source bindin
 checker outages, rejected-cache retries, revision preflight, and direct-write
 source requirements.
 
-## Broad historical recall memory experiment
+## Broad historical recall memory benchmark
 
-`evals.historical_recall` compares ordinary reconstruction with an opt-in recall
-projection on a restored, frozen database copy. It never installs the candidate
-into the normal service. Restore a backup into a separate database volume and
+`evals.historical_recall` compares the historical recall projection that normal
+recall, search and latest use with a complete reconstruction, on a restored,
+frozen database copy. `--mode projected` runs the ordinary `GraphStore`, the
+code the MCP service runs. `--mode full` runs `FullStore`, which rebuilds every
+journaled node complete for those three reads, as they did before the projection.
+It exists only in this runner. Restore a backup into a separate database volume and
 use an unused loopback port; do not use a production volume or endpoint.
 `--frozen-copy` is an acknowledgement, not a check: the requests only read, but
 the runner cannot tell a restored copy from a live graph on another port. Set
@@ -239,14 +242,19 @@ to measure allocator retention. The first request is process-cold; database and
 OS caches are not reset. These are session-tool handler timings, excluding MCP
 HTTP transport and model interpretation. Keep private requests/responses ignored.
 
-The candidate retains all facts, entities and insights so temporal competitors,
-related decisions and inference supports remain available. Episodes become
-ID/status pairs and messages become ID/timestamp pairs. Other source records
-are omitted from the recall working set; the evidence tool still reconstructs
-and validates requested source text on demand. Journal replay verifies the same
+The projection (`Journal.recall_snapshot`) retains all facts, entities and
+insights so temporal competitors, related decisions and inference supports
+remain available. Episodes become ID/status pairs and messages become
+ID/timestamp pairs as the checkpoint is restored. Other source records are
+omitted from the recall working set; the evidence tool still reconstructs and
+validates requested source text on demand. Journal replay verifies the same
 checkpoint parts, event chain, node/shape and state hashes. Changed nodes stay
 complete until replay ends; legacy formats may require full reconstruction.
-This reduces reconstruction memory but is not a fixed bound independent of
+Replay reads the delta events twice, once to find the changed nodes. This
+reduces reconstruction memory but is not a fixed bound independent of
 namespace size or the number of nodes changed after a checkpoint.
 
-Results and limitations: [2026-09-24 experiment](reports/20260924-historical-recall.md).
+The 2026-09-24 report measured the same projection while it was still opt-in, at
+older code hashes. It is historical benchmark evidence, not a measurement of the
+current runtime routing.
+Results and limitations: [2026-09-24 benchmark](reports/20260924-historical-recall.md).

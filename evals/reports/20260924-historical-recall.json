@@ -1,5 +1,6 @@
 {
   "issue": 191,
+  "evidence_status": "Historical benchmark of the opt-in candidate at the recorded source hashes. Ordinary historical recall, search and latest later adopted the same projection by default; these numbers were not re-measured on that routing.",
   "baseline_commit": "9ce29c94af93bcf98ea9de6b1e671268cdd7a9f1",
   "scope": "Isolated restored production backup; sequential session-tool handlers, not HTTP transport or live MCP load.",
   "backup": {

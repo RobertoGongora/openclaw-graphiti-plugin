@@ -71,11 +71,22 @@ change and replays one event at a time. A checkpoint is due after 64 MB of
 changes (or the size of the last checkpoint, if larger) or 2,000 events. The
 daemon takes it between scans and logs `journal_checkpoint`.
 
+Historical `memory_recall`, `memory_search` and `memory_latest` hold less of that
+state. They keep every fact, entity and insight, an episode's ID and status and
+a message's ID and timestamp, and drop the rest as the checkpoint is restored.
+Every part is still hashed as it was written, and every node a later event
+changes is kept complete until replay has checked it. A checkpoint stored in its
+event (versions 1 and 2) or followed by a version 1 event is restored in full and
+cut down afterwards. To find the changed nodes these reads go through the events
+after the checkpoint twice.
+`history snapshot`, `history replay`, `history verify`, historical evidence and
+entity search read their own complete nodes, as before.
+
 ## What each command proves
 
 | Command | Reads | Proves |
 | --- | --- | --- |
-| `history snapshot`, historical recall | The latest checkpoint and the events after it | The hash chain from that checkpoint, the checkpoint parts, every declared node and shape hash, and the state hash of every event. It does not read write-once text, so it does not prove that a live text is unchanged |
+| `history snapshot`, historical recall | The latest checkpoint and the events after it | The hash chain from that checkpoint, the checkpoint parts, every declared node and shape hash, and the state hash of every event. It does not read write-once text, so it does not prove that a live text is unchanged. Historical recall, search and latest then keep only what they answer from; see [how the journal is written](#how-the-journal-is-written) |
 | `history replay` | The same, plus every referenced text | The above, and that each text copied into the replay matches its journaled hash |
 | `history verify-live` | The live graph, streamed | That the live graph, including every live text, hashes to the journal head. It does not read the history |
 | `history verify` | Every event, then the live graph node by node | The whole chain from change 0, the reconstruction from the latest checkpoint, and that every live property equals the reconstruction, with referenced text compared by hash |

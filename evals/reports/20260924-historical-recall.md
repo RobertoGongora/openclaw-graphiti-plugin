@@ -1,5 +1,15 @@
 # Broad historical recall efficiency experiment
 
+> **Historical benchmark evidence.** These measurements were taken on 2026-09-24,
+> at the code hashes recorded in the aggregate JSON, while the projection was
+> opt-in through `evals.historical_recall.ProjectedStore`. Ordinary historical
+> `memory_recall`, `memory_search` and `memory_latest` now use the same
+> projection by default (`Journal.recall_snapshot`), and the runner's `--mode full`
+> forces the complete reconstruction instead. The recorded source hashes identify
+> the measured code; `graph_memory/journal.py` and the runner have changed since,
+> so neither hash matches the current files. The numbers below were not
+> re-measured on that routing and are not a measurement of the current runtime.
+
 Issue [#191](https://github.com/RobertoGongora/openclaw-graphiti-plugin/issues/191).
 The recall projection reduced median peak process memory **50.7%** on the frozen
 historical profile workload. All **51 paired responses** matched byte for byte:
@@ -7,8 +17,8 @@ historical profile workload. All **51 paired responses** matched byte for byte:
 The projection changes only `memory_recall`, `memory_search` and `memory_latest`;
 32 of the 51 pairs used it. The other 19 (entity search, evidence and one
 expected validation error) run the same code in both modes and match by construction.
-The candidate remains opt-in in the eval runner; ordinary service routing is
-unchanged and nothing was deployed.
+At measurement time the candidate was opt-in in the eval runner; ordinary service
+routing was unchanged and nothing was deployed.
 
 ## Measurements
 
@@ -115,19 +125,20 @@ The runner was then corrected: requests rejected by cross-field validation no
 longer crash JSON encoding, engine `ValueError`s are recorded as MCP returns them,
 a validation error raised inside a handler now fails the run, output folders must
 be new or empty, the URI needs an explicit loopback port, `NEO4J_PASSWORD` is
-honoured, and `RecallJournal` refuses `replay` and `verify`. `graph_memory/journal.py`
-is unchanged, so its recorded hash still matches. The recorded hash of
+honoured, and `RecallJournal` refused `replay` and `verify`. At that review stage,
+`graph_memory/journal.py` was unchanged, so its recorded hash still matched. The recorded hash of
 `evals/historical_recall.py` identifies the code that produced these
 measurements, not the corrected runner. The new validation-error encoding
 reproduces the recorded response byte for byte; the other changes affect only
-paths these runs never reached. Validation after the changes: **415 passed,
+paths these runs never reached. Validation at that review stage: **415 passed,
 1 skipped**, Ruff check/format clean, and Pyright zero errors.
 
 ## Decision and limits
 
-The experiment passes its measured memory and response-parity gates. It supports
-reviewing this projection for normal historical recall/search routing as the next
-implementation step. Deployment remains a separate decision.
+The experiment passed its measured memory and response-parity gates and supported
+reviewing this projection for normal historical recall/search routing. That
+runtime promotion is now implemented in this PR; the historical measurements
+above remain tied to their original code. Deployment remains a separate decision.
 
 This is a smaller working set, not a fixed memory cap: all facts/entities/insights
 and message timestamps remain resident. Large namespaces, long delta tails and
@@ -137,4 +148,4 @@ session behavior. The next optimization could select facts and their complete
 temporal dependencies more narrowly, with an additional replay/latency tradeoff.
 
 Machine-readable results: [aggregate JSON](20260924-historical-recall.json).
-Reproduction: [eval instructions](../README.md#broad-historical-recall-memory-experiment).
+Reproduction with the current runner: [eval instructions](../README.md#broad-historical-recall-memory-benchmark).

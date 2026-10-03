@@ -59,6 +59,15 @@ INLINE = 128  # a shorter body costs less inline than its reference
 PART_BYTES = 4 << 20  # uncompressed; bounds what a checkpoint read or write holds
 CHECKPOINT_BYTES = 64 << 20
 
+# What historical recall, search and latest read: every fact, entity and insight
+# (whole temporal roles, related decisions, inference supports), an episode's
+# status and a message's timestamp. Source text stays with evidence, which
+# reconstructs the records it needs on its own.
+RECALL_LABELS = frozenset(
+    {"MemoryEntity", "MemoryFact", "MemoryInsight", "MemoryEpisode", "MemoryMessage"}
+)
+RECALL_FIELDS = {"MemoryEpisode": ("id", "status"), "MemoryMessage": ("id", "timestamp")}
+
 MODULUS = 1 << 256
 INTEGRITY = "Journal integrity check failed"
 CHECKPOINT = "Journal checkpoint integrity check failed"
@@ -98,6 +107,11 @@ def referenced(label, props):
 
 def holds_ref(label, node):
     return any(is_ref(dict.get(node, key)) for key in IMMUTABLE.get(label, ()))
+
+
+def recall_node(label, node):
+    fields = RECALL_FIELDS.get(label)
+    return node if fields is None else {key: node[key] for key in fields if key in node}
 
 
 # Written in front of the head's state hash. An engine that predates references
@@ -966,6 +980,18 @@ class Journal:
 
         return self.store.transaction(run)
 
+    def recall_snapshot(self, namespace, *, known_at=None, sequence=None):
+        """The historical state recall reads: RECALL_LABELS, episodes and messages
+        cut to RECALL_FIELDS while the checkpoint is restored. Verified like any
+        snapshot, but incomplete: replay, verify and evidence use snapshot()."""
+        return self.snapshot(
+            namespace,
+            known_at=known_at,
+            sequence=sequence,
+            select=lambda label, node: label in RECALL_LABELS,
+            project_node=recall_node,
+        )
+
     def recall(
         self,
         namespace,
@@ -979,7 +1005,7 @@ class Journal:
         search=False,
         related_question=None,
     ):
-        snapshot = self.snapshot(namespace, known_at=known_at, sequence=sequence)
+        snapshot = self.recall_snapshot(namespace, known_at=known_at, sequence=sequence)
         state = snapshot["state"]
         at = as_of or datetime.fromisoformat(snapshot["known_at"])
         needle = normalized(query)
