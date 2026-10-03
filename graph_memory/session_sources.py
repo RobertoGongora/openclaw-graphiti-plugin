@@ -8,8 +8,11 @@ import ast
 import json
 import posixpath
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
+
+from pydantic import AwareDatetime, TypeAdapter, ValidationError
 
 from .importers import redact, text_content
 from .models import ArtifactTouch, Message, Transcript
@@ -175,6 +178,27 @@ def is_cursor_format(item):
     if role not in {"user", "assistant"}:
         return False
     return "message" in item or "content" in item
+
+
+AWARE_TIME = TypeAdapter(AwareDatetime)
+
+
+def record_time(item):
+    """The line's event time, or None. A timestamp without a zone, or one that
+    does not parse, is missing rather than a reason to stop reading the file."""
+    stamp = item.get("timestamp")
+    if stamp is not None:
+        try:
+            return AWARE_TIME.validate_python(stamp)
+        except ValidationError:
+            return None
+    ms = item.get("timestampMs")
+    if isinstance(ms, (int, float)) and not isinstance(ms, bool) and ms > 0:
+        try:
+            return datetime.fromtimestamp(ms / 1000, UTC)
+        except (OverflowError, OSError, ValueError):
+            return None
+    return None
 
 
 def records(path: Path):
@@ -428,7 +452,7 @@ def records(path: Path):
                     record_id=record_id,
                     role=role,
                     content=chunk,
-                    timestamp=item.get("timestamp"),
+                    timestamp=record_time(item),
                     source_type=source_type,
                     call_id=call_id,
                     tool_name=tool,

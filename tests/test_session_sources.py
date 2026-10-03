@@ -153,6 +153,7 @@ def test_assistant_claim_requires_validation_and_memory_read_cannot_validate():
                 "role": "assistant",
                 "source_type": "assistant_report",
                 "content": "Atlas uses MySQL.",
+                "timestamp": "2026-09-16T10:00:00Z",
             },
             {"id": "v", "role": "tool", "source_type": "memory_read", "content": "MySQL online"},
         ],

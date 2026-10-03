@@ -1,0 +1,34 @@
+{
+  "id": "undated-source-assertion",
+  "description": "An undated conversational source keeps its claim as uncertain without inventing an event date.",
+  "transcripts": [
+    {
+      "source_id": "cursor-undated",
+      "session_id": "cursor-undated",
+      "source_format": "session-records-v1",
+      "messages": [
+        {
+          "id": "m",
+          "role": "user",
+          "source_type": "user_assertion",
+          "content": "Project Atlas uses MySQL for its production database.",
+          "timestamp": null
+        }
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "tool": "memory_recall",
+      "arguments": {"query": "Atlas"},
+      "path": "current",
+      "equals": []
+    },
+    {
+      "tool": "memory_recall",
+      "arguments": {"query": "Atlas"},
+      "path": "uncertain",
+      "contains": {"relation": "uses_database", "target_contains": "mysql", "valid_at": null}
+    }
+  ]
+}

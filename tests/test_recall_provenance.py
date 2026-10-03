@@ -79,7 +79,9 @@ def test_fresh_work_and_user_corrections_survive_memory_read():
     msgs = [
         message("read", "memory_read", "Old memory: Atlas uses Postgres."),
         message("tool", "tool_result", "Atlas uses MySQL.", tool_name="database_status"),
-        message("report", "assistant_report", "Atlas uses MySQL."),
+        message(
+            "report", "assistant_report", "Atlas uses MySQL.", timestamp="2026-09-01T00:00:00Z"
+        ),
     ]
     t = transcript(msgs, focus_message_ids=["report"])
     assert t.can_yield_facts()
@@ -94,7 +96,11 @@ def test_fresh_work_and_user_corrections_survive_memory_read():
 
     candidate.validate_evidence(t, support=SupportVerifier(SupportModel()))
     correction = Message(
-        id="user", role="user", source_type="user_assertion", content="Atlas uses MySQL."
+        id="user",
+        role="user",
+        source_type="user_assertion",
+        content="Atlas uses MySQL.",
+        timestamp="2026-09-01T00:00:00Z",
     )
     t = transcript([*msgs, correction], focus_message_ids=["user"])
     extraction("user", status="active", valid_at="2026-09-01T00:00:00Z").validate_evidence(t)
