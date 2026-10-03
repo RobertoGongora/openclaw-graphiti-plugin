@@ -2,6 +2,7 @@
 
 from pathlib import PurePosixPath
 
+from .models import SESSION_RECORD_FORMATS
 from .store import digest
 
 LABELS = ("MemorySession", "MemoryMessage", "MemoryArtifact", "MemoryArtifactObservation")
@@ -19,7 +20,7 @@ def artifact_id(ns, transcript, touch):
 
 def save(tx, transcript, episode_id, declare=None):
     """declare(label, ids) names the nodes about to be written to a scoped journal."""
-    if transcript.source_format != "session-records-v1":
+    if transcript.source_format not in SESSION_RECORD_FORMATS:
         return
     ns = transcript.namespace
     sid = digest([ns, "session", transcript.session_id])
@@ -67,6 +68,10 @@ def save(tx, transcript, episode_id, declare=None):
             "tool_failed": m.tool_failed,
             "gaps": m.gaps,
         }
+        if m.from_agent:
+            props["from_agent"] = m.from_agent
+        if m.channel:
+            props["channel"] = m.channel
         if origin := transcript.memory_origins.get(m.id):
             props["memory_read_refs"] = [
                 digest([ns, transcript.session_id, mid]) for mid in origin.result_ids

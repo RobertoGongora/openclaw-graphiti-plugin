@@ -124,6 +124,19 @@ class Message(Model):
     tool_failed: bool | None = None
     touches: list[ArtifactTouch] = Field(default_factory=list)
     gaps: list[str] = Field(default_factory=list)
+    # Omitted when empty so Claude/Codex prefix hashes stay stable.
+    from_agent: Annotated[str, Field(max_length=200)] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    channel: Annotated[str, Field(max_length=200)] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+
+# grok-bot desk transcripts follow session-records-v1 evidence rules.
+# direct-mcp-v1 adds verified-source requirements on top.
+SESSION_RECORD_FORMATS = frozenset({"session-records-v1", "grok-bot"})
+SOURCED_FORMATS = SESSION_RECORD_FORMATS | {"direct-mcp-v1"}
 
 
 class RecallOrigin(Model):
@@ -163,7 +176,7 @@ class Transcript(Model):
             raise ValueError("Split transcripts into chunks of at most 500000 characters")
         if not set(self.memory_origins) <= {m.id for m in self.messages}:
             raise ValueError("Memory origins must identify messages in the transcript")
-        if self.source_format in {"session-records-v1", "direct-mcp-v1"}:
+        if self.source_format in SOURCED_FORMATS:
             from .recall_provenance import report_origins
 
             for mid, origin in report_origins(self.messages).items():
@@ -175,7 +188,7 @@ class Transcript(Model):
         """False when no fact can come of it: a feed fact states a new claim, and a
         batch of tool traffic holds none. Of 2,237 committed batches whose only new
         messages were tool results, none produced a fact."""
-        if self.source_format not in {"session-records-v1", "direct-mcp-v1"}:
+        if self.source_format not in SOURCED_FORMATS:
             return True
         focus = set(self.focus_message_ids)
         from .recall_provenance import fresh_results
@@ -395,7 +408,7 @@ class Extraction(Model):
                     "A feed fact must cite at least one new focus message",
                     ["facts", fact_index, "evidence"],
                 )
-            if transcript.source_format in {"session-records-v1", "direct-mcp-v1"}:
+            if transcript.source_format in SOURCED_FORMATS:
                 if transcript.source_format == "direct-mcp-v1" and any(
                     msg.id not in transcript.verified_source_refs for msg in cites
                 ):
@@ -430,6 +443,13 @@ class Extraction(Model):
                 if not primary and (fact.status != "uncertain" or fact.valid_at is not None):
                     reject(
                         "An unvalidated assistant claim requires status=uncertain and valid_at=null. To validate it, cite an exact corroborating tool-result quote in validation_evidence AND keep the assistant quote in evidence. Memory reads/writes cannot validate it.",
+                        ["facts", fact_index, "evidence"],
+                    )
+                if all(m.timestamp is None for m in claims) and (
+                    fact.status != "uncertain" or fact.valid_at is not None
+                ):
+                    reject(
+                        "Claims without source timestamps require status=uncertain and valid_at=null. Do not invent a date from ingestion or file metadata.",
                         ["facts", fact_index, "evidence"],
                     )
             if fact.valid_at and fact.valid_at > now() and fact.status == "active":

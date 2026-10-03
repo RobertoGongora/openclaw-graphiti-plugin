@@ -9,7 +9,7 @@ from datetime import datetime
 
 from neo4j import WRITE_ACCESS, GraphDatabase
 
-from .models import Extraction, Transcript, now
+from .models import SESSION_RECORD_FORMATS, Extraction, Transcript, now
 from .recall_provenance import latest_report_time
 from .temporal import project
 from .version import engine_fingerprint
@@ -546,7 +546,7 @@ class GraphStore:
                         digest([namespace, transcript.session_id, e.message_id])
                         for e in fact.evidence
                     ]
-                    if transcript.source_format == "session-records-v1"
+                    if transcript.source_format in SESSION_RECORD_FORMATS
                     else [],
                     "slot": fact.slot,
                     "valid_at": fact.valid_at.isoformat() if fact.valid_at else None,
@@ -569,7 +569,7 @@ class GraphStore:
                         digest([namespace, transcript.session_id, e.message_id])
                         for e in fact.validation_evidence
                     ]
-                    if transcript.source_format == "session-records-v1"
+                    if transcript.source_format in SESSION_RECORD_FORMATS
                     else [],
                     "episode_id": episode_id,
                     "session_id": transcript.session_id,

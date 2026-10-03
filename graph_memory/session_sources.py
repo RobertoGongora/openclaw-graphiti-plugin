@@ -1,21 +1,28 @@
 """Transcript evidence adapters. Never open files mentioned by a tool call.
 
 Only source JSONL is read. Reasoning, injected system/developer instructions and
-provider duplicate event mirrors are not conversational evidence.
+provider duplicate event mirrors are not conversational evidence. Grok Bot desk
+lines are Claude-shaped, or flat records that name fromAgent or channel. A
+user-role line from another agent is a relay, not a direct assertion.
 """
 
 import ast
+import functools
 import json
 import posixpath
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-from .importers import redact, text_content
+from pydantic import AwareDatetime, TypeAdapter, ValidationError
+
+from .importers import redact, redact_v1, text_content
 from .models import ArtifactTouch, Message, Transcript
 from .store import digest
 
 FORMAT = "session-records-v1"
+GROK_BOT = "grok-bot"
 CHUNK = 24_000
 MAX_BATCH_CHARS = 90_000
 # Earlier tool results of the turn in progress, carried into a batch as context: an
@@ -104,12 +111,421 @@ def tool_touch(name, arguments) -> list[Touch]:
     return []
 
 
-def records(path: Path):
-    """Stable IDs use line/block/chunk positions, including tool arguments/results."""
+def episode_format(path: Path, source_key=None) -> str:
+    """Episode evidence format, from the feed's root label when the watcher named
+    one, else from the path. Feed cursors stay session-records-v1."""
+    if source_key:
+        return GROK_BOT if source_key.startswith(GROK_BOT + ":") else FORMAT
+    return GROK_BOT if GROK_BOT in path.parts else FORMAT
+
+
+def agent_ref(item):
+    """Another agent named on the line, by id when the record has one. Any
+    fromAgent other than null names one, even without a usable id."""
+    agent = item.get("fromAgent")
+    if agent is None:
+        return None
+    if isinstance(agent, str) and agent.strip():
+        return agent.strip()
+    if isinstance(agent, dict):
+        for key in ("id", "name"):
+            value = agent.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return "unknown-agent"
+
+
+def channel_name(item):
+    channel = item.get("channel")
+    if isinstance(channel, str) and channel.strip():
+        return channel.strip()
+    if isinstance(channel, dict):
+        for key in ("id", "name"):
+            value = channel.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
+def bounded_label(value):
+    if not value:
+        return None
+    return " ".join(value.split())[:200] or None
+
+
+def is_grok_native(item):
+    """A flat grok-bot line, not a Claude or Codex record."""
+    kind = item.get("type")
+    if kind in {
+        "user",
+        "assistant",
+        "response_item",
+        "session_meta",
+        "turn_context",
+        "compacted",
+        "event_msg",
+    }:
+        return False
+    if item.get("source_format") == GROK_BOT or item.get("source") == GROK_BOT:
+        return True
+    if item.get("role") not in {"user", "assistant"} and not isinstance(
+        item.get("content"), (str, list)
+    ):
+        return False
+    return any(key in item for key in ("fromAgent", "fromUser", "channel"))
+
+
+AWARE_TIME = TypeAdapter(AwareDatetime)
+
+
+def record_time(item):
+    """The line's event time, or None. A timestamp without a zone, or one that
+    does not parse, is missing rather than a reason to stop reading the file."""
+    stamp = item.get("timestamp")
+    if stamp is not None:
+        try:
+            return AWARE_TIME.validate_python(stamp)
+        except ValidationError:
+            return None
+    ms = item.get("timestampMs")
+    if isinstance(ms, (int, float)) and not isinstance(ms, bool) and ms > 0:
+        try:
+            return datetime.fromtimestamp(ms / 1000, UTC)
+        except (OverflowError, OSError, ValueError):
+            return None
+    return None
+
+
+def grok_blocks(content):
+    if isinstance(content, str):
+        return [{"type": "text", "text": content}]
+    if not isinstance(content, list):
+        return []
+    blocks = []
+    for block in content:
+        if isinstance(block, str):
+            blocks.append({"type": "text", "text": block})
+        elif isinstance(block, dict):
+            blocks.append(block)
+    return blocks
+
+
+def as_claude(item):
+    """Flat grok-bot text as a Claude-shaped record. None when the line has no text."""
+    role = item.get("role")
+    if role not in {"user", "assistant"}:
+        return None
+    blocks = grok_blocks(item.get("content", item.get("text", "")))
+    if not text_content(blocks).strip():
+        return None
+    shaped = {
+        "type": role,
+        "timestamp": record_time(item),
+        "message": {"role": role, "content": blocks},
+    }
+    for key in ("isSidechain", "fromAgent", "fromUser", "channel", "sessionId", "cwd"):
+        if key in item:
+            shaped[key] = item[key]
+    return shaped
+
+
+# Grok Bot ReadTranscript entries, as the app replicates them. They carry `kind`
+# and never `type`, which every Claude and Codex record has.
+NATIVE_KINDS = {"message", "send-message", "user-attachment", "event", "voice-call"}
+
+
+def is_readtranscript(item):
+    # Unknown kinds remain native context; they must not fall through to Cursor
+    # or flat Grok and lose the author. The internal shape is never trusted as input.
+    return ("type" not in item and "kind" in item) or item.get("type") == "grok-native"
+
+
+def described(kind, parts):
+    """A bracketed note for an entry that is not conversational text."""
+    shown = "; ".join(f"{k}: {v}" for k, v in parts if isinstance(v, (str, int)) and v != "")
+    return f"[Grok Bot {kind}{': ' + shown if shown else ''}]"
+
+
+def obj(value):
+    return value if isinstance(value, dict) else {}
+
+
+def from_readtranscript(item, seen):
+    """A ReadTranscript entry as a record the parser reads. Text keeps its speaker;
+    every other entry becomes a note, so nothing in the transcript is dropped
+    unseen. None for a partial streaming message, which a final one follows, and
+    for an entry exported again with nothing new.
+
+    seen maps an entry id to the parts already read and their evidence identity.
+    The app changes a widget after sending it (the answer arrives later), so an exporter
+    may append it again; only a part not read before is emitted, a changed part
+    is kept as a context note, and earlier lines never change meaning."""
+    try:
+        return readtranscript_entry(item, seen)
+    except (TypeError, AttributeError, ValueError):
+        # Keep usable source content, but never promote malformed text to a
+        # claim. records() redacts and chunks this context like every other entry.
+        content = item.get("content", item.get("message", ""))
+        if not isinstance(content, str):
+            content = json.dumps(content, ensure_ascii=False)
+        kind = item.get("kind")
+        note = described(kind if isinstance(kind, str) else "entry", [])
+        shaped = native_record(item)
+        shaped["entries"] = [
+            (
+                "context",
+                {
+                    "role": "note",
+                    "content": note + ("\n" + content if content else ""),
+                    "grok_gap": "malformed_native_entry",
+                },
+            )
+        ]
+        return shaped
+
+
+def native_record(item):
+    """Keep native attribution on both valid entries and malformed context."""
+    shaped = {"type": "grok-native", "timestamp": record_time(item)}
+    for field in ("fromAgent", "channel"):
+        if field in item:
+            shaped[field] = item[field]
+    author = item.get("author")
+    if (
+        isinstance(author, dict)
+        and author.get("kind") != "cursor_user"
+        and shaped.get("fromAgent") is None
+    ):
+        # Any author that is not the account's own user is another speaker.
+        shaped["fromAgent"] = {"id": author.get("id"), "name": author.get("name")}
+    return shaped
+
+
+def native_content(content):
+    """Validate before deduplication; text_content's join must not fail later."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list) and all(
+        isinstance(block, dict)
+        and block.get("type") in ("text", "input_text", "output_text")
+        and isinstance(block.get("text", ""), str)
+        for block in content
+    ):
+        # Keep the original representation in the re-export comparison.
+        return content
+    raise ValueError("Malformed native content")
+
+
+def readtranscript_entry(item, seen):
+    kind = item.get("kind")
+    if "type" in item or not isinstance(kind, str) or kind not in NATIVE_KINDS:
+        raise ValueError("Malformed native kind")
+    key = item.get("id") if isinstance(item.get("id"), str) else None
+    # Do not mark a partial conversion as read when a later part is malformed.
+    done = dict(seen.get(key, {})) if key else {}
+    shaped = native_record(item)
+    entries = []
+
+    def add(part, entry):
+        text = entry[1].get("content")
+        identity = (entry, agent_ref(shaped), channel_name(shaped))
+        if part not in done:
+            done[part] = identity
+            entries.append(entry)
+        elif done[part] != identity:
+            # Changed after it was read: kept as context beside the original,
+            # which stays as first read so earlier evidence does not move.
+            done[part] = identity
+            entries.append(
+                (
+                    "context",
+                    {"role": "note", "content": text, "grok_gap": "entry_revised_after_read"},
+                )
+            )
+
+    message = obj(item.get("message"))
+    if kind == "send-message" and not isinstance(message.get("type"), str):
+        raise ValueError("Malformed native message type")
+    if kind == "message":
+        if item.get("isStreaming") is True:
+            return None
+        role = item.get("role")
+        if role not in ("user", "assistant"):
+            raise ValueError("Malformed native role")
+        add("text", ("text", {"role": role, "content": native_content(item.get("content"))}))
+    elif kind == "send-message" and message.get("type") == "text":
+        add(
+            "text",
+            ("text", {"role": "assistant", "content": native_content(message.get("content"))}),
+        )
+    elif kind == "send-message" and message.get("type") == "widget":
+        widget = obj(message.get("widget"))
+        options = widget.get("options")
+        labels = [
+            o.get("label") or o.get("value")
+            for o in (options if isinstance(options, list) else [])
+            if isinstance(o, dict)
+        ]
+        asked = "\n".join(
+            x
+            for x in (
+                widget.get("prompt"),
+                widget.get("helpText"),
+                *(f"- {o}" for o in labels if isinstance(o, str)),
+            )
+            if isinstance(x, str) and x
+        )
+        add(
+            "prompt",
+            ("text", {"role": "assistant", "content": asked})
+            if asked
+            else ("context", {"role": "note", "content": described("widget", [])}),
+        )
+        answer = item.get("respondedValue")
+        if isinstance(answer, str) and answer.strip():
+            if item.get("widgetSkipped") or item.get("widgetDismissed"):
+                # A skipped widget keeps a value nobody chose.
+                add(
+                    "answer",
+                    ("context", {"role": "note", "content": answer, "grok_gap": "widget_skipped"}),
+                )
+            else:
+                # The person's answer to the question above, as they gave it.
+                add(
+                    "answer",
+                    ("text", {"role": "user", "content": answer, "grok_gap": "widget_response"}),
+                )
+    elif kind == "send-message":
+        kind_of = message.get("type") or "message"
+        request = obj(message.get("secretRequest"))
+        approval = obj(message.get("approval"))
+        detail = {
+            "cursor-agent": [("title", message.get("title")), ("agent", message.get("bcId"))],
+            "secret-request": [
+                ("label", request.get("label")),
+                ("provided", str(item.get("secretProvided", ""))),
+            ],
+            "auto-review-approval": [
+                (k, approval.get(k)) for k in ("summary", "reason", "status", "proposedRule")
+            ],
+            "connector": [
+                ("connector", message.get("connector")),
+                ("variant", message.get("variant")),
+            ],
+        }.get(str(kind_of), [])
+        add("note", ("context", {"role": "note", "content": described(str(kind_of), detail)}))
+    elif kind == "user-attachment":
+        add(
+            "note",
+            (
+                "attachment",
+                {
+                    "role": "note",
+                    "content": "[Non-text attachment unavailable to transcript text extraction: "
+                    + str(item.get("file_name") or "file")
+                    + "]",
+                },
+            ),
+        )
+    elif kind == "event":
+        event = obj(item.get("event"))
+        parts = [(k, event.get(k)) for k in ("type", "action", "automationName")]
+        add("note", ("context", {"role": "note", "content": described("event", parts)}))
+    elif kind == "voice-call":
+        call = obj(item.get("call"))
+        parts = [(k, call.get(k)) for k in ("durationMs", "turnCount", "ending")]
+        add("note", ("context", {"role": "note", "content": described("voice call", parts)}))
+    if key:
+        seen[key] = done
+    if not entries:
+        return None
+    shaped["entries"] = entries
+    return shaped
+
+
+def cursor_entries(item):
+    """Parse Cursor agent-transcript JSONL records.
+
+    Cursor JSONL uses {role, message:{content:[…]}} without a top-level type field.
+    Tool calls use {type:"tool_use", id, name, input} in content blocks; tool results
+    use {type:"tool_result", tool_use_id, content}. Plain text blocks use {type:"text", text}.
+    Some Cursor records have role directly at the top level with content as a sibling.
+    """
+    role = item.get("role")
+    if role not in {"user", "assistant"}:
+        return []
+    message = item.get("message", {})
+    if isinstance(message, dict) and "content" in message:
+        content = message.get("content", [])
+    else:
+        content = item.get("content", [])
+    if isinstance(content, str):
+        return [("text", {"role": role, "content": content})]
+    if not isinstance(content, list):
+        return []
+    entries = []
+    for block in content:
+        if not isinstance(block, dict):
+            if isinstance(block, str):
+                entries.append(("text", {"role": role, "content": block}))
+            continue
+        t = block.get("type")
+        if t == "tool_use":
+            entries.append(("call", {**block, "call_id": block.get("id")}))
+        elif t == "tool_result":
+            entries.append(
+                (
+                    "result",
+                    {
+                        **block,
+                        "call_id": block.get("tool_use_id"),
+                        "output": block.get("content"),
+                    },
+                )
+            )
+        elif t in {"text", "input_text", "output_text"}:
+            entries.append(("text", {"role": role, "content": block.get("text", "")}))
+        elif t in {"image", "document"}:
+            entries.append(
+                (
+                    "attachment",
+                    {
+                        "role": "note",
+                        "content": "[Non-text attachment unavailable to transcript text extraction]",
+                    },
+                )
+            )
+    return entries
+
+
+def is_cursor_format(item):
+    """Detect Cursor agent-transcript JSONL format.
+
+    Cursor format: has 'role' at top level without a recognized 'type' field, and has
+    either 'message' or 'content' as a sibling. Does not match Claude Code (type=user/assistant)
+    or Codex (type=response_item) records.
+    """
+    if not isinstance(item, dict) or "kind" in item:
+        return False
+    kind = item.get("type")
+    if kind in {"user", "assistant", "response_item", "session_meta", "turn_context", "compacted"}:
+        return False
+    role = item.get("role")
+    if role not in {"user", "assistant"}:
+        return False
+    return "message" in item or "content" in item
+
+
+def records(path: Path, scrub=redact):
+    """Stable IDs use line/block/chunk positions, including tool arguments/results.
+    scrub is the redaction; only cursor checks pass an older one."""
     calls = {}
     cwd = None
     delegated = "subagents" in path.parts
     automated = False
+    native_seen = {}
     for line_number, line in enumerate(path.open(), 1):
         if not line.endswith("\n"):
             break  # writer may still be appending this record
@@ -121,6 +537,14 @@ def records(path: Path):
             raise ValueError(f"Malformed transcript JSON at line {line_number}") from exc
         if not isinstance(item, dict):
             continue
+        if is_readtranscript(item):
+            item = from_readtranscript(item, native_seen)
+            if item is None:
+                continue
+        elif is_grok_native(item) and not is_cursor_format(item):
+            item = as_claude(item)
+            if item is None:
+                continue
         kind = item.get("type")
         if kind in {"session_meta", "turn_context"}:
             cwd = item.get("payload", {}).get("cwd", cwd)
@@ -131,7 +555,11 @@ def records(path: Path):
         cwd = item.get("cwd", cwd)
         payload = item.get("payload", {}) if kind == "response_item" else item.get("message", {})
         entries = []
-        if kind == "response_item" and isinstance(payload, dict):
+        if kind == "grok-native":
+            entries = item["entries"]
+        elif is_cursor_format(item):
+            entries = cursor_entries(item)
+        elif kind == "response_item" and isinstance(payload, dict):
             t = payload.get("type")
             if t in {"function_call", "custom_tool_call"}:
                 entries = [("call", payload)]
@@ -142,7 +570,7 @@ def records(path: Path):
         elif kind in {"user", "assistant"} and isinstance(payload, dict):
             content = payload.get("content", [])
             if isinstance(content, str):
-                entries = [("text", payload)]
+                entries = [("text", {**payload, "role": payload.get("role", kind)})]
             elif isinstance(content, list):
                 for block in content:
                     if not isinstance(block, dict):
@@ -199,6 +627,10 @@ def records(path: Path):
             failed = None
             touches = []
             gaps = []
+            agent = None
+            desk = None
+            if entry.get("grok_gap"):
+                gaps.append(entry["grok_gap"])
             if entry_kind == "call":
                 tool = entry.get("name", "unknown tool")
                 args = entry.get("arguments", entry.get("input", {}))
@@ -240,7 +672,7 @@ def records(path: Path):
                         ArtifactTouch(
                             path=p,
                             operation=op,
-                            content=redact(body)[:CHUNK],
+                            content=scrub(body)[:CHUNK],
                             captured=captured if body else "unavailable",
                             gap="execution_not_yet_observed",
                         )
@@ -298,7 +730,7 @@ def records(path: Path):
                         ArtifactTouch(
                             path=p,
                             operation=op,
-                            content=redact(captured_content)[:CHUNK],
+                            content=scrub(captured_content)[:CHUNK],
                             captured=("unavailable" if compound else "excerpt")
                             if op == "read"
                             else captured,
@@ -325,12 +757,18 @@ def records(path: Path):
             else:
                 role = entry.get("role", "note")
                 content = text_content(entry.get("content", ""))
+                # Redacted before truncation, so a cut cannot split a secret.
+                agent = bounded_label(scrub(agent_ref(item) or ""))
+                desk = bounded_label(scrub(channel_name(item) or ""))
                 source_type = "user_assertion" if role == "user" else "assistant_report"
-                if role == "user" and (delegated or item.get("isSidechain") or automated):
+                # Sidechain text and another agent's user-role line are relays.
+                # They are not the person's assertions.
+                relay = delegated or bool(item.get("isSidechain")) or automated or bool(agent)
+                if role == "user" and relay:
                     source_type = "context"
                     gaps.append(
                         "delegated_instruction"
-                        if delegated or item.get("isSidechain")
+                        if delegated or item.get("isSidechain") or agent
                         else "automated_prompt_not_direct_user_assertion"
                     )
                 if entry_kind in {"context", "attachment"}:
@@ -338,7 +776,7 @@ def records(path: Path):
                     gaps.append(
                         "derived_context" if entry_kind == "context" else "non_text_attachment"
                     )
-            content = redact(content)
+            content = scrub(content)
             if not content.strip():
                 content = "[Empty tool or source record]"
             for offset in range(0, len(content), CHUNK):
@@ -353,14 +791,111 @@ def records(path: Path):
                     record_id=record_id,
                     role=role,
                     content=chunk,
-                    timestamp=item.get("timestamp"),
+                    timestamp=record_time(item),
                     source_type=source_type,
                     call_id=call_id,
                     tool_name=tool,
                     tool_failed=failed,
                     touches=touches if offset == 0 else [],
                     gaps=gaps + (["record_split_into_chunks"] if len(content) > CHUNK else []),
+                    from_agent=agent,
+                    channel=desk,
                 )
+
+
+def cursor_matches(path: Path, messages, count, stored):
+    """Whether a cursor still describes the file's first count messages.
+
+    A cursor hashes redacted text, so it may predate shell output validating a
+    claim (before_shell_results) or the current redaction patterns (redact_v1).
+    Earlier forms are accepted only when chunk identities and coverage agree."""
+    if count > len(messages):
+        return False
+    if not count:
+        return True
+
+    def hashes(found):
+        prefix = [m if isinstance(m, dict) else m.model_dump(mode="json") for m in found[:count]]
+        return digest(prefix), digest([before_shell_results(m) for m in prefix])
+
+    if stored in hashes(messages):
+        return True
+    # Parsed again only on a mismatch. Inventory never advances a cursor, so an
+    # idle file keeps its older hash; the answer is kept until the file changes.
+    info = path.stat()
+    version = (info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+    ids = tuple(m["id"] if isinstance(m, dict) else m.id for m in messages[:count])
+    return legacy_match(str(path), version, ids, cursor_boundary(messages, count), stored)
+
+
+def cursor_boundary(messages, count):
+    """Whether the cursor splits a record, and that whole record's fingerprint.
+
+    Both transcript parsers end chunk IDs with their character offset. Include
+    unread chunks: the consumed IDs alone cannot prove that no text moved across
+    the cursor when redaction changed the chunk boundaries.
+    """
+
+    def record(m):
+        return (m["id"] if isinstance(m, dict) else m.id).rsplit("-", 1)[0]
+
+    key = record(messages[count - 1])
+    start, end = count - 1, count
+    while start and record(messages[start - 1]) == key:
+        start -= 1
+    while end < len(messages) and record(messages[end]) == key:
+        end += 1
+    return end > count, digest(
+        [m if isinstance(m, dict) else m.model_dump(mode="json") for m in messages[start:end]]
+    )
+
+
+@functools.lru_cache(maxsize=4096)
+def legacy_match(path, version, ids, boundary, stored):
+    """Keep consumed identities and prove coverage of any partly consumed record."""
+    older = list(records(Path(path), redact_v1))
+    count = len(ids)
+    if tuple(m.id for m in older[:count]) != ids:
+        return False
+    previous = cursor_boundary(older, count)
+    if (boundary[0] or previous[0]) and boundary != previous:
+        return False
+    prefix = [m.model_dump(mode="json") for m in older[:count]]
+    return stored in (digest(prefix), digest([before_shell_results(m) for m in prefix]))
+
+
+def as_stored(tx, namespace, session_id, path, selected, fed):
+    """Already-fed messages as the graph holds them. A message stored under the
+    earlier redaction keeps that text, so carrying it again as context does not
+    read as a changed source. Artifact observations must match too, even when
+    the message text is unchanged. Other differences require a source revision."""
+    ids = {digest([namespace, session_id, m.id]): m for m in selected if m.id in fed}
+    if not ids:
+        return selected
+    stored = {
+        r["id"]: r
+        for r in tx.run(
+            "MATCH (m:MemoryMessage) WHERE m.id IN $ids "
+            "OPTIONAL MATCH (o:MemoryArtifactObservation {message_ref:m.id}) "
+            "RETURN m.id AS id, m.content AS content, collect(o.id) AS observations",
+            ids=list(ids),
+        )
+    }
+
+    def matches(m, row):
+        return m.content == row["content"] and {
+            digest([row["id"], index, touch.model_dump()]) for index, touch in enumerate(m.touches)
+        } == set(row["observations"])
+
+    changed = {ids[k].id: row for k, row in stored.items() if not matches(ids[k], row)}
+    if not changed:
+        return selected
+    # A write result can retain its text while its captured request changes.
+    # Restore the whole earlier message only when its text AND touches match.
+    earlier = {m.id: m for m in records(path, redact_v1) if m.id in changed}
+    if any(mid not in earlier or not matches(earlier[mid], row) for mid, row in changed.items()):
+        raise ValueError("Source message identity changed; use a reviewed source revision")
+    return [earlier[m.id] if m.id in changed else m for m in selected]
 
 
 def before_shell_results(message):
@@ -466,24 +1001,21 @@ def feed_records(
         row = tx.run("MATCH (f:MemoryFeed {id:$id}) RETURN properties(f) AS f", id=fid).single()
         previous = row["f"] if row else {}
         count = previous.get("message_count", 0)
-        prefix = [m.model_dump(mode="json") for m in messages[:count]]
-        if count > len(messages) or (
-            count
-            and previous["prefix_hash"]
-            not in (digest(prefix), digest([before_shell_results(m) for m in prefix]))
-        ):
+        if not cursor_matches(path, messages, count, previous.get("prefix_hash")):
             raise ValueError(
                 "Transcript prefix changed; preserve old evidence and review a new source revision"
             )
         receipts = []
+        fed = {m.id for m in messages[:count]}
         while count < len(messages) and len(receipts) < max_batches:
             end, selected = batch(messages, count)
+            selected = as_stored(tx, namespace, session_id, path, selected, fed)
             t = Transcript(
                 namespace=namespace,
                 session_id=session_id,
                 source_id=f"records:{fid}:{count}",
                 source_uri=str(path),
-                source_format=FORMAT,
+                source_format=episode_format(path, source_key),
                 title=title,
                 messages=selected,
                 memory_origins={m.id: origins[m.id] for m in selected if m.id in origins},

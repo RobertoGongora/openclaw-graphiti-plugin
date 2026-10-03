@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 
 from .models import now
-from .session_sources import FORMAT, before_shell_results, records
+from .session_sources import FORMAT, before_shell_results, cursor_matches, records
 from .store import digest
 
 
@@ -51,11 +51,7 @@ def plan(store, namespace, feed_id, path, reason, *, transaction=None):
         if str(path) != old["source_uri"]:
             raise ValueError("Read the source through its stored mount path")
         count = old["message_count"]
-        prefix = messages[:count]
-        if count <= len(messages) and old["prefix_hash"] in (
-            digest(prefix),
-            digest([before_shell_results(m) for m in prefix]),
-        ):
+        if cursor_matches(path, messages, count, old["prefix_hash"]):
             raise ValueError("Source prefix is unchanged; no revision is needed")
         rows = tx.run(
             "MATCH (e:MemoryEpisode {namespace:$ns,session_id:$session}) "

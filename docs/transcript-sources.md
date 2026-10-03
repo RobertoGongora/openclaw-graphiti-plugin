@@ -28,16 +28,38 @@ supports a claim still depends on extraction quality and the fixed evals.
 
 Use `daemon --source-records --transcripts DIRECTORY` or
 `feed FILE --session-id ID --source-records`. This explicitly selects the versioned
-source parser, separate from the old text-only feed. Claude Code JSONL and Codex
-response-item JSONL are supported, including Codex custom tool calls/outputs.
-Memory MCP recall results also remain derived context, not fresh verification.
-The output of a shell, exec or python call is a tool result and can validate an
-assistant claim, because commands are how agents verify most things. The exception
-is a command whose text names memory: what it printed may be a stored claim, so it
-stays context.
+source parser, separate from the old text-only feed. Claude Code JSONL, Codex
+response-item JSONL, and Cursor agent-transcript JSONL are supported, including
+tool calls/outputs across all formats. Memory MCP recall results also remain
+derived context, not fresh verification. The output of a shell, exec or python
+call is a tool result and can validate an assistant claim, because commands are
+how agents verify most things. The exception is a command whose text names memory:
+what it printed may be a stored claim, so it stays context.
+
 Provider duplicate event mirrors, reasoning, and system/developer instructions
 are not claim sources. Delegated subagent instructions and automated Codex exec
-prompts are context, even when their provider role is `user`. Non-text attachments are gaps, not interpreted content.
+prompts are context, even when their provider role is `user`. Non-text attachments
+are gaps, not interpreted content.
+
+### Cursor agent-transcripts
+
+Cursor agent JSONL uses a different format: `{role, message:{content:[…]}}` without
+a top-level `type` field. The parser auto-detects this format and maps it to the
+standard source-records contract:
+
+- Text blocks (`{type:"text", text:...}`) become user assertions or assistant reports.
+- Tool use blocks (`{type:"tool_use", id, name, input}`) pair with results.
+- Tool result blocks (`{type:"tool_result", tool_use_id, content}`) link to their calls.
+
+Cursor records may lack timestamps. Per ADR 004, undated claims become `uncertain`
+facts with `valid_at=null`. The parser never invents timestamps.
+
+**Subagent handling.** Transcripts under `…/subagents/*.jsonl` are marked as
+delegated context. Their instructions are not treated as direct user assertions,
+avoiding double-ingest of parent session traffic.
+
+Grok Bot desk and fleet chats use a separate root; see
+[Grok Bot desk and fleet chats](#grok-bot-desk-and-fleet-chats).
 
 A session stays a single source identity with multiple bounded episodes. Each
 batch contains at most eight new text chunks (90,000 characters), four preceding
@@ -171,6 +193,124 @@ MATCH p=(f:MemoryFact)-[:CITES|VALIDATED_BY]->(m:MemoryMessage)
 RETURN p LIMIT 200;
 ```
 
+## Grok Bot desk and fleet chats
+
+Grok Bot (Sand) desk and fleet chats are a transcript feed. They are not Cursor
+agent transcripts under `~/.cursor/.../agent-transcripts`, and this feed is not
+a Tailscale push. The namespace stays `transcripts`. The feed label is
+`grok-bot`, from a root mounted at `/sessions/grok-bot`. One append-only file
+per agent id, not the display name:
+
+```text
+/sessions/grok-bot/<agentId>.jsonl
+```
+
+The source key is `grok-bot:<agentId>.jsonl`. Episodes from this root use
+`source_format=grok-bot`, which follows the same evidence rules as
+`session-records-v1` (facts, validation, and the source graph). The feed cursor
+node stays `source_format=session-records-v1` so identity and resume match the
+existing worker. The format follows the root label: a file under the root
+labelled `grok-bot` gets `grok-bot`, and a `grok-bot` directory inside the
+Claude or Codex root does not. Missing timestamps stay null, and so does a
+timestamp without a time zone or one that does not parse; the rest of the file
+is still read. File mtime is not an event time.
+
+### ReadTranscript entries
+
+The exporter appends the app's ReadTranscript entries unchanged, one JSON
+object per line, ordered by `seq`. These lines carry `kind` and no `type`, so
+they are never mistaken for Claude, Codex or Cursor records. Every entry is read:
+
+| Entry | Stored as |
+|---|---|
+| `message`, `role: user`, no `fromAgent` | `user_assertion`: Roberto's own words, typed or spoken (`fromUser` / `author.kind: cursor_user` on a voice call) |
+| `message`, `role: user`, with `fromAgent`, or an `author` that is not `cursor_user` | `context`, gap `delegated_instruction`: another agent's message, never Roberto's claim |
+| `message`, `role: assistant` (`toAgent` when sent to another agent) | `assistant_report` |
+| `send-message`, `message.type: text` | `assistant_report`: the agent's reply |
+| `send-message`, `message.type: widget` | `assistant_report` with the prompt and options; `respondedValue` is a `user_assertion` with gap `widget_response`, or `context` with gap `widget_skipped` when `widgetSkipped` or `widgetDismissed` is set |
+| `send-message` of any other type (`cursor-agent`, `secret-request`, `auto-review-approval`, `connector`) | a `context` note naming the type and its short fields; a secret's value is never in the entry |
+| `user-attachment` | `context`, gap `non_text_attachment`, with the file name |
+| `event`, `voice-call` | a `context` note (event type and action; call length and turns) |
+| `message` with `isStreaming: true` | skipped: the final message follows |
+| unknown or malformed `kind` | redacted `context` with gap `malformed_native_entry`, preserving agent/channel attribution |
+
+`timestampMs` is Unix epoch milliseconds. `fromAgent.id` (or `name`) and
+`channel` are stored on the message, redacted like its text.
+
+Lines are append-only: the exporter never rewrites a written line. The app
+fills in a widget's answer after sending it, so the exporter may append the
+same entry `id` again once it changes. A repeated id yields only what was not
+read before (the answer); the prompt is not repeated. A part whose text changed
+after it was read (an edited message, a role change) is kept as a `context`
+note with gap `entry_revised_after_read`; the original stays as first read. A line that does not have
+the expected shape becomes a `context` note with gap `malformed_native_entry`
+and the rest of the file is still read. A raw `type: grok-native` line is also
+malformed: that shape is internal to the parser, not an exporter format.
+Only `cursor_user` lines from the
+account owner are exported as the owner's; the parser does not compare
+`author.id` with the account.
+
+### Claude-shaped and flat lines
+
+Claude Code JSONL lines are also read under this root:
+
+```json
+{"type":"user","timestamp":"2026-09-28T12:00:00Z","channel":"desk","message":{"role":"user","content":[{"type":"text","text":"Atlas uses MySQL."}]}}
+```
+
+So are flat lines that set `source_format` or `source` to `grok-bot`, or have
+`role` or text `content` plus `fromAgent`, `fromUser` or `channel`:
+
+```json
+{"source_format":"grok-bot","role":"user","content":"Check Atlas.","fromAgent":{"id":"fleet-agent","name":"Fleet"},"channel":"fleet","timestampMs":1759053720000}
+```
+
+- A `user` line without `isSidechain` and without `fromAgent` is a
+  `user_assertion`.
+- `isSidechain: true`, or `fromAgent` with any value other than null on a
+  `user` line, is `context` with gap `delegated_instruction`. `fromAgent`
+  without a string id or name is stored as `unknown-agent`.
+- An `assistant` line is an `assistant_report`, including when it names
+  `fromAgent`. An unvalidated assistant claim stays uncertain and undated.
+- `timestamp`, when present, wins over `timestampMs`.
+- Content blocks retain tool calls/results and non-text attachment context,
+  using the same block handling as Cursor-shaped records.
+
+The hourly path is this root. MCP `memory_ingest` / Remember is not the feed.
+The box exporter and its watermark (`desk-chat-graph-memory-ingest`) stay
+outside this repository.
+
+### Compose example
+
+The default `compose.transcripts.yaml` does not mount this root. Do not edit a
+running host compose file from the repository change. When a deploy is
+approved, add the same read-only mount and `--transcripts` root to **both**
+the worker and the inventory service. In an override file `command` replaces
+the whole list, so repeat the Claude and Codex roots. `volumes` merge by
+container path, so the grok-bot mount alone is enough; repeating the others, as
+below, is harmless:
+
+```yaml
+# worker
+command: [daemon, --source-records, --transcripts, /sessions/claude, --transcripts, /sessions/codex, --transcripts, /sessions/grok-bot, --workers, '${TRANSCRIPT_WORKERS:-8}']
+volumes:
+  - '${CLAUDE_SESSIONS_PATH:?Set Claude session directory}:/sessions/claude:ro'
+  - '${CODEX_SESSIONS_PATH:?Set Codex session directory}:/sessions/codex:ro'
+  - '${GROK_BOT_SESSIONS_PATH:?Set Grok Bot JSONL directory}:/sessions/grok-bot:ro'
+  - '${TRANSCRIPT_AUTH_PATH:?Set Codex authentication directory}:/home/memory/.codex'
+
+# inventory
+command: [inventory, --transcripts, /sessions/claude, --transcripts, /sessions/codex, --transcripts, /sessions/grok-bot, --interval, '300']
+volumes:
+  - '${CLAUDE_SESSIONS_PATH:?Set Claude session directory}:/sessions/claude:ro'
+  - '${CODEX_SESSIONS_PATH:?Set Codex session directory}:/sessions/codex:ro'
+  - '${GROK_BOT_SESSIONS_PATH:?Set Grok Bot JSONL directory}:/sessions/grok-bot:ro'
+```
+
+A new grok-bot root has no older feeds, so it needs no `feeds stamp`. The
+container path's last component must stay `grok-bot`: it is the feed label. Do
+not mount a model-worker home directory on this root.
+
 ## Deployment and validation
 
 `compose.transcripts.yaml` starts Neo4j, the transcript worker, the inventory
@@ -190,12 +330,30 @@ directories under one label. Do not
 mount model-worker-generated session directories, which would ingest extraction
 prompts and outputs recursively.
 
+### Optional Cursor sessions mount
+
+To ingest Cursor agent-transcripts, use the overlay file:
+
+```sh
+docker compose -f compose.transcripts.yaml -f compose.transcripts.cursor.yaml up -d
+```
+
+Set `CURSOR_SESSIONS_PATH` in your env file to the Cursor projects root, typically
+`~/.cursor/projects`. The mount appears at `/sessions/cursor` with label `cursor`.
+See `.env.example` for the variable definition.
+
+**Subagent JSONL policy.** Transcripts under `…/subagents/*.jsonl` are automatically
+detected and treated as delegated context. Their user-role instructions become
+`context` source type with a `delegated_instruction` gap, avoiding double-ingest
+when a parent session already captured the same exchange. This follows the same
+policy as Codex delegated/automated prompts.
+
 `tests/test_session_sources.py` covers source parsing, identity, historical
-artifacts, append/restart, tool-only rejection and audit replay. Frozen real-model
-canaries live in `evals/transcripts/cases.json`; run
-`MEMORY_LLM=codex python -m evals.transcripts.run`. They make no graph writes.
-A passing canary is not certification of full historical coverage or semantic
-accuracy. Preserve failed runs as well as successful evidence.
+artifacts, append/restart, tool-only rejection, audit replay, and the Cursor
+agent-transcript adapter. Frozen real-model canaries live in
+`evals/transcripts/cases.json`; run `MEMORY_LLM=codex python -m evals.transcripts.run`.
+They make no graph writes. A passing canary is not certification of full historical
+coverage or semantic accuracy. Preserve failed runs as well as successful evidence.
 
 After both imports reach the agreed fixed source coverage, benchmark the same
 questions and expected facts against both graphs. No memory-system superiority

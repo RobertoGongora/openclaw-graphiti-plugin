@@ -11,7 +11,7 @@ import uuid
 from pathlib import Path
 
 from .diagnostics import SYSTEMIC
-from .importers import read_messages
+from .importers import read_messages, redact_v1
 from .models import EpisodeRequest, Transcript
 from .settings import lease_seconds
 from .store import digest
@@ -48,13 +48,26 @@ def feed(service, namespace: str, path: Path, session_id: str):
     messages = list(read_messages(path, allow_incomplete=True))
     fid = digest([namespace, str(path), session_id])
 
+    def matches(stored, count):
+        # A cursor written before the current redaction patterns hashes the older text.
+        if stored == digest([m.model_dump(mode="json") for m in messages[:count]]):
+            return True
+        from .session_sources import cursor_boundary
+
+        older = list(read_messages(path, allow_incomplete=True, scrub=redact_v1))
+        if [m.id for m in older[:count]] != [m.id for m in messages[:count]]:
+            return False
+        boundary, previous = cursor_boundary(messages, count), cursor_boundary(older, count)
+        if (boundary[0] or previous[0]) and boundary != previous:
+            return False
+        return stored == digest([m.model_dump(mode="json") for m in older[:count]])
+
     def run(tx):
         service.store.lock(tx, namespace)
         row = tx.run("MATCH (f:MemoryFeed {id:$id}) RETURN properties(f) AS f", id=fid).single()
         previous = row["f"] if row else {}
         count = previous.get("message_count", 0)
-        prefix = [m.model_dump(mode="json") for m in messages[:count]]
-        if count > len(messages) or (count and digest(prefix) != previous["prefix_hash"]):
+        if count > len(messages) or (count and not matches(previous["prefix_hash"], count)):
             raise ValueError(
                 "Transcript prefix changed; use a new source session ID and review the old evidence"
             )
