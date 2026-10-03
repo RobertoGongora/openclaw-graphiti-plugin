@@ -598,6 +598,83 @@ Neo4j image as the stack. The dump holds full transcript text. Store it like the
 source sessions. Keep the image tag that wrote the data next to the dump,
 because an older image cannot write to a migrated journal.
 
+## MCP call log
+
+The server does not record MCP requests unless `MEMORY_MCP_CALL_LOG` is set to an
+absolute file path. Leaving it unset is the default: questions, arguments, and
+results are not written, and the HTTP access log stays empty. Failures still log
+only an exception type and a request id. A relative path is refused and `~` is
+expanded to your home directory.
+
+Setting the variable is a privacy flip for local recall debugging. `graph-memory
+serve` prints the path to stderr at startup, and `graph-memory health --role mcp`
+run inside the MCP container reports it as `call_log`. Each `tools/call` on HTTP and stdio appends one JSON
+object:
+
+- `ts` (when the call started), request id, tool, transport, pid, server version
+  and the client's declared name and version
+- arguments after namespace binding. Message `content` and evidence `quote`
+  are omitted with their length; other large text is cut with `…[truncated]`
+- `ok` / `isError`, `timing_ms` for the whole call and `handler_ms` for the tool
+- for a successful live read that accepts `at_change`, `journal_head` (the
+  namespace's journal change when the read started) and `replay`:
+  `{at_change, as_of, raced, intact}`. Add `at_change` and `as_of` to the logged
+  `arguments` and send them to the same tool to ask the read again at that point,
+  after the graph has changed. `raced` is true when a write committed while the
+  read ran, so the live answer can hold a change the replay lacks. `intact` is
+  false when the logged arguments differ from what the tool got (text cut or a
+  credential redacted)
+- a compact result: `facts` as `[id, lane]` in the order the client got them,
+  with `"related"` appended for a decision about another entity; `fact_ids`; the
+  ids a result referred to but did not return (`conflict_fact_ids`,
+  `derived_support_ids`, `missing_fact_ids`); `written_fact_ids` for writes;
+  entity keys (for `memory_search`, the subjects and targets of the returned
+  facts); counts, status, `revision` and `question_term_count` (0 means the
+  question held only stop words and the facts are unranked). No fact text,
+  question echo, episode names (a session feed's is its first user message) or
+  render PNG bytes. A result over 7,000 characters keeps as many
+  ids as fit and says how many there were
+
+Authorization headers and credential-shaped fields (`token`, `password`,
+`api_key`, and similar) are not written. The bearer token and the values of
+`MEMORY_HTTP_TOKEN`, `NEO4J_PASSWORD`, `MEMORY_LLM_API_KEY` and
+`TRANSCRIPT_MCP_TOKEN` are also replaced wherever they appear, in any case,
+including in keys, before any text is cut, when they are 8 characters or longer
+and not the public default `graph-memory`. Other headers are not treated as
+secrets, so a client cannot choose words to blank. Other credentials a user types into a question (an
+`sk-…` key pasted into a search) are written as typed. One line is at most 32,000
+characters; a larger record keeps only the tool, id, status and timing.
+
+The file and a `<path>.lock` beside it are mode 0600. The process will not write
+through a symbolic link, into a FIFO, into a file with other hard links, or into a
+file another user owns. At 5 MiB
+the file is renamed to `<path>.1`, replacing the older copy, under a lock that the
+HTTP server and every stdio session share. If that rename fails, records are
+skipped rather than let the file grow.
+
+A replay reads the journal, not the live graph, and usually returns the same
+facts in the same order. Known differences: entity search ranks some keys with
+Unicode case or extra spaces differently when the alias index is in use; recall
+can pick different insights when more exist than `limit`, and can list
+`corroborating_fact_ids` or ambiguous candidates in another order; alias index
+rebuilds are not journaled; `freshness`, `revision` and `knowledge_history`
+differ by design, and `expand` and `suggested_call` carry the `at_change`.
+
+This file is not the Neo4j change journal. `MEMORY_JOURNAL_AUDIT` does not read
+it, and it is not worker JSONL or the OpenClaw debug log. Nothing here is sent
+off the machine. Nothing deletes it either: unsetting the variable stops new
+records but leaves `<path>`, `<path>.1` and `<path>.lock` in place until you
+remove them.
+
+Compose runs MCP with a read-only root filesystem. Use `/tmp/mcp-calls.jsonl`
+(tmpfs; gone whenever the container stops or restarts, and it counts against the
+service's memory limit) or mount a directory and point the variable at that
+path. The personal stack reads `MEMORY_MCP_CALL_LOG`; the transcripts stack reads
+`TRANSCRIPT_MCP_CALL_LOG`, so enabling one does not enable the other. Plugin
+sessions started with `docker exec` into an MCP container inherit its setting. On
+a host, prefer a private directory over `/tmp`, which other local users can
+write to. A path the process cannot write is skipped; the call still succeeds.
+
 ## Secrets
 
 The personal stack starts with no `.env`: `NEO4J_PASSWORD` and `MEMORY_HTTP_TOKEN` both
@@ -626,8 +703,9 @@ transcripts stack has no default and requires both values.
   password or the MCP token.
 - `claude-config` writes `${NEO4J_PASSWORD}` as a reference for the client to
   expand. It never copies the value. The files are mode 0600.
-- The MCP server does not log requests, arguments or credentials. Failures log
-  an exception type and a request id.
+- MCP failures log an exception type and a request id. Request bodies stay out of
+  that log. `MEMORY_MCP_CALL_LOG` is the only switch that records calls, and it
+  is off unless you set it. See [MCP call log](#mcp-call-log).
 - The MCP port is bound to loopback. To reach it under another host name, add
   the name to `MEMORY_HTTP_HOSTS` or `TRANSCRIPT_MCP_HOSTS`. Do not publish the
   port on a public interface. The bearer token is a private-service option.

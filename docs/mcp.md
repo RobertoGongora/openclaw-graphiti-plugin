@@ -53,8 +53,16 @@ A request body is limited to 4,000,000 bytes on both transports. HTTP requires
 `Content-Length` and refuses `Transfer-Encoding` (413). Connections time out after
 30 seconds of inactivity. Tool failures that are the engine's own refusals return
 their message with `isError: true`. Any other failure returns a generic message
-with a request id, because exception text can quote user data. The server never
-logs request data or credentials.
+with a request id, because exception text can quote user data. By default the
+server never logs request data or credentials, and the HTTP access log stays
+empty. Set `MEMORY_MCP_CALL_LOG` to a local file path to append one JSONL record
+per `tools/call` (HTTP and stdio) for recall debugging. That is an explicit
+privacy flip: questions and compact results stay on this machine, can contain
+private content, and are not the Neo4j journal (`MEMORY_JOURNAL_AUDIT`). The
+process rotates the file at 5 MiB and keeps one older copy (`<path>.1`); nothing
+deletes them. Authorization headers, credential-shaped fields and the server's
+own credentials are omitted; transcript content and fact text are left out and
+other large text is truncated. See [operations](operations.md#mcp-call-log).
 
 For clients supporting subprocess MCP, configure an equivalent command:
 
