@@ -77,7 +77,7 @@ def test_labels_do_not_depend_on_the_mount_point(tmp_path):
     assert parse_root(Path("~/.codex/sessions")).label == "codex"
     stated = parse_root(Path("work=/mnt/anything"))
     assert (stated.label, str(stated.given)) == ("work", "/mnt/anything")
-    # A real path with "=" in it is a path.
+    # A path with "=" in it is a path when the part before "=" is not a valid label.
     odd = tmp_path / "a=b"
     odd.mkdir()
     assert parse_root(odd).label == "a_b"
@@ -425,6 +425,341 @@ def test_label_fallbacks_and_bounded_uid(tmp_path):
     huge = tmp_path / "huge.jsonl"
     huge.write_text(json.dumps({"pad": "x" * 400_000, "sessionId": "beyond-the-bound"}) + "\n")
     assert session_uid(huge) is None
+
+
+def test_remote_mode_detection():
+    from graph_memory.feed_identity import is_remote_bolt
+
+    # Loopback addresses are local
+    assert is_remote_bolt("bolt://127.0.0.1:7687") is False
+    assert is_remote_bolt("bolt://localhost:7687") is False
+    assert is_remote_bolt("bolt://[::1]:7687") is False  # IPv6 loopback with brackets
+    # Docker internal hostname is local
+    assert is_remote_bolt("bolt://neo4j:7687") is False
+
+    # Remote addresses
+    assert is_remote_bolt("bolt://ct-160:7687") is True
+    assert is_remote_bolt("bolt://ct-160.tailnet.ts.net:7687") is True
+    assert is_remote_bolt("bolt://192.168.1.100:7687") is True
+    assert is_remote_bolt("neo4j://graph.example.com:7687") is True
+
+    # TLS variants
+    assert is_remote_bolt("bolt+s://graph.example.com:7687") is True
+    assert is_remote_bolt("neo4j+s://127.0.0.1:7687") is False
+
+    # Every scheme is read for its host, including self-signed TLS.
+    assert is_remote_bolt("bolt+ssc://ct-160:27687") is True
+    assert is_remote_bolt("neo4j+ssc://ct-160:27687") is True
+    assert is_remote_bolt("bolt+ssc://127.0.0.1:27687") is False
+    assert is_remote_bolt("BOLT://CT-160:27687") is True
+    assert is_remote_bolt("bolt://user@ct-160:27687") is True
+    # Any loopback address, not just 127.0.0.1.
+    assert is_remote_bolt("bolt://127.0.1.1:7687") is False
+    assert is_remote_bolt("bolt://LOCALHOST:7687") is False
+    # A host that cannot be read fails closed.
+    for unreadable in ("ct-160:27687", "", "bolt://", "bolt://[::1:7687"):
+        assert is_remote_bolt(unreadable) is True, unreadable
+
+
+def test_bare_labels_refused_in_remote_mode():
+    from graph_memory.feed_identity import validate_remote_label
+
+    # Bare labels are fine locally
+    validate_remote_label("claude", remote=False)
+    validate_remote_label("codex", remote=False)
+    validate_remote_label("cursor", remote=False)
+
+    # Bare labels are refused in remote mode
+    for bare in ("claude", "codex", "cursor"):
+        with pytest.raises(ValueError) as exc:
+            validate_remote_label(bare, remote=True)
+        assert "machine-qualified" in str(exc.value)
+        assert f"hostname.{bare}" in str(exc.value)
+
+    # Machine-qualified labels are always fine
+    validate_remote_label("rob-mbp.claude", remote=True)
+    validate_remote_label("ct-160.codex", remote=True)
+    validate_remote_label("dev-box.cursor", remote=True)
+
+    # Non-bare labels are fine even if not machine-qualified
+    validate_remote_label("personal", remote=True)
+    validate_remote_label("transcripts", remote=True)
+
+
+def test_validate_roots_refuses_bare_labels_in_remote_mode(tmp_path):
+    root = tmp_path / "sessions" / "claude"
+    root.mkdir(parents=True)
+
+    # Local mode: bare derived labels are fine
+    validate_roots([root], remote=False)
+
+    # Remote mode: bare derived labels are refused
+    with pytest.raises(ValueError) as exc:
+        validate_roots([root], remote=True)
+    assert "machine-qualified" in str(exc.value)
+
+    # Remote mode: machine-qualified explicit labels are fine
+    validate_roots([f"rob-mbp.claude={root}"], remote=True)
+
+
+def test_accepting_unmatched_is_refused_on_a_shared_graph(monkeypatch):
+    from graph_memory.feed_identity import accept_unmatched
+
+    monkeypatch.delenv("MEMORY_FEED_REMOTE_RECEIVER", raising=False)
+    monkeypatch.delenv("MEMORY_FEED_ACCEPT_UNMATCHED", raising=False)
+    monkeypatch.setenv("NEO4J_URI", "bolt://127.0.0.1:17687")
+    assert accept_unmatched() is False
+    monkeypatch.setenv("MEMORY_FEED_ACCEPT_UNMATCHED", "1")
+    assert accept_unmatched() is True
+    # The receiver's own services reach Neo4j as bolt://neo4j; the flag marks them.
+    monkeypatch.setenv("NEO4J_URI", "bolt://neo4j:7687")
+    monkeypatch.setenv("MEMORY_FEED_REMOTE_RECEIVER", "1")
+    with pytest.raises(ValueError, match="MEMORY_FEED_REMOTE_RECEIVER"):
+        accept_unmatched()
+    # A forwarder pushing to another machine needs no flag.
+    monkeypatch.delenv("MEMORY_FEED_REMOTE_RECEIVER")
+    monkeypatch.setenv("NEO4J_URI", "bolt://ct-160:27687")
+    with pytest.raises(ValueError, match="shared between machines"):
+        accept_unmatched()
+    monkeypatch.delenv("MEMORY_FEED_ACCEPT_UNMATCHED")
+    assert accept_unmatched() is False
+
+
+def test_relabel_keeps_feeds_so_a_machine_qualified_root_feeds_nothing_again(
+    graph, tmp_path, parsed, monkeypatch
+):
+    """The cutover: feeds written by a local daemon under bare labels, then the same
+    files pushed from the Mac under machine-qualified labels."""
+    from graph_memory.feed_identity import relabel
+
+    store, ns = graph
+    service = MemoryService(store)
+    container = tmp_path / "sessions" / "claude"
+    project(container)
+    tree(container)
+    drain(service, ns, [container])
+    before, staged = feeds(store, ns), episodes(store, ns)
+    assert {f["source_key"].split(":")[0] for f in before.values()} == {"claude"}
+    # The Mac sees the same files at its own path, under a qualified label.
+    home = tmp_path / "Users" / "rob" / ".claude" / "projects"
+    home.parent.mkdir(parents=True)
+    container.rename(home)
+    mac = [Path(f"rob-mbp.claude={home}")]
+    counted = relabel(store, ns, "claude", "rob-mbp.claude")
+    assert counted == dict(feeds=4, conflicts=0, relabelled=0) and feeds(store, ns) == before
+    assert relabel(store, ns, "claude", "rob-mbp.claude", apply=True)["relabelled"] == 4
+    assert relabel(store, ns, "claude", "rob-mbp.claude", apply=True)["feeds"] == 0
+    after = feeds(store, ns)
+    for fid, feed in after.items():
+        assert feed.pop("source_key") == before[fid]["source_key"].replace(
+            "claude:", "rob-mbp.claude:", 1
+        )
+        assert feed == {k: v for k, v in before[fid].items() if k != "source_key"}
+    # Pushed from the Mac: same feeds, nothing reparsed, nothing staged.
+    monkeypatch.setenv("NEO4J_URI", "bolt://ct-160:27687")
+    parsed.clear()
+    assert follow_once(service, ns, mac, {}, source_records=True) == []
+    assert parsed == [] and set(feeds(store, ns)) == set(before)
+    assert episodes(store, ns) == staged
+    assert census(store, ns, mac)["unstaged_episodes"] == 0
+    # A key the new label already holds is refused, not merged: two feeds, one file.
+    copy = tmp_path / "copy" / "one.jsonl"
+    copy.parent.mkdir()
+    copy.write_text(claude("user", "Another machine's one."))
+    feed_records(service, ns, copy, "source:copy", source_key="claude:-Users-rob/one.jsonl")
+    clash = relabel(store, ns, "claude", "rob-mbp.claude", apply=True)
+    assert clash == dict(feeds=1, conflicts=1, relabelled=0)
+
+
+def test_offline_forwarder_catches_up_by_rescan_without_duplicate_receipts(
+    graph, tmp_path, parsed, monkeypatch
+):
+    """Mac asleep: nothing is queued on the Mac. On wake a new follower process
+    rescans, skips what is fed, and stages only what was appended meanwhile."""
+    store, ns = graph
+    service = MemoryService(store)
+    monkeypatch.setenv("NEO4J_URI", "bolt://ct-160:27687")
+    home = tmp_path / "Users" / "rob" / ".claude" / "projects"
+    session, _ = project(home)
+    mac = [Path(f"rob-mbp.claude={home}")]
+    drain(service, ns, mac)
+    before, staged = feeds(store, ns), episodes(store, ns)
+    # Appended while the Bolt connection was down; the old process is gone.
+    with session.open("a") as stream:
+        stream.write(claude("user", "Atlas moved to Postgres."))
+    parsed.clear()
+    fed = follow_once(service, ns, mac, {}, source_records=True)
+    assert parsed == [UUID] and [len(f["receipts"]) for f in fed] == [1]
+    assert set(feeds(store, ns)) == set(before) and episodes(store, ns) == staged + 1
+    # Woken again, or restarted by launchd: nothing more.
+    parsed.clear()
+    assert follow_once(service, ns, mac, {}, source_records=True) == []
+    assert parsed == [] and episodes(store, ns) == staged + 1
+
+
+def test_two_machines_with_qualified_labels_keep_separate_cursors(
+    graph, tmp_path, parsed, monkeypatch
+):
+    store, ns = graph
+    service = MemoryService(store)
+    monkeypatch.setenv("NEO4J_URI", "bolt://ct-160:27687")
+    one = tmp_path / "mbp" / ".claude" / "projects"
+    two = tmp_path / "mini" / ".claude" / "projects"
+    tree(one)
+    # The second machine has a different session at the same relative path.
+    (two / "-Users-rob").mkdir(parents=True)
+    (two / "-Users-rob" / "0138dd13-1c43-4517-84bc-416fc7aac738.jsonl").write_text(
+        claude("user", "The mini runs the build.")
+    )
+    first, second = [Path(f"rob-mbp.claude={one}")], [Path(f"rob-mini.claude={two}")]
+    drain(service, ns, first)
+    drain(service, ns, second)
+    found = feeds(store, ns)
+    assert sorted(f["source_key"].split(":")[0] for f in found.values()) == [
+        "rob-mbp.claude",
+        "rob-mbp.claude",
+        "rob-mini.claude",
+    ]
+    # Each machine sees only its own root; the other's keyed feeds do not block it,
+    # and a remount on one machine keeps its cursors.
+    staged = episodes(store, ns)
+    moved = tmp_path / "mbp-new-disk" / ".claude" / "projects"
+    moved.parent.mkdir(parents=True)
+    one.rename(moved)
+    parsed.clear()
+    assert (
+        follow_once(service, ns, [Path(f"rob-mbp.claude={moved}")], {}, source_records=True) == []
+    )
+    assert follow_once(service, ns, second, {}, source_records=True) == []
+    assert parsed == [] and feeds(store, ns) == found and episodes(store, ns) == staged
+
+
+@pytest.mark.parametrize(
+    "filename", ["journal.jsonl", "0138dd13-1c43-4517-84bc-416fc7aac737.jsonl"]
+)
+@pytest.mark.parametrize("same_path", [True, False])
+def test_remote_identity_fallback_and_caught_up_stamps_stay_with_the_label(
+    graph, tmp_path, monkeypatch, filename, same_path
+):
+    import os
+
+    store, ns = graph
+    service = MemoryService(store)
+    monkeypatch.setenv("NEO4J_URI", "bolt://ct-160:27687")
+    root = tmp_path / "Users" / "rob" / ".claude" / "projects"
+    first = root / "workflow" / filename
+    first.parent.mkdir(parents=True)
+    original = claude("user", "Mac A uses MySQL.")
+    first.write_text(original)
+    stat = first.stat()
+    root_a = Path(f"rob-mbp.claude={root}")
+    drain(service, ns, [root_a])
+    before, staged = feeds(store, ns), episodes(store, ns)
+
+    # Separate machines can expose the exact same absolute path, size and mtime.
+    other_root = root if same_path else tmp_path / "mini" / "projects"
+    second = other_root / "workflow" / filename
+    second.parent.mkdir(parents=True, exist_ok=True)
+    second.write_text(claude("user", "Mac B uses MySQL."))
+    os.utime(second, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    root_b = Path(f"rob-mini.claude={other_root}")
+    # Deliberately register a different host whose paths or session names coincide.
+    monkeypatch.setenv("MEMORY_FEED_NEW_SOURCE_LABELS", "rob-mini.claude")
+    result = follow_once(service, ns, [root_b], {}, source_records=True)
+    monkeypatch.delenv("MEMORY_FEED_NEW_SOURCE_LABELS", raising=False)
+    assert len(result) == 1 and len(result[0]["receipts"]) == 1
+    found = feeds(store, ns)
+    assert len(found) == 2 and episodes(store, ns) == staged + 1
+    assert all(found[fid] == props for fid, props in before.items())
+    assert {f["source_key"] for f in found.values()} == {
+        f"rob-mbp.claude:workflow/{filename}",
+        f"rob-mini.claude:workflow/{filename}",
+    }
+    assert census(store, ns, [root_b])["gaps"]["prefix_mismatches"] == 0
+
+    # Returning to the first host must still resolve its original feed.
+    first.write_text(original)
+    os.utime(first, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    assert follow_once(service, ns, [root_a], {}, source_records=True) == []
+    with first.open("a") as stream:
+        stream.write(claude("user", "Mac A moved to Postgres."))
+    result = follow_once(service, ns, [root_a], {}, source_records=True)
+    assert len(result) == 1 and result[0]["feed_id"] in before
+
+
+@pytest.mark.parametrize("apply", [False, True])
+def test_relabel_cli_reports_a_refused_apply_as_failure(monkeypatch, capsys, apply):
+    from types import SimpleNamespace
+
+    from graph_memory import cli, feed_identity
+
+    monkeypatch.setattr(
+        cli, "build_service", lambda: SimpleNamespace(store=SimpleNamespace(close=lambda: None))
+    )
+    monkeypatch.setattr(
+        feed_identity, "relabel", lambda *args: dict(feeds=1, conflicts=1, relabelled=0)
+    )
+    argv = ["graph-memory", "feeds", "relabel", "--from", "claude", "--to", "rob-mbp.claude"]
+    monkeypatch.setattr(cli.sys, "argv", argv + (["--apply"] if apply else []))
+    if apply:
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+        assert exc.value.code == 1
+    else:
+        cli.main()
+    assert json.loads(capsys.readouterr().out) == dict(feeds=1, conflicts=1, relabelled=0)
+
+
+def test_follow_cli_accepts_label_path_and_refuses_bare_labels_remotely(
+    monkeypatch, tmp_path, capsys
+):
+    from neo4j.exceptions import ServiceUnavailable
+
+    from graph_memory import cli
+
+    root = tmp_path / ".claude" / "projects"
+    root.mkdir(parents=True)
+
+    def offline():
+        raise ServiceUnavailable("down")
+
+    # Exit 69 means the arguments passed and the command went on to connect.
+    monkeypatch.setattr(cli, "build_service", offline)
+
+    def invoke(*argv):
+        monkeypatch.setattr(cli.sys, "argv", ["graph-memory", *argv])
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+        return exc.value.code
+
+    monkeypatch.delenv("MEMORY_FEED_REMOTE_RECEIVER", raising=False)
+    monkeypatch.delenv("MEMORY_FEED_ACCEPT_UNMATCHED", raising=False)
+    monkeypatch.setenv("NEO4J_URI", "bolt://ct-160:27687")
+    # The PATH must exist, not the whole LABEL=PATH token.
+    assert invoke("follow", "--once", f"rob-mbp.claude={root}") == 69
+    assert invoke("follow", "--once", f"rob-mbp.claude={tmp_path / 'missing'}") == 2
+    capsys.readouterr()
+    # Refused before connecting: a bare label, and accepting unmatched feeds.
+    assert invoke("follow", "--once", str(root)) == 2
+    assert "machine-qualified" in capsys.readouterr().err
+    monkeypatch.setenv("MEMORY_FEED_ACCEPT_UNMATCHED", "1")
+    assert invoke("follow", "--once", f"rob-mbp.claude={root}") == 2
+    assert invoke("inventory", "--once", "--transcripts", f"rob-mbp.claude={root}") == 2
+    # Self-signed TLS to the receiver is just as remote.
+    monkeypatch.setenv("NEO4J_URI", "bolt+ssc://ct-160:27687")
+    assert invoke("follow", "--once", f"rob-mbp.claude={root}") == 2
+    monkeypatch.delenv("MEMORY_FEED_ACCEPT_UNMATCHED")
+    capsys.readouterr()
+    assert invoke("follow", "--once", str(root)) == 2
+    assert "machine-qualified" in capsys.readouterr().err
+    monkeypatch.setenv("MEMORY_FEED_ACCEPT_UNMATCHED", "1")
+    # The receiver's worker watches no transcripts and still refuses.
+    monkeypatch.setenv("NEO4J_URI", "bolt://neo4j:7687")
+    monkeypatch.setenv("MEMORY_FEED_REMOTE_RECEIVER", "1")
+    monkeypatch.setenv("MEMORY_LLM", "codex")
+    capsys.readouterr()
+    assert invoke("daemon", "--source-records") == 2
+    assert "MEMORY_FEED_REMOTE_RECEIVER" in capsys.readouterr().err
 
 
 def test_a_different_file_at_a_known_key_is_reported_not_merged(graph, tmp_path):

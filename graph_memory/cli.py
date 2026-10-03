@@ -211,7 +211,10 @@ def run():
     call.add_argument("arguments", help="JSON object, or @path to a JSON file")
     commands.add_parser("repair")
     feeds = commands.add_parser("feeds", help="Maintain transcript feed identity")
-    feeds.add_argument("action", choices=("stamp", "plan-revision", "apply-revision"))
+    feeds.add_argument("action", choices=("stamp", "relabel", "plan-revision", "apply-revision"))
+    feeds.add_argument("--from", dest="old", help="relabel: the label the keys have now")
+    feeds.add_argument("--to", dest="new", help="relabel: the label they get, e.g. rob-mbp.claude")
+    feeds.add_argument("--apply", action="store_true", help="relabel: write; default only counts")
     feeds.add_argument("--feed", help="Source feed ID for plan-revision")
     feeds.add_argument("--path", type=Path, help="Mounted transcript path for plan-revision")
     feeds.add_argument("--reason", help="Why the changed source should continue")
@@ -277,10 +280,29 @@ def run():
     if args.command == "follow":
         if args.interval < 1:
             parser.error("--interval must be at least 1 second")
-        if not all(p.exists() for p in args.paths):
+        from .feed_identity import parse_root
+
+        # Of a LABEL=PATH root only the PATH has to exist.
+        if not all(parse_root(p).given.exists() for p in args.paths):
             parser.error("All transcript paths must exist")
     if args.command in ("work", "daemon") and os.environ.get("MEMORY_LLM", "caller") == "caller":
         parser.error(f"{args.command} requires MEMORY_LLM=codex or compatible")
+    if args.command == "feed" and args.source_records:
+        from .feed_identity import shared_graph
+
+        if shared_graph():
+            parser.error(
+                "feed --source-records cannot create an unkeyed feed on a shared graph; "
+                "use follow LABEL=PATH --source-records --once with the owning machine's label"
+            )
+    if args.command in ("follow", "inventory", "daemon"):
+        from .feed_identity import accept_unmatched, new_source_labels, validate_roots
+
+        # Before connecting: clashing or bare labels, and MEMORY_FEED_ACCEPT_UNMATCHED
+        # on a shared graph, even for a receiver's daemon that watches no transcripts.
+        validate_roots(args.paths if args.command == "follow" else args.transcripts)
+        accept_unmatched()
+        new_source_labels()
     service = build_service()
     result: dict[str, Any]
     try:
@@ -332,6 +354,12 @@ def run():
                 if not args.root:
                     parser.error("feeds stamp requires --root")
                 result = stamp_existing(service.store, args.namespace, args.root)
+            elif args.action == "relabel":
+                from .feed_identity import relabel
+
+                if not args.old or not args.new:
+                    parser.error("feeds relabel requires --from and --to")
+                result = relabel(service.store, args.namespace, args.old, args.new, args.apply)
             elif args.action == "plan-revision":
                 from .source_revisions import plan
 
@@ -509,6 +537,13 @@ def run():
         else:
             result = service.store.repair(args.namespace)
         print(json.dumps(result, indent=2))
+        if (
+            args.command == "feeds"
+            and args.action == "relabel"
+            and args.apply
+            and (result.get("conflicts") or result.get("feeds") == 0)
+        ):
+            raise SystemExit(1)
         if result.get("failures") or any(
             r.get("status") == "failed" for r in result.get("receipts", [])
         ):

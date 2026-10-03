@@ -42,6 +42,8 @@ A volume first created without authentication takes the password on its first
 authenticated start, provided the default password was never changed. After that
 the stored password wins, and `NEO4J_PASSWORD` must match it.
 
+For a remote transcript source over Tailscale, see [remote-push.md](remote-push.md).
+
 ## Container hardening
 
 The `worker` and `mcp` services run with a read-only root filesystem, a tmpfs
@@ -74,11 +76,15 @@ For multiple roots, override the worker's `command` and mount each source direct
 read-only. For Claude's project memory bank, preserve a path ending in
 `.claude/projects`; the scanner selects only `*/memory/*.md`. A general bank root
 recursively includes `.md` files. Explicit files may also be `.txt` or `.jsonl`.
-Use `--transcripts /sessions` for ongoing append-only Claude/Codex JSONL sessions;
-this uses durable append cursors and skips an unfinished final line. With
-`--source-records` each root gets a label from its name, or from `LABEL=PATH`,
+Use `--transcripts /sessions` for ongoing append-only Claude/Codex/Cursor JSONL
+sessions; this uses durable append cursors and skips an unfinished final line.
+With `--source-records` each root gets a label from its name, or from `LABEL=PATH`,
 and files are identified by `LABEL:relative/path`. Keep labels and roots stable;
 see [feed identity](operations.md#feed-identity).
+
+For Cursor agent-transcripts, use the `compose.transcripts.cursor.yaml` overlay
+with `CURSOR_SESSIONS_PATH` pointing to `~/.cursor/projects`. Subagent transcripts
+under `…/subagents/*.jsonl` are automatically detected as delegated context.
 
 **When moving an existing installation, preserve the original absolute source
 paths inside the container.** Source identity includes its path. Mounting the
