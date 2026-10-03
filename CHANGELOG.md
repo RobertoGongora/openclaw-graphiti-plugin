@@ -11,7 +11,11 @@
   `localhost` or `neo4j`, for every scheme including `bolt+ssc://`; an unreadable
   URI counts as remote. `follow` accepts `LABEL=PATH` roots whose PATH
   exists. `feeds relabel` renames a label in every source key without changing
-  feed ids or cursors.
+  feed ids or cursors; an apply with conflicts or zero matching feeds exits 1.
+  New labels block when stored paths or relative UUID/rollout session keys overlap
+  another label. `MEMORY_FEED_NEW_SOURCE_LABELS` temporarily acknowledges exact
+  labels for genuinely new sources. Unkeyed feeds block shared intake until an
+  explicit ownership stamp, and shared `feed --source-records` is refused.
 - Cursor agent transcripts can be ingested through an optional read-only mount,
   retaining tools and delegated subagent context. Missing or malformed source
   timestamps stay undated; sourced claims without any dated claim evidence must

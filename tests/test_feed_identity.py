@@ -663,9 +663,8 @@ def test_remote_identity_fallback_and_caught_up_stamps_stay_with_the_label(
     second.write_text(claude("user", "Mac B uses MySQL."))
     os.utime(second, ns=(stat.st_atime_ns, stat.st_mtime_ns))
     root_b = Path(f"rob-mini.claude={other_root}")
-    if same_path:
-        # Deliberately register a different host whose absolute paths coincide.
-        monkeypatch.setenv("MEMORY_FEED_NEW_SOURCE_LABELS", "rob-mini.claude")
+    # Deliberately register a different host whose paths or session names coincide.
+    monkeypatch.setenv("MEMORY_FEED_NEW_SOURCE_LABELS", "rob-mini.claude")
     result = follow_once(service, ns, [root_b], {}, source_records=True)
     monkeypatch.delenv("MEMORY_FEED_NEW_SOURCE_LABELS", raising=False)
     assert len(result) == 1 and len(result[0]["receipts"]) == 1

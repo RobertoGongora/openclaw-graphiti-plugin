@@ -396,11 +396,13 @@ line.
 
 | Event | Meaning | Action |
 | --- | --- | --- |
-| `feed_identity` | Older feeds were stamped with their keys on the first scan | Check `unmatched: 0` and `conflicts: 0` |
-| `feed_identity_blocked` | Some older feeds are stored under paths outside the current roots. Intake stages nothing | Stamp them, below |
+| `feed_identity` | On a local graph, older feeds were stamped with their keys on the first scan | Check `unmatched: 0` and `conflicts: 0` |
+| `feed_identity_blocked` | Local roots cannot name older feeds, shared feeds lack ownership, or a new label overlaps another label's paths/session keys. Intake stages nothing | Follow the action in the JSON: stamp unkeyed feeds, relabel an existing source, or explicitly register a genuinely new source; see [remote push](remote-push.md#several-macs) |
 | `feed_identity_refused` | One file is new by key and by path but has the name of a known feed. It was not read | Find out why the file moved. Fix the mount or the label so it gets its old key |
 
-To unblock, stamp the feeds with the roots they were written under. The path in
+For unkeyed feeds, stamp them with the roots they were written under. On a shared
+graph, stop followers first and use the known owner's machine-qualified label;
+automatic stamping is disabled. The following example is for a local graph. The path in
 `LABEL=PATH` is the prefix of the stored paths. Matching is on the text of the
 path, so it need not exist where the command runs:
 
@@ -429,7 +431,9 @@ Do not rename a label, and do not add a root below an existing root, without
 planning it as a migration. Both change the key that existing files would get.
 `feeds relabel --from OLD --to NEW` renames a label in every key and keeps the
 feed ids; without `--apply` it only counts, and it refuses when a key under the
-new label is taken.
+new label is taken. Applying with a conflict or zero matching feeds exits 1.
+On a shared graph, `feed --source-records` is also refused because it supplies no
+source key; use `follow LABEL=PATH --source-records --once`.
 The daemon validates its roots at start and exits with a message when two
 different directories share a label. Give one of them as `LABEL=PATH`.
 

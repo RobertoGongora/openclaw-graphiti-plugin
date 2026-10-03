@@ -69,6 +69,84 @@ def test_new_label_on_known_paths_blocks_follow_and_inventory(intake, tmp_path, 
         assert not seen  # No stale seed: an administrative relabel can unblock the next scan.
 
 
+@pytest.mark.parametrize("mistyped_target", [False, True])
+@pytest.mark.parametrize(
+    ("consumer", "filename"),
+    [
+        ("claude", "0138dd13-1c43-4517-84bc-416fc7aac737.jsonl"),
+        ("codex", "rollout-2026-09-16T10-20-30-0138dd13-1c43-4517-84bc-416fc7aac737.jsonl"),
+    ],
+)
+def test_docker_cutover_blocks_missed_relabel_and_resumes_after_fix(
+    intake, tmp_path, monkeypatch, mistyped_target, consumer, filename
+):
+    service, ns = intake
+    mounted = tmp_path / "sessions" / consumer
+    source(mounted, filename)
+    source(mounted)  # The unique session must also protect generic files in this root.
+    assert len(scan(service, ns, mounted, consumer)) == 2
+    new_label = f"rob-mbp.{consumer}"
+    old_label = consumer
+    if mistyped_target:
+        old_label = new_label + "-typo"
+        assert (
+            feed_identity.relabel(service.store, ns, consumer, old_label, True)["relabelled"] == 2
+        )
+    before, staged = snapshot(service, ns)
+    host = tmp_path / "Users" / "rob" / f".{consumer}" / "projects"
+    host.parent.mkdir(parents=True)
+    mounted.rename(host)
+    monkeypatch.setenv("MEMORY_FEED_REMOTE_RECEIVER", "1")
+    seen = {}
+    for _ in range(2):
+        inventory = census(service.store, ns, [f"{new_label}={host}"])
+        result = scan(service, ns, host, new_label, seen)
+        assert inventory["state"] == "identity_blocked"
+        assert "unstaged_episodes" not in inventory
+        assert result[0]["status"] == "feed_identity_blocked"
+        assert result[0]["new_source_labels"] == {new_label: [old_label]}
+        assert snapshot(service, ns) == (before, staged)
+        assert not seen
+    # Correcting the administrative relabel unblocks this same follower without a restart.
+    assert feed_identity.relabel(service.store, ns, old_label, new_label, True)["relabelled"] == 2
+    assert scan(service, ns, host, new_label, seen) == []
+    assert census(service.store, ns, [f"{new_label}={host}"])["unstaged_episodes"] == 0
+    assert set(feeds(service.store, ns)) == set(before)
+    assert episodes(service.store, ns) == staged
+    path = host / "workflow" / filename
+    path.write_text(path.read_text() + claude("user", "A new message after the cutover."))
+    appended = scan(service, ns, host, new_label, seen)
+    assert len(appended) == 1 and appended[0]["feed_id"] in before
+    assert set(feeds(service.store, ns)) == set(before)
+    assert episodes(service.store, ns) == staged + 1
+
+
+@pytest.mark.parametrize("same_session", [False, True])
+def test_new_machine_relative_session_registration(intake, tmp_path, monkeypatch, same_session):
+    service, ns = intake
+    monkeypatch.setenv("MEMORY_FEED_REMOTE_RECEIVER", "1")
+    first = tmp_path / "first" / "projects"
+    second = tmp_path / "second" / "projects"
+    filename = "0138dd13-1c43-4517-84bc-416fc7aac737.jsonl"
+    source(first, filename)
+    assert len(scan(service, ns, first, "rob-mbp.claude")) == 1
+    before, staged = snapshot(service, ns)
+    source(second, filename if same_session else filename.replace("0138dd13", "0138dd14"))
+    roots = [f"rob-mini.claude={second}"]
+    if same_session:
+        assert census(service.store, ns, roots)["state"] == "identity_blocked"
+        assert scan(service, ns, second, "rob-mini.claude")[0]["status"] == "feed_identity_blocked"
+        assert snapshot(service, ns) == (before, staged)
+        monkeypatch.setenv(ACK, "rob-mini.claude")
+    assert census(service.store, ns, roots)["unstaged_episodes"] == 1
+    result = scan(service, ns, second, "rob-mini.claude")
+    assert len(result) == 1 and result[0]["feed_id"] not in before
+    found, count = snapshot(service, ns)
+    assert count == staged + 1 and {fid: found[fid] for fid in before} == before
+    monkeypatch.delenv(ACK, raising=False)
+    assert scan(service, ns, second, "rob-mini.claude") == []
+
+
 @pytest.mark.parametrize("same_path", [True, False])
 def test_new_machine_ack_is_narrow_and_both_hosts_resume(intake, tmp_path, monkeypatch, same_path):
     service, ns = intake
@@ -279,6 +357,52 @@ def test_registration_checks_path_boundaries_and_single_file_roots(monkeypatch, 
     sibling = source(root, filename="different.jsonl")
     assert not feed_identity.Feeds(store, "test", [f"new.claude={sibling}"]).blocked
     rows[0]["uri"] = str(tmp_path / "projects-backup" / "workflow" / path.name)
+    assert not feed_identity.Feeds(store, "test", [f"new.claude={root}"]).blocked
+
+
+@pytest.mark.parametrize("mode", ["directory", "file", "symlink_directory", "symlink_file"])
+def test_relative_session_guard_respects_root_and_symlinks(monkeypatch, tmp_path, mode):
+    monkeypatch.setenv("MEMORY_FEED_REMOTE_RECEIVER", "1")
+    directory = tmp_path / "host"
+    directory.mkdir()
+    filename = "0138dd13-1c43-4517-84bc-416fc7aac737.jsonl"
+    path = directory / filename
+    path.write_text(claude("user", "A relocated session."))
+    root = path if mode.endswith("file") else directory
+    if mode.startswith("symlink"):
+        link = directory / "alias.jsonl" if mode.endswith("file") else tmp_path / "mounted"
+        link.symlink_to(root, target_is_directory=root.is_dir())
+        root = link
+    rows = [
+        {
+            "id": "old",
+            "session": "old",
+            "key": f"old.claude:{filename}",
+            "uri": f"/sessions/claude/{filename}",
+        }
+    ]
+    store = SimpleNamespace(read=lambda *_: rows)
+    roots = [f"new.claude={root}"]
+    assert feed_identity.Feeds(store, "test", roots).blocked["new_source_labels"] == {
+        "new.claude": ["old.claude"]
+    }
+    if mode.endswith("file"):
+        sibling = directory / filename.replace("0138dd13", "0138dd14")
+        sibling.write_text(path.read_text())
+        rows[0]["key"] = f"old.claude:{sibling.name}"
+        assert not feed_identity.Feeds(store, "test", roots).blocked
+
+
+@pytest.mark.parametrize("absolute", [False, True])
+def test_relative_session_guard_does_not_follow_keys_outside_root(monkeypatch, tmp_path, absolute):
+    monkeypatch.setenv("MEMORY_FEED_REMOTE_RECEIVER", "1")
+    root = tmp_path / "host"
+    root.mkdir()
+    outside = tmp_path / "0138dd13-1c43-4517-84bc-416fc7aac737.jsonl"
+    outside.write_text(claude("user", "Outside the watched root."))
+    relative = str(outside) if absolute else f"../{outside.name}"
+    rows = [{"id": "old", "session": "old", "key": f"old.claude:{relative}", "uri": str(outside)}]
+    store = SimpleNamespace(read=lambda *_: rows)
     assert not feed_identity.Feeds(store, "test", [f"new.claude={root}"]).blocked
 
 

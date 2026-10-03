@@ -10,9 +10,10 @@ every component is generic or has no letters (``/``, ``/sessions``) is labelled
 
 A change of roots must never silently mint a feed for a file already known.
 On a shared graph, path and filename matching stay within the source label.
-A new label whose root contains another label's stored paths is blocked until
-explicitly acknowledged as a new source, or the old label is relabelled. Unkeyed
-legacy feeds on a shared graph require explicit stamping, never path inference.
+A new label whose root contains another label's stored paths or relative session
+keys is blocked until explicitly acknowledged as a new source, or the old label
+is relabelled. Unkeyed legacy feeds on a shared graph require explicit stamping,
+never path inference.
 Locally, a feed is found by key, then by its stored path; a new file carrying a
 known name is refused, and unmatchable older feeds block intake (``blocked``).
 
@@ -139,6 +140,17 @@ class Root(NamedTuple):
         if self.is_file():
             return PurePosixPath(uri) in (self.given, self.given.resolve())
         return uri_key([self], uri) is not None
+
+    def contains_session_key(self, key):
+        """A known UUID/rollout session is present under this mount, regardless of label."""
+        relative = key.partition(":")[2]
+        path = PurePosixPath(relative)
+        if not unique_name(relative) or path.is_absolute() or ".." in path.parts:
+            return False
+        if self.is_file():
+            # Use the same resolved/symlink identity as intake; siblings are not this root.
+            return self.key(self.given)[1].partition(":")[2] == relative
+        return (self.given / relative).is_file()
 
 
 def derived_label(directory: Path):
@@ -316,7 +328,8 @@ class Feeds:
                         owners = {
                             row["key"].partition(":")[0]
                             for row in rows
-                            if row["uri"] and root.contains_uri(row["uri"])
+                            if (row["uri"] and root.contains_uri(row["uri"]))
+                            or root.contains_session_key(row["key"])
                         }
                         if owners:
                             collisions[root.label] = sorted(owners)
@@ -324,7 +337,8 @@ class Feeds:
                         self.blocked = {"feeds": len(rows), "new_source_labels": collisions}
                         self.blocked_action = (
                             "These labels have no feeds, but their roots contain paths "
-                            "stored under other labels. With followers stopped, run "
+                            "or relative session keys stored under other labels. "
+                            "With followers stopped, run "
                             "graph-memory feeds relabel --from OLD --to NEW --apply "
                             "for the same source. Only for a genuinely new machine, "
                             f"set {NEW_SOURCE_LABELS}={','.join(sorted(collisions))} "

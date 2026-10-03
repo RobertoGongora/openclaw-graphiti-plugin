@@ -163,11 +163,14 @@ inside the container. In order:
 
    `feeds stamp` does not do this: it names only feeds that have no key, and the
    Mac's worker keyed every feed on its first scan. Without the relabel the Mac's
-   first `follow` finds no feed under the new label. If the stored paths fall
-   under the Mac's roots, intake and inventory block until ownership is resolved.
-   Paths that also changed cannot identify a missed relabel: always complete this
-   step and check the counts before continuing. Remote path and filename matching
-   never crosses labels. `--apply` exits 1 for conflicts **or zero matching feeds**;
+   first `follow` finds no feed under the new label. Intake and inventory block
+   if another label has stored paths under the Mac's roots, or if one of its
+   UUID/rollout-named files exists at the same relative path under the new root.
+   The second check catches the Docker-to-host path change, including a typo in
+   the relabel target, without adopting another label's feeds. Always complete
+   this step and check the counts before continuing: the guard does not detect
+   a simultaneous label/path change when every file has a generic name, or when
+   the relative paths changed too. `--apply` exits 1 for conflicts **or zero matching feeds**;
    check the source label and resolve conflicts before continuing. A dry run may
    exit 0 with zero feeds, for example if that consumer has never been used.
 6. **Start the receiver**: `gmr up -d`. The worker watches no transcripts, so it
@@ -188,7 +191,9 @@ inside the container. In order:
    counts should be what the Mac wrote after step 2. `identity_blocked` means
    either unkeyed legacy feeds need explicit stamping with their known owning
    machine's label and stored paths, or the new label overlaps another label's
-   stored paths. Follow the reported action: stamp legacy feeds or complete step 5.
+   stored paths or relative session keys. Follow the reported action: stamp legacy
+   feeds or complete step 5. Read the JSON state; identity-blocked inventory and
+   `follow --once` currently still exit 0, so an exit-code-only gate is insufficient.
    Do not acknowledge the cutover as a new source, or use
    `MEMORY_FEED_ACCEPT_UNMATCHED`.
 9. **Start `follow`** on the Mac (next section).
@@ -321,10 +326,12 @@ over each other's feeds. Moving a session to another machine or changing its
 label requires an explicit `feeds relabel` with both followers stopped.
 
 A label with no keyed feeds needs a one-time acknowledgement if another label
-has stored paths under its root. A new Mac with the same home directory and an
-accidentally renamed existing Mac are indistinguishable by paths. For an existing
-source, use `feeds relabel`; never acknowledge it as new. A new Mac with different,
-nonoverlapping paths needs no acknowledgement.
+has stored paths under its root or a UUID/rollout-named file at the same relative
+path. This catches copied sessions and missed relabels across different mounts.
+A new Mac with the same home directory and an accidentally renamed existing Mac
+are indistinguishable by paths. For an existing source, use `feeds relabel`;
+never acknowledge it as new. A new Mac with nonoverlapping paths and different
+session ids needs no acknowledgement.
 
 For a genuinely new Mac, first edit its wrapper to use that Mac's qualified
 labels. Then run inventory and one scan with those exact labels acknowledged:
@@ -346,6 +353,9 @@ can restart without acknowledgement; if the queue is full or no file exists yet,
 repeat the one-time scan when it can stage work. Inventory does not register a
 label. The acknowledgement only permits new feeds under the listed labels; it
 never adopts another label's feeds and never bypasses unkeyed legacy feeds.
+If a consumer has no transcript files yet (for example, Codex has never run),
+leave that root out of the wrapper until it has a file: a blocked empty root
+otherwise holds up intake for the other roots too.
 
 Push each session from one Mac only. A session copied or synced to another Mac
 under a different label becomes a separate feed; content is not deduplicated
@@ -358,7 +368,7 @@ across machines.
 | `follow` exits 69 | Receiver unreachable, or wrong password | `tailscale status`, `nc -zv graph-memory.taild00569.ts.net 27687`, the tailnet policy, the Keychain item |
 | `follow` exits 2, "machine-qualified" | A bare label with a remote `NEO4J_URI` | Name the root `HOST.CONSUMER=PATH` |
 | `feed_identity_blocked` / inventory `identity_blocked`, `unkeyed` | Shared graph contains feeds with no known owning label | Stop followers; `feeds stamp --root LABEL=STORED_PREFIX` with the known owner's qualified label; see [operations.md](operations.md#feed-identity) |
-| `feed_identity_blocked` / inventory `identity_blocked`, `new_source_labels` | A label has no feeds, but its root overlaps paths stored under other labels | Existing source: `feeds relabel` (cutover step 5), with followers stopped. Genuinely new Mac: transient acknowledgement as above |
+| `feed_identity_blocked` / inventory `identity_blocked`, `new_source_labels` | A label has no feeds, but its root overlaps stored paths or relative UUID/rollout session keys under other labels | Existing source: `feeds relabel` (cutover step 5), with followers stopped. Genuinely new Mac: transient acknowledgement as above |
 | `feed_identity_refused` | A known file name under the same label appears copied beside its original | Keep one authoritative source; inspect the reported known feed and key |
 | Worker exits 2 at start | `MEMORY_FEED_ACCEPT_UNMATCHED=1` reached a receiver | Remove it from the env file |
 | Episodes stay pending | Worker down, model login expired, or provider outage | `gmr ps worker`, `gmr logs worker`; see [operations.md](operations.md#provider-outage) |

@@ -98,27 +98,36 @@ their files would merge. The daemon validates its roots once at start and stops
 with a message if they clash.
 
 A file's feed is found by key first, then by the absolute path it was last stored
-with. Feeds created before source keys existed keep their ids, because episodes,
-messages and the journal already reference them. The first scan stamps them with
-the key their stored path has under the current roots and logs `feed_identity`
+with. On a shared graph, path and filename matching stay within the source label.
+Feeds created before source keys existed keep their ids, because episodes,
+messages and the journal already reference them. On a local graph, the first scan
+stamps them with the key their stored path has under the current roots and logs `feed_identity`
 with the counts `feeds`, `stamped`, `already_stamped`, `unmatched` and
 `conflicts`. A feed found by its path alone is given today's key on that scan
 too, since a fully fed file is never opened again.
 
 Two refusals protect the graph from a second copy of a session:
 
-- **Blocked.** While any older feed cannot be named under the current roots, or
+- **Blocked locally.** While any older feed cannot be named under the current roots, or
   two feeds claim one key, intake stages nothing at all. Each scan reports
   `feed_identity_blocked` with the counts. Every file of those feeds would read
   as new and be staged again. The operator stamps the feeds with the roots they
   were written under, using `feeds stamp`, and the next scan continues.
+- **Blocked on a shared graph.** Unkeyed feeds require an explicit `feeds stamp`
+  with the known owning machine's qualified label; followers never infer their
+  ownership from paths. A new label also blocks if another label has stored paths
+  below its root or a UUID/rollout-named session at the same relative path. Use
+  `feeds relabel` for an existing source. Only a genuinely new source may use a
+  transient `MEMORY_FEED_NEW_SOURCE_LABELS` acknowledgement, which never bypasses
+  unkeyed feeds. See [remote push](remote-push.md#several-macs).
 - **Refused.** A file that is new by key and by path but carries the name of a
   known feed is not read. The scan reports `feed_identity_refused` once per
   version of the file, with the known feed's id and key. Session ids, rollout
   names and long hashes name a file by basename. Other names, such as
   `journal.jsonl`, count together with their directory.
 
-`MEMORY_FEED_ACCEPT_UNMATCHED=1` turns both refusals off. Every file that cannot
+On a local graph, `MEMORY_FEED_ACCEPT_UNMATCHED=1` turns both refusals off. A shared
+graph refuses that override before connecting. Every file that cannot
 be matched then gets a new feed, and a session the graph already holds is staged
 and extracted a second time under new ids. There is no undo short of a restore.
 The inventory uses the same resolution and reports `identity_blocked` instead of
