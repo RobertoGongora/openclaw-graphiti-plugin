@@ -522,9 +522,13 @@ session before query working sets. Historical requests can use substantially
 more. A process-shared nonblocking file lock serializes historical MCP handlers;
 competing callers get BUSY and must retry with the same cutoff. Locks release
 automatically when a session dies. Entity/evidence history selectively retains
-nodes while validating the complete journal; broad historical recall still has
-a namespace-sized working set. This reduces concurrent peaks, not idle allocator
-retention. A healthy main process does not establish that every stdio session
+nodes while validating the complete journal. Historical recall, search and
+latest drop source text and other source records as the checkpoint is
+restored, but keep every fact, entity and insight, so their working set still
+grows with the namespace. A long tail of events after the last checkpoint keeps
+every node it changes complete, and a version 1 or 2 checkpoint stored in its
+event is restored in full before it is cut down. This reduces concurrent peaks, not
+idle allocator retention. A healthy main process does not establish that every stdio session
 survived: inspect container OOM events when a client reports a closed transport.
 The personal MCP container keeps 1 GB.
 

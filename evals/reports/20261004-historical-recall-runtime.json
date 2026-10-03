@@ -1,0 +1,150 @@
+{
+  "kind": "synthetic default-runtime validation",
+  "baseline_commit": "3032c254b92976463fe1fc2286e8544ee8846724",
+  "runtime_commit": "ec5eb01ca429582c6039c5f4252a19d7ca165fac",
+  "runtime_worktree_clean": true,
+  "queries_sha256": "2a160c3429027e2519dae1a1bf9235de1ab255d43e5db3418725519ae1fe79e2",
+  "fixture": {
+    "kind": "synthetic",
+    "uri": "bolt://127.0.0.1:38689",
+    "namespace": "eval:history-runtime-20261003",
+    "sessions": 1000,
+    "counts": [
+      {
+        "labels": [
+          "MemoryAlias"
+        ],
+        "n": 7
+      },
+      {
+        "labels": [
+          "MemoryArtifact"
+        ],
+        "n": 8004
+      },
+      {
+        "labels": [
+          "MemoryArtifactObservation"
+        ],
+        "n": 8004
+      },
+      {
+        "labels": [
+          "MemoryEntity"
+        ],
+        "n": 3
+      },
+      {
+        "labels": [
+          "MemoryEpisode"
+        ],
+        "n": 1002
+      },
+      {
+        "labels": [
+          "MemoryFact"
+        ],
+        "n": 2
+      },
+      {
+        "labels": [
+          "MemoryMessage"
+        ],
+        "n": 8006
+      },
+      {
+        "labels": [
+          "MemorySession"
+        ],
+        "n": 1002
+      },
+      {
+        "labels": [
+          "MemorySnapshotPart"
+        ],
+        "n": 16
+      }
+    ],
+    "cutoffs": [
+      [
+        3,
+        "2026-10-03T20:07:16.858471+00:00"
+      ],
+      [
+        5,
+        "2026-10-03T20:07:17.261973+00:00"
+      ]
+    ],
+    "verified": {
+      "namespace": "eval:history-runtime-20261003",
+      "verified": true,
+      "sequence": 5,
+      "hash": "8dc60045365886df936f1930b4e2edc8ee4310393049f04c2b4f9af811a9f74c",
+      "records": 26023
+    }
+  },
+  "measurements": {
+    "original-full": {
+      "runs": [
+        {
+          "peak_process_bytes": 155844608,
+          "handler_seconds": 2.8664710021112114,
+          "requests": 24
+        },
+        {
+          "peak_process_bytes": 155516928,
+          "handler_seconds": 4.954694875865243,
+          "requests": 24
+        },
+        {
+          "peak_process_bytes": 151109632,
+          "handler_seconds": 4.86975392093882,
+          "requests": 24
+        }
+      ],
+      "median_peak_process_bytes": 155516928,
+      "median_handler_seconds": 4.86975392093882
+    },
+    "runtime-projected": {
+      "runs": [
+        {
+          "peak_process_bytes": 111738880,
+          "handler_seconds": 4.8489378757658415,
+          "requests": 24
+        },
+        {
+          "peak_process_bytes": 111050752,
+          "handler_seconds": 4.730271500069648,
+          "requests": 24
+        },
+        {
+          "peak_process_bytes": 113901568,
+          "handler_seconds": 4.724708664813079,
+          "requests": 24
+        }
+      ],
+      "median_peak_process_bytes": 111738880,
+      "median_handler_seconds": 4.730271500069648
+    }
+  },
+  "peak_reduction_percent": 28.150021070375054,
+  "paired_runtime_responses": 72,
+  "forced_full_baseline_responses": 24,
+  "unchanged_control_responses": 2,
+  "limitations": "Synthetic source-heavy graph, sequential local macOS processes; no production percentage or concurrency/OOM guarantee. Latency descriptive, caches not reset.",
+  "verified_after": {
+    "namespace": "eval:history-runtime-20261003",
+    "verified": true,
+    "sequence": 5,
+    "hash": "8dc60045365886df936f1930b4e2edc8ee4310393049f04c2b4f9af811a9f74c",
+    "records": 26023
+  },
+  "source_sha256": {
+    "graph_memory/journal.py": "b57bdf5dd4aa63066a7ddb7778cb0b1d2da0cd59353f536c4eedee206dd14b63",
+    "evals/historical_recall.py": "b1628dba14a848be87669ab1b42f61bd5ccfd688144ab8715cff85457fdc1a1c"
+  },
+  "probe_sha256": {
+    "graph-memory-history-runtime-seed.py": "aaa437b76a0caa49834647d389f971221af6fd74a35e7e952f18fbee0a45f8b7",
+    "graph-memory-history-runtime-measure.py": "aeda1aeddac9600235fb8f77f0d389267540b1c3f320a45a62663db87998642d"
+  }
+}
