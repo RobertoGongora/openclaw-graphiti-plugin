@@ -76,10 +76,13 @@ or validation_evidence. Older messages may explain a new claim, not create new f
    turn it into a fact, even uncertain. Original session ingestion preserves new
    user assertions without depending on a caller's claimed role.
 
-3. Only AFTER step 2, apply the general rules for planned/active/ended and dates
+3. If every cited conversational claim lacks a source timestamp, the fact MUST
+have status="uncertain" and valid_at=null, including user assertions. Keep the
+claim with its evidence; never invent a source date from ingestion or file metadata.
+Otherwise, only AFTER step 2, apply the general rules for planned/active/ended and dates
 to supported claims. The uncertain/null requirement above takes precedence over
 ALL general timestamp rules, including timestamped present-tense state and plans.
-Do not turn a supported user assertion or genuinely corroborated assistant claim
+For dated source claims, do not turn a supported user assertion or genuinely corroborated assistant claim
 into uncertain merely to pass validation. A report date alone does not date an event.
 
 4. Copy each evidence quote verbatim from ONE message's content. Use a short,
