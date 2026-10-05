@@ -163,6 +163,7 @@ def test_a_bad_greeting_is_closed_without_a_session(sessions):
 
 
 def test_without_a_session_server_the_relay_serves_in_process(monkeypatch):
+    monkeypatch.setattr(relay, "WAIT", 0.2)
     calls = []
     monkeypatch.setattr(cli, "main", lambda: calls.append(sys.argv[1:]))
     monkeypatch.setenv(relay.ENV, "/tmp/graph-memory-absent.sock")
@@ -174,6 +175,30 @@ def test_without_a_session_server_the_relay_serves_in_process(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["graph-memory", "serve"])
     relay.main()
     assert calls == [["--namespace", "t", "serve"], ["recall", "x"], ["serve"]]
+
+
+def test_a_relay_started_before_the_server_waits_for_its_socket():
+    # Clients reconnect as soon as a restarted container runs, before the server
+    # has created its socket; they must not each load an engine meanwhile.
+    directory = tempfile.mkdtemp(prefix="gm", dir="/tmp")
+    path = os.path.join(directory, "s.sock")
+    try:
+        child = spawn(path, "--namespace", "t", "serve")
+        time.sleep(1)
+        server = session_server(MemoryService(None), path)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            # A fallback would answer too; only a relayed session is counted here.
+            assert settle(server, 1) == 1
+            assert exchange(child, INIT)[0]["id"] == 0
+            assert child.returncode == 0
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
 
 
 def test_session_socket_replaces_a_stale_socket_but_never_a_file():

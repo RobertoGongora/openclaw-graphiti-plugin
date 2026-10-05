@@ -12,6 +12,8 @@ import threading
 import time
 
 ENV = "MEMORY_SESSION_SOCKET"
+# Seconds to wait for a server that is starting or busy before serving in-process.
+WAIT = 10
 
 
 def relayable(argv):
@@ -43,16 +45,17 @@ def relayable(argv):
 
 def connect(path, namespace, read_only):
     """A session the server accepted, or None to serve in this process instead."""
-    deadline = time.monotonic() + 10
+    deadline = time.monotonic() + WAIT
     while True:
         client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
             client.settimeout(max(deadline - time.monotonic(), 0.1))
             client.connect(path)
             break
-        except BlockingIOError:
-            # A full accept backlog: the server is there, so wait for it rather than
-            # loading a second engine, which is the cost this relay exists to avoid.
+        except (BlockingIOError, FileNotFoundError, ConnectionRefusedError):
+            # A full accept backlog, or a server still starting (it creates the socket
+            # after database setup), as when every client reconnects after a restart.
+            # Wait rather than load a second engine, the cost this relay exists to avoid.
             client.close()
             if time.monotonic() > deadline:
                 return None
