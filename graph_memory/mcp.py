@@ -4,12 +4,15 @@ import base64
 import hmac
 import json
 import logging
+import os
 import re
+import socketserver
+import stat
 import sys
 import threading
 import time
 import uuid
-from contextlib import nullcontext
+from contextlib import nullcontext, suppress
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from pydantic import ValidationError
@@ -366,24 +369,94 @@ class Protocol:
         return 200, {"jsonrpc": "2.0", "id": request_id, "result": result}
 
 
-def stdio(protocol):
+def serve_lines(protocol, reader, write, slots=None):
+    """Newline-delimited JSON-RPC until EOF, the stdio framing on any byte stream."""
     while True:
-        line = sys.stdin.buffer.readline(MAX_BODY + 1)
+        line = reader.readline(MAX_BODY + 1)
         if not line:
             break
         if len(line) > MAX_BODY:
             response = error(None, -32600, "Request too large")
             while line and not line.endswith(b"\n"):
-                line = sys.stdin.buffer.readline(MAX_BODY + 1)
+                line = reader.readline(MAX_BODY + 1)
         else:
             try:
                 message = json.loads(line)
             except (ValueError, UnicodeError, RecursionError):
                 response = error(None, -32700, "Invalid JSON")
             else:
-                _, response = protocol.dispatch(message)
+                with slots or nullcontext():
+                    _, response = protocol.dispatch(message)
         if response is not None:
-            print(json.dumps(response), flush=True)
+            write(json.dumps(response))
+
+
+def stdio(protocol):
+    serve_lines(protocol, sys.stdin.buffer, lambda text: print(text, flush=True))
+
+
+class SessionServer(socketserver.ThreadingUnixStreamServer):
+    # Idle sessions must not hold up shutdown.
+    daemon_threads = True
+    # The default of 5 refuses a burst of subagents starting together.
+    request_queue_size = 128
+    sessions = 0
+
+    def server_close(self):
+        super().server_close()
+        with suppress(FileNotFoundError):
+            os.unlink(str(self.server_address))
+
+
+def session_server(service, path):
+    """stdio sessions relayed from `docker exec ... serve` (see relay.py), served by
+    this process. Each would otherwise load the engine in its own process, about
+    55 MiB apiece against the container's memory limit."""
+    if os.path.lexists(path):
+        if not stat.S_ISSOCK(os.lstat(path).st_mode):
+            raise ValueError(f"{path} exists and is not a socket")
+        os.unlink(path)
+    protocols, lock = {}, threading.Lock()
+    # Concurrent tool calls share one heap now; excess calls wait instead of failing.
+    slots = threading.BoundedSemaphore(16)
+
+    class Handler(socketserver.StreamRequestHandler):
+        server: SessionServer
+
+        def write(self, text):
+            self.wfile.write(text.encode() + b"\n")
+
+        def handle(self):
+            # The relay states what its command line asked for, so a session keeps the
+            # namespace and read-only binding of a standalone `serve`.
+            try:
+                hello = json.loads(self.rfile.readline(1024))
+                namespace, read_only = hello["namespace"], hello["read_only"]
+            except (ValueError, UnicodeError, RecursionError, TypeError, KeyError):
+                return
+            if not (isinstance(namespace, str) and 0 < len(namespace) <= 200):
+                return
+            if not isinstance(read_only, bool):
+                return
+            with lock:
+                protocol = protocols.get((namespace, read_only))
+                if protocol is None:
+                    protocol = Protocol(service, namespace=namespace, read_only=read_only)
+                    if len(protocols) < 32:
+                        protocols[namespace, read_only] = protocol
+                self.server.sessions += 1
+            try:
+                self.write('{"ok": true}')
+                serve_lines(protocol, self.rfile, self.write, slots)
+            except OSError:
+                pass  # The relay went away mid-response; nothing is left to tell.
+            finally:
+                with lock:
+                    self.server.sessions -= 1
+
+    server = SessionServer(path, Handler)
+    os.chmod(path, 0o600)
+    return server
 
 
 def host_allowed(value, extra=()):

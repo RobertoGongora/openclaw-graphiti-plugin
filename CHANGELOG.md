@@ -14,6 +14,11 @@
 
 ### Fixed
 
+- The MCP container no longer runs out of memory as client sessions pile up. A
+  `docker exec ... serve` session relays over `MEMORY_SESSION_SOCKET` to the
+  running server instead of loading its own engine: about 9 MB per session
+  instead of 55 MB, so 30 sessions cost 317 MB where they cost 1.7 GB. Without
+  the socket, `serve` falls back to a full in-process server as before.
 - Historical MCP calls share admission control across session processes; bounded
   entity/evidence reconstruction retains fewer nodes without skipping journal
   integrity checks. Busy callers can retry without losing their connection.

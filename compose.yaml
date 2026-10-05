@@ -128,11 +128,15 @@ services:
 
   mcp:
     <<: [*graph-memory, *hardening]
+    # `docker exec ... serve` sessions relay through MEMORY_SESSION_SOCKET to this
+    # server (~9 MiB each) instead of each loading the engine (~55 MiB).
     mem_limit: 1g
     pids_limit: 256
     environment:
       <<: *neo4j-client
       MEMORY_LLM: caller
+      # tmpfs; set on the service, so every exec into this container inherits it.
+      MEMORY_SESSION_SOCKET: /tmp/graph-memory-sessions.sock
       MEMORY_HTTP_TOKEN: ${MEMORY_HTTP_TOKEN:-graph-memory}
       # Extra Host names and browser Origins accepted besides loopback (comma lists).
       MEMORY_HTTP_HOSTS: ${MEMORY_HTTP_HOSTS:-}

@@ -31,7 +31,7 @@ Issues = "https://github.com/RobertoGongora/openclaw-graphiti-plugin/issues"
 Changelog = "https://github.com/RobertoGongora/openclaw-graphiti-plugin/blob/master/CHANGELOG.md"
 
 [project.scripts]
-graph-memory = "graph_memory.cli:main"
+graph-memory = "graph_memory.relay:main"
 
 [dependency-groups]
 dev = ["pyright>=1.1.400,<2", "pytest>=8,<10", "pytest-cov>=6,<8", "ruff>=0.12,<1"]
