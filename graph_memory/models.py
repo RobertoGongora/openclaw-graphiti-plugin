@@ -432,6 +432,13 @@ class Extraction(Model):
                         "An unvalidated assistant claim requires status=uncertain and valid_at=null. To validate it, cite an exact corroborating tool-result quote in validation_evidence AND keep the assistant quote in evidence. Memory reads/writes cannot validate it.",
                         ["facts", fact_index, "evidence"],
                     )
+                if all(m.timestamp is None for m in claims) and (
+                    fact.status != "uncertain" or fact.valid_at is not None
+                ):
+                    reject(
+                        "Claims without source timestamps require status=uncertain and valid_at=null. Do not invent a date from ingestion or file metadata.",
+                        ["facts", fact_index, "evidence"],
+                    )
             if fact.valid_at and fact.valid_at > now() and fact.status == "active":
                 reject(
                     "Future facts must be planned, not active", ["facts", fact_index, "valid_at"]
