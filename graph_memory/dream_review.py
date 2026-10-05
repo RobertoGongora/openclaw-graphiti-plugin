@@ -22,7 +22,7 @@ def packet(graph, transcripts):
             if msg.id in transcript.memory_origins or msg.tool_failed:
                 continue
             ref = transcript.verified_source_refs.get(msg.id)
-            if transcript.source_format == "session-records-v1":
+            if transcript.source_format in m.SESSION_RECORD_FORMATS:
                 ref = digest([transcript.namespace, transcript.session_id, msg.id])
             if not ref:
                 # Unsourced notes and legacy/context material cannot validate a claim.

@@ -3,6 +3,10 @@
 
 ### Added
 
+- Cursor agent transcripts can be ingested through an optional read-only mount,
+  retaining tools and delegated subagent context. Missing or malformed source
+  timestamps stay undated; sourced claims without any dated claim evidence must
+  remain uncertain with no event date.
 - Opt-in local MCP `tools/call` JSONL (`MEMORY_MCP_CALL_LOG`, and
   `TRANSCRIPT_MCP_CALL_LOG` for the transcripts stack) for recall debugging. Off
   by default. Records the tool, arguments, client and transport, and a compact
@@ -11,6 +15,22 @@
   `as_of` to ask the same read again later (`replay`, with `raced` and `intact`). Rotates at 5 MiB across processes. Authorization
   headers, credential fields and the server's own credentials are omitted;
   transcript content is left out. Separate from the Neo4j journal.
+- Grok Bot desk and fleet chats can be ingested from a `grok-bot` transcript
+  root (`<agentId>.jsonl`). The app's ReadTranscript entries are read as
+  exported: messages keep their speaker, replies and widget answers are
+  sourced, and attachments, events, voice calls and other message types become
+  context notes, so no entry is dropped unseen. Claude-shaped and flat lines are
+  also read. Messages from other agents (`fromAgent`, a non-user `author`, or
+  sidechain) stay context, not user assertions.
+- `importers.redact()` also covers GitHub device codes shown with a device-code
+  prompt, `tskey-`, `xai-` keys, `crsr_` keys, `github_pat_`, JWTs, quoted JSON
+  keys (`"api_key": "…"`), prefixed names (`OPENAI_API_KEY=`, `GITHUB_TOKEN=`),
+  webhook keys and secrets, escaped quotes in JSON-encoded tool arguments,
+  `Authorization: Basic`, unterminated private keys,
+  and `token`/`key`/`access_token`/`client_secret` query and fragment values.
+  Feed cursors written with the earlier redaction still resume, and messages
+  already stored keep their earlier text when a later batch carries them again
+  as context.
 
 ### Fixed
 

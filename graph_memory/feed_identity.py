@@ -24,7 +24,7 @@ from itertools import islice
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
-from .session_sources import FORMAT, records
+from .session_sources import FORMAT, cursor_matches, records
 from .store import digest
 
 # Where the hosts keep sessions; the directory above names the host.
@@ -227,9 +227,7 @@ class Feeds:
                 )
                 for row in gone:
                     count, prefix = cursors.get(row["id"], (0, None))
-                    if 0 < count <= len(found) and prefix == digest(
-                        [m.model_dump(mode="json") for m in found[:count]]
-                    ):
+                    if count and cursor_matches(Path(name), found, count, prefix):
                         return row
             known = [row for row in alike if self.present(row, name)]
         for row in known:

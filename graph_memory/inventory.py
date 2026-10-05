@@ -9,7 +9,7 @@ from pathlib import Path
 from .diagnostics import diagnostic
 from .feed_identity import Feeds, KnownElsewhere, validate_roots
 from .models import now
-from .session_sources import FORMAT, MAX_BATCH_CHARS, before_shell_results, records
+from .session_sources import FORMAT, MAX_BATCH_CHARS, cursor_matches, records
 from .store import digest
 
 
@@ -113,12 +113,7 @@ def census(store, namespace, roots, stop=None):
                 gaps["identity_refused"] += 1
                 continue
             count = cursor.get("message_count", 0)
-            prefix = [m.model_dump(mode="json") for m in messages[:count]]
-            if count > len(messages) or (
-                count
-                and cursor["prefix_hash"]
-                not in (digest(prefix), digest([before_shell_results(m) for m in prefix]))
-            ):
+            if not cursor_matches(path, messages, count, cursor.get("prefix_hash")):
                 gaps["prefix_mismatches"] += 1
                 continue
             with path.open("rb") as stream:

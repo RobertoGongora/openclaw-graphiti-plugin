@@ -73,7 +73,7 @@ Do not treat a memory-summary snapshot as live production verification.
 """
 
 
-SOURCE_INSTRUCTIONS = """For source_format=session-records-v1, source_type identifies evidence origin:
+SOURCE_INSTRUCTIONS = """For source_format=session-records-v1 or grok-bot, source_type identifies evidence origin:
 - user_assertion is a user message, not proof that an external action executed.
   Quoted memories, pasted transcripts, assistant-citation blocks and examples inside it are
   contextual text, NOT new user assertions. Extract the user's own assertion/correction,
@@ -106,8 +106,9 @@ excerpt is partial evidence, not a complete file version. Preserve unresolved am
 
 def extraction_instructions(transcript):
     from .extraction_policy import source_instructions
+    from .models import SOURCED_FORMATS
 
-    if transcript.source_format in {"session-records-v1", "direct-mcp-v1"}:
+    if transcript.source_format in SOURCED_FORMATS:
         return source_instructions(EXTRACTION_INSTRUCTIONS)
     return EXTRACTION_INSTRUCTIONS
 
