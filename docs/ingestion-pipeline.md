@@ -433,7 +433,9 @@ the next scan too and every attempt stalls the workers.
 requested change and applies one event at a time, checking the hash chain, each
 change's declared hashes and the state hash of every event. Events of all three
 versions replay in one chain, including the snapshots that the first version
-embedded every 100 changes.
+embedded every 100 changes. Historical recall, search and latest keep a smaller
+state, described in [history](history.md#how-the-journal-is-written); the checks
+are the same.
 
 **What replay proves.** Replay proves the chain and the declared hashes. It does
 not prove that a live text is still the text that was journaled. That is proved

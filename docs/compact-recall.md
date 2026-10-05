@@ -180,8 +180,11 @@ threads sharing a user/container. A competing request returns BUSY with retry
 guidance; live requests remain available. Evidence and entity lookup selectively
 retain checkpoint nodes while still validating every part and replayed delta.
 Historical evidence resolves requested facts and their episodes at one pinned
-sequence. General historical recall still reconstructs its complete dependency
-graph; this change does not claim constant-memory historical recall.
+sequence. Historical recall, search and latest keep every fact, entity and
+insight, but only the ID and status of each episode and the ID and timestamp of
+each message; other source records are dropped as the checkpoint is restored.
+Their working set still grows with the namespace, so this is not constant-memory
+historical recall.
 
 ## Validation
 

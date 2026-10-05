@@ -22,6 +22,18 @@
 - Historical MCP calls share admission control across session processes; bounded
   entity/evidence reconstruction retains fewer nodes without skipping journal
   integrity checks. Busy callers can retry without losing their connection.
+- Historical `memory_recall`, `memory_search` and `memory_latest` hold a smaller
+  reconstruction by default. They keep every fact, entity and insight, an
+  episode's status and a message's timestamp, and drop episode and message text
+  and every session, artifact, observation and dream as the checkpoint is
+  restored. The same journal checks run, and a valid journal gives the same
+  answers. Evidence, entity search, `history snapshot`, replay and verify
+  still read complete nodes. Memory still grows with the namespace and with the
+  nodes changed since the last checkpoint, and reading the events after it takes
+  a second pass. A [fresh synthetic runtime check](evals/reports/20261004-historical-recall-runtime.md)
+  measured 28.15% lower peak process memory with 72 identical response pairs;
+  this is not a production estimate. The [2026-09-24 benchmark](evals/reports/20260924-historical-recall.md)
+  remains separate evidence for the earlier opt-in version.
 - Evidence supports compact excerpts and a short source index, with full batched
   expansion. Truncation is explicit and exact-source writes still require full evidence.
 - Source-reviewed compatible alternatives can have erroneous exclusive slots
