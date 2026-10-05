@@ -516,10 +516,26 @@ checkpoint and a recovery on the next start.
 
 The personal stack uses a 512 MB heap, a 256 MB page cache and a 1,536 MB limit.
 
-The transcripts MCP container has a 2 GB memory limit. Each client session
-attached through `docker exec` is charged to that container, at about 56 MB per
-session before query working sets. Historical requests can use substantially
-more. A process-shared nonblocking file lock serializes historical MCP handlers;
+The transcripts MCP container has a 2 GB memory limit. Every client session
+attached through `docker exec` is charged to that container. When
+`MEMORY_SESSION_SOCKET` is set, as both Compose files do, `serve` over stdio is
+a small relay (about 9 MB) to a socket that the HTTP server process also serves,
+so all sessions share one engine and one set of query working sets. Without the
+socket, or if it is missing, each session loads its own engine (about 55 MB
+before queries). A Codex app-server with subagents opened 27 sessions at once,
+so 30 or more sessions are normal.
+
+To check, count processes and memory in the container:
+
+```sh
+docker top graph-memory-transcripts-mcp-1 -o pid,rss,args
+docker stats --no-stream graph-memory-transcripts-mcp-1
+```
+
+Relayed sessions show as `graph-memory ... serve` processes at about 13 MB RSS
+each; anything near 70 MB is an engine, which should be only the HTTP server.
+Up to 16 tool calls run at once across all relayed sessions; more wait.
+Historical requests can use substantially more. A process-shared nonblocking file lock serializes historical MCP handlers;
 competing callers get BUSY and must retry with the same cutoff. Locks release
 automatically when a session dies. Entity/evidence history selectively retains
 nodes while validating the complete journal; broad historical recall still has

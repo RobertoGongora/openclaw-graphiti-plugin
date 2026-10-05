@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import signal
+import socketserver
 import sys
 import threading
 from pathlib import Path
@@ -12,8 +13,9 @@ from typing import Any
 from .call_log import announce as announce_call_log
 from .importers import memory_files, transcripts
 from .llm import configured_llm
-from .mcp import Protocol, http_server, stdio
+from .mcp import Protocol, http_server, session_server, stdio
 from .models import DreamCreate, DreamRequest, HistoricalScope, Ingest, Latest, Recall, Relation
+from .relay import ENV as RELAY_SOCKET
 from .service import MemoryService
 from .store import GraphStore
 
@@ -303,16 +305,26 @@ def run():
                     env_list("MEMORY_HTTP_ORIGINS"),
                     env_list("MEMORY_HTTP_HOSTS"),
                 )
+                servers: list[socketserver.BaseServer] = [server]
+                if os.environ.get(RELAY_SOCKET):
+                    servers.append(session_server(service, os.environ[RELAY_SOCKET]))
+                    threading.Thread(target=servers[1].serve_forever, daemon=True).start()
+
+                def shut_down():
+                    for each in servers:
+                        each.shutdown()
+
                 # shutdown() blocks until serve_forever returns, so it cannot run
                 # in the handler, which interrupts that very loop.
                 signal.signal(
                     signal.SIGTERM,
-                    lambda *_: threading.Thread(target=server.shutdown, daemon=True).start(),
+                    lambda *_: threading.Thread(target=shut_down, daemon=True).start(),
                 )
                 try:
                     server.serve_forever()
                 finally:
-                    server.server_close()
+                    for each in servers:
+                        each.server_close()
             return
         if args.command in ("import", "ingest"):
             outputs, failures = [], []

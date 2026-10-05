@@ -133,7 +133,9 @@ args = ["--context", "colima", "exec", "-i", "graph-memory-transcripts-mcp-1", "
 ```
 
 This launches the stdio MCP entrypoint inside the existing MCP container, using
-its pinned engine and database settings. It does not start another worker or
+its pinned engine and database settings. The container sets
+`MEMORY_SESSION_SOCKET`, so the launched process only relays to the server
+already running there instead of loading a second engine. It does not start another worker or
 copy a bearer token into the client configuration. The container and Colima must
 be running. Using the stable container name follows subsequent MCP image upgrades.
 The client uses the stdio compatibility handshake; the standalone 2026 HTTP

@@ -1,0 +1,34 @@
+# Disposable stack for measure.sh: its own project name, database and port, so
+# it never touches a live graph-memory stack. TAG selects the image under test.
+#   TAG=<tag> docker compose -f evals/session_load/compose.yaml up -d --wait
+#   evals/session_load/measure.sh gm-session-load-mcp-1 load 30 3
+name: gm-session-load
+services:
+  neo4j:
+    image: neo4j:5.26-community
+    environment:
+      NEO4J_AUTH: neo4j/disposable-load-test
+      NEO4J_server_memory_heap_max__size: 512m
+      NEO4J_server_memory_pagecache_size: 128m
+    tmpfs: [/data]
+    healthcheck:
+      test: ['CMD-SHELL', 'cypher-shell -a bolt://localhost:7687 -u neo4j -p disposable-load-test "RETURN 1"']
+      interval: 3s
+      timeout: 5s
+      retries: 40
+  mcp:
+    image: graph-memory:${TAG:?Set the image tag}
+    read_only: true
+    tmpfs: [/tmp]
+    mem_limit: 2g
+    pids_limit: 256
+    depends_on: {neo4j: {condition: service_healthy}}
+    environment:
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_PASSWORD: disposable-load-test
+      MEMORY_NAMESPACE: load
+      MEMORY_LLM: caller
+      MEMORY_HTTP_TOKEN: disposable-load-token
+      MEMORY_SESSION_SOCKET: /tmp/graph-memory-sessions.sock
+    command: [serve, --transport, http, --host, 0.0.0.0]
+    ports: ['127.0.0.1:18766:8765']

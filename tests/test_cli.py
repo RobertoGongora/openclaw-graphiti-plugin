@@ -243,3 +243,46 @@ def test_health_prints_one_json_line_and_never_builds_the_service(monkeypatch, c
     assert json.loads(captured.out) == {"ok": False, "error": "ConnectionError"}
     assert captured.err == "" and not offline
     assert invoke(monkeypatch, "health", "--role", "other") == 2
+
+
+def test_serve_http_also_serves_relayed_sessions_and_sigterm_closes_both(monkeypatch, service):
+    import shutil
+    import socket
+    import tempfile
+
+    from graph_memory.relay import ENV
+
+    directory = tempfile.mkdtemp(prefix="gm", dir="/tmp")
+    path = os.path.join(directory, "s.sock")
+    monkeypatch.setenv(ENV, path)
+    monkeypatch.delenv("MEMORY_HTTP_TOKEN", raising=False)
+    real = cli.http_server
+    reached = []
+
+    def server(*args):
+        built = real(*args)
+        serve = built.serve_forever
+
+        def serving():
+            def probe():
+                with socket.socket(socket.AF_UNIX) as client:
+                    client.connect(path)
+                    client.sendall(b'{"namespace": "personal", "read_only": false}\n')
+                    reached.append(client.recv(64))
+                os.kill(os.getpid(), signal.SIGTERM)
+
+            threading.Timer(0.2, probe).start()
+            serve()
+
+        built.serve_forever = serving
+        return built
+
+    monkeypatch.setattr(cli, "http_server", server)
+    previous = signal.getsignal(signal.SIGTERM)
+    try:
+        assert invoke(monkeypatch, "serve", "--transport", "http", "--port", "0") == 0
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+        shutil.rmtree(directory, ignore_errors=True)
+    assert reached == [b'{"ok": true}\n']
+    assert not os.path.exists(path) and service.store.closed
