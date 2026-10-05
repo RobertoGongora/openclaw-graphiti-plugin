@@ -3,6 +3,23 @@
 
 ### Added
 
+- Remote push: a Mac stages its transcripts over Bolt on Tailscale into a graph
+  on another host (`compose.transcripts.tailscale.yaml`, `docs/remote-push.md`).
+  With a remote `NEO4J_URI`, or `MEMORY_FEED_REMOTE_RECEIVER=1` on the receiver,
+  bare `claude`/`codex`/`cursor` labels and `MEMORY_FEED_ACCEPT_UNMATCHED=1` are
+  refused before connecting. A URI counts as remote unless its host is loopback,
+  `localhost` or `neo4j`, for every scheme including `bolt+ssc://`; an unreadable
+  URI counts as remote. `follow` accepts `LABEL=PATH` roots whose PATH
+  exists. `feeds relabel` renames a label in every source key without changing
+  feed ids or cursors; an apply with conflicts or zero matching feeds exits 1.
+  New labels block when stored paths or relative UUID/rollout session keys overlap
+  another label. `MEMORY_FEED_NEW_SOURCE_LABELS` temporarily acknowledges exact
+  labels for genuinely new sources. Unkeyed feeds block shared intake until an
+  explicit ownership stamp, and shared `feed --source-records` is refused.
+- Cursor agent transcripts can be ingested through an optional read-only mount,
+  retaining tools and delegated subagent context. Missing or malformed source
+  timestamps stay undated; sourced claims without any dated claim evidence must
+  remain uncertain with no event date.
 - Opt-in local MCP `tools/call` JSONL (`MEMORY_MCP_CALL_LOG`, and
   `TRANSCRIPT_MCP_CALL_LOG` for the transcripts stack) for recall debugging. Off
   by default. Records the tool, arguments, client and transport, and a compact

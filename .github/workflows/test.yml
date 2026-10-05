@@ -67,14 +67,19 @@ jobs:
           GRAPH_MEMORY_TAG: ci
           CLAUDE_SESSIONS_PATH: /tmp/claude
           CODEX_SESSIONS_PATH: /tmp/codex
+          CURSOR_SESSIONS_PATH: /tmp/cursor
           TRANSCRIPT_AUTH_PATH: /tmp/auth
           TRANSCRIPT_MCP_TOKEN: ci-validation-only
         run: |
           docker compose -f compose.yaml config -q
           docker compose -f compose.transcripts.yaml config -q
+          docker compose -f compose.transcripts.yaml -f compose.transcripts.cursor.yaml config -q
           docker compose -f compose.test.yaml config -q
           docker compose -f compose.yaml --env-file .env.example config -q
           docker compose -f compose.transcripts.yaml --env-file .env.example config -q
+          TAILSCALE_IP=100.64.0.1 docker compose -f compose.transcripts.yaml -f compose.transcripts.tailscale.yaml config -q
+          TAILSCALE_IP=100.64.0.1 CLAUDE_SESSIONS_PATH=remote-push CODEX_SESSIONS_PATH=remote-push \
+            docker compose -f compose.transcripts.yaml -f compose.transcripts.tailscale.yaml config -q
       - run: docker build --target production --build-arg GIT_SHA=${{ github.sha }} -t graph-memory:ci .
       - run: docker run --rm graph-memory:ci
       - run: docker run --rm --entrypoint codex graph-memory:ci --version

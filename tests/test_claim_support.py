@@ -38,7 +38,9 @@ def pair(tool="Atlas uses MySQL."):
         [
             message("read", "memory_read", "OLD MEMORY DO NOT SEND TO CHECKER"),
             message("fresh", "tool_result", tool, tool_name="database_status"),
-            message("report", "assistant_report", "Atlas uses MySQL."),
+            message(
+                "report", "assistant_report", "Atlas uses MySQL.", timestamp="2026-09-01T00:00:00Z"
+            ),
         ],
         focus_message_ids=["report"],
     )

@@ -215,6 +215,7 @@ def test_mixed_direct_write_cannot_launder_an_unsourced_claim():
         content="Atlas uses MySQL.",
         role="user",
         source_type="user_assertion",
+        timestamp="2026-09-16T10:00:00Z",
     )
     r = request(sources={"m": "stored"})
     r.transcript.messages.append(r.transcript.messages[0].model_copy(update={"id": "echo"}))

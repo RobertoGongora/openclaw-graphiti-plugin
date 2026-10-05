@@ -8,21 +8,27 @@ hosts use, so ``/sessions/claude`` and ``~/.claude/projects`` are both
 every component is generic or has no letters (``/``, ``/sessions``) is labelled
 ``root``: state a label for it, since two such roots clash.
 
-A change of roots must never mint a feed for a file already known. A feed is found
-by key, then by the path it was last stored with; a file that is new by both but
-carries the name of a known feed is refused, and nothing at all is staged while
-older feeds cannot be named under the current roots (``blocked``).
+A change of roots must never silently mint a feed for a file already known.
+On a shared graph, path and filename matching stay within the source label.
+A new label whose root contains another label's stored paths or relative session
+keys is blocked until explicitly acknowledged as a new source, or the old label
+is relabelled. Unkeyed legacy feeds on a shared graph require explicit stamping,
+never path inference.
+Locally, a feed is found by key, then by its stored path; a new file carrying a
+known name is refused, and unmatchable older feeds block intake (``blocked``).
 
 Feeds staged before source keys existed keep the ids derived from their absolute
 path: episodes, messages and the journal already reference them.
 """
 
+import ipaddress
 import json
 import os
 import re
 from itertools import islice
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple
+from urllib.parse import urlsplit
 
 from .session_sources import FORMAT, records
 from .store import digest
@@ -34,6 +40,81 @@ UID_LINES, UID_BYTES = 64, 262_144
 # Session uuids, rollout names and agent hashes name one file wherever it sits.
 UNIQUE_NAME = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-|[0-9a-f]{12,}")
 ACCEPT_UNMATCHED = "MEMORY_FEED_ACCEPT_UNMATCHED"
+# Set on a graph that other machines push into; see docs/remote-push.md.
+REMOTE_RECEIVER = "MEMORY_FEED_REMOTE_RECEIVER"
+NEW_SOURCE_LABELS = "MEMORY_FEED_NEW_SOURCE_LABELS"
+
+# Bare labels that must be machine-qualified in remote mode.
+# These are host-local names that would collide across machines.
+BARE_LABELS = frozenset({"claude", "codex", "cursor"})
+
+
+def is_remote_bolt(uri: str | None = None) -> bool:
+    """Whether the Neo4j URI points anywhere but this host.
+
+    Only a loopback address, ``localhost`` and the Compose service name ``neo4j``
+    are local, whatever the scheme (``bolt+ssc://`` included). A URI whose host
+    cannot be read counts as remote: the guards it decides must fail closed.
+    """
+    if uri is None:
+        uri = os.environ.get("NEO4J_URI", "bolt://127.0.0.1:7687")
+    try:
+        host = urlsplit(uri.strip()).hostname
+    except ValueError:
+        return True
+    if not host:
+        return True
+    if host in ("localhost", "neo4j"):
+        return False
+    try:
+        return not ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return True
+
+
+def shared_graph() -> bool:
+    """Other machines' feeds live in this graph: this process pushes to a remote
+    Bolt, or runs beside a graph that receives pushes. The receiver's own services
+    reach Neo4j as bolt://neo4j, which does not look remote, hence the flag."""
+    return os.environ.get(REMOTE_RECEIVER) == "1" or is_remote_bolt()
+
+
+def validate_remote_label(label: str, remote: bool | None = None) -> None:
+    """Raise ValueError if the label is bare in remote mode.
+
+    In remote mode (a shared graph), labels like ``claude``, ``codex`` and
+    ``cursor`` must be machine-qualified (e.g. ``rob-mbp.claude``) to avoid
+    collisions when multiple machines push to the same database.
+    ``remote`` overrides the detection, for tests.
+    """
+    if remote is None:
+        remote = shared_graph()
+    if remote and label in BARE_LABELS:
+        raise ValueError(
+            f"Feed label {label!r} must be machine-qualified in remote mode "
+            f"(e.g. 'hostname.{label}'). Bare labels like {', '.join(sorted(BARE_LABELS))} "
+            f"would collide when multiple machines push to the same database."
+        )
+
+
+def new_source_labels() -> set[str]:
+    """Transient acknowledgement of exact labels for new machines, never adoption.
+
+    Empty/unset means none. Reject malformed lists instead of quietly ignoring a
+    typo; whitespace around comma-separated labels is allowed, wildcards are not.
+    """
+    value = os.environ.get(NEW_SOURCE_LABELS, "").strip()
+    if not value:
+        return set()
+    labels = {label.strip() for label in value.split(",")}
+    if any(not LABEL.fullmatch(label) for label in labels):
+        raise ValueError(
+            f"{NEW_SOURCE_LABELS} must contain comma-separated exact feed labels "
+            "(e.g. rob-mini.claude,rob-mini.codex), without empty entries or wildcards"
+        )
+    for label in sorted(labels):
+        validate_remote_label(label)
+    return labels
 
 
 class Root(NamedTuple):
@@ -53,6 +134,23 @@ class Root(NamedTuple):
 
     def is_file(self):
         return self.given.is_file()
+
+    def contains_uri(self, uri):
+        """Match stored paths lexically against both mount and resolved roots."""
+        if self.is_file():
+            return PurePosixPath(uri) in (self.given, self.given.resolve())
+        return uri_key([self], uri) is not None
+
+    def contains_session_key(self, key):
+        """A known UUID/rollout session is present under this mount, regardless of label."""
+        relative = key.partition(":")[2]
+        path = PurePosixPath(relative)
+        if not unique_name(relative) or path.is_absolute() or ".." in path.parts:
+            return False
+        if self.is_file():
+            # Use the same resolved/symlink identity as intake; siblings are not this root.
+            return self.key(self.given)[1].partition(":")[2] == relative
+        return (self.given / relative).is_file()
 
 
 def derived_label(directory: Path):
@@ -76,13 +174,15 @@ def parse_root(root) -> Root:
     return Root(label or derived_label(directory), given, directory.resolve())
 
 
-def validate_roots(roots) -> list[Root]:
+def validate_roots(roots, remote: bool | None = None) -> list[Root]:
     """Parse the roots, most specific first so overlapping roots name a file the
-    same in any order. Two directories under one label would merge their files."""
+    same in any order. Two directories under one label would merge their files,
+    and on a shared graph so would two machines' bare labels."""
     owners = {}
     parsed = []
     for given in roots:
         root = parse_root(given)
+        validate_remote_label(root.label, remote)
         first, base = owners.setdefault(root.label, (given, root.base))
         if base != root.base:
             raise ValueError(
@@ -159,7 +259,25 @@ def unique_name(uri):
 
 
 def accept_unmatched():
-    return os.environ.get(ACCEPT_UNMATCHED) == "1"
+    """Whether intake may mint feeds for files it cannot match to a known feed.
+
+    Refused wherever the graph is shared between machines: when this process
+    pushes to a remote Bolt (a Mac forwarder), and when it runs next to a graph
+    that receives pushes (MEMORY_FEED_REMOTE_RECEIVER=1, since the receiver's own
+    services reach Neo4j as bolt://neo4j and do not look remote). There, every
+    other machine's feeds are unmatched by design, so accepting them would stage
+    the files of this machine again under new ids. ValueError: the CLI prints it
+    in one line and exits 2.
+    """
+    if os.environ.get(ACCEPT_UNMATCHED) != "1":
+        return False
+    if shared_graph():
+        raise ValueError(
+            f"{ACCEPT_UNMATCHED}=1 is refused on a graph shared between machines "
+            f"(remote NEO4J_URI or {REMOTE_RECEIVER}=1): other machines' feeds are "
+            "always unmatched here, so every file would be staged again as new"
+        )
+    return True
 
 
 class Feeds:
@@ -167,24 +285,78 @@ class Feeds:
 
     def __init__(self, store, namespace, roots=None):
         self.store, self.namespace = store, namespace
+        self.shared = shared_graph()
         self.roots = validate_roots(roots) if roots is not None else []
+        acknowledged = new_source_labels()
         self.by_key, self.by_uri, self.by_name = {}, {}, {}
         rows = store.read(feed_rows, namespace)
         for row in rows:
             if row["key"]:
                 self.by_key[row["key"]] = row
             if row["uri"]:
-                held = self.by_uri.get(row["uri"])
+                uri = self.lookup_key(row["key"], row["uri"])
+                name = self.lookup_key(row["key"], PurePosixPath(row["uri"]).name)
+                held = self.by_uri.get(uri)
                 # The watcher's own feed for a path wins over one a direct caller made.
                 if not held or row["session"] == "host:" + digest(row["uri"]):
-                    self.by_uri[row["uri"]] = row
-                self.by_name.setdefault(PurePosixPath(row["uri"]).name, {})[row["id"]] = row
-        # Older feeds these roots cannot name: their files would all read as new.
-        self.blocked = {}
+                    self.by_uri[uri] = row
+                self.by_name.setdefault(name, {})[row["id"]] = row
+        self.blocked: dict[str, object] = {}
+        self.blocked_action = (
+            "Older feeds cannot be matched safely. Stamp them with the roots they were "
+            "written under (graph-memory feeds stamp --root LABEL=STORED_PREFIX), or set "
+            "MEMORY_FEED_ACCEPT_UNMATCHED=1 on a local graph to feed regardless."
+        )
         if roots is not None and not accept_unmatched():
-            counts = plan(rows, self.roots)[1]
-            if counts["unmatched"] or counts["conflicts"]:
-                self.blocked = counts
+            if self.shared:
+                # A stored path cannot establish which machine owns a legacy feed.
+                unkeyed = sum(not row["key"] for row in rows)
+                if unkeyed:
+                    self.blocked = {"feeds": len(rows), "unkeyed": unkeyed}
+                    self.blocked_action = (
+                        "Unkeyed feeds on a shared graph require explicit ownership. "
+                        "With followers stopped, run graph-memory feeds stamp --root "
+                        "LABEL=STORED_PREFIX using the known owning machine's label and "
+                        "stored paths. New-source acknowledgement does not bypass this."
+                    )
+                else:
+                    labels = {key.partition(":")[0] for key in self.by_key}
+                    collisions = {}
+                    for root in self.roots:
+                        if root.label in labels or root.label in acknowledged:
+                            continue
+                        owners = {
+                            row["key"].partition(":")[0]
+                            for row in rows
+                            if (row["uri"] and root.contains_uri(row["uri"]))
+                            or root.contains_session_key(row["key"])
+                        }
+                        if owners:
+                            collisions[root.label] = sorted(owners)
+                    if collisions:
+                        self.blocked = {"feeds": len(rows), "new_source_labels": collisions}
+                        self.blocked_action = (
+                            "These labels have no feeds, but their roots contain paths "
+                            "or relative session keys stored under other labels. "
+                            "With followers stopped, run "
+                            "graph-memory feeds relabel --from OLD --to NEW --apply "
+                            "for the same source. Only for a genuinely new machine, "
+                            f"set {NEW_SOURCE_LABELS}={','.join(sorted(collisions))} "
+                            "temporarily for inventory and follow --once; remove it "
+                            "after each acknowledged label has created its first feed."
+                        )
+            else:
+                # Local legacy feeds can still be named by their stored paths.
+                counts = plan(rows, self.roots)[1]
+                if counts["unmatched"] or counts["conflicts"]:
+                    self.blocked.update(counts)
+
+    def lookup_key(self, key, name):
+        # Absolute paths and even UUID filenames can recur on another host.
+        # Remote roots keep their label through remounts; crossing labels is an
+        # explicit relabel operation, never an inference from a local path.
+        label = (key or "").partition(":")[0] if self.shared else None
+        return label, name
 
     def present(self, row, name):
         """Is the file this feed was fed from still there? Its stored path may be
@@ -196,7 +368,7 @@ class Feeds:
                 places.add(str((root.given.parent if root.is_file() else root.given) / relative))
         return any(place != name and Path(place).exists() for place in places)
 
-    def renamed(self, name, messages):
+    def renamed(self, key, name, messages):
         """The known feed this file continues after its directory was renamed.
 
         A file that is new by key and by path but carries a known name is a copy
@@ -205,7 +377,8 @@ class Feeds:
         rejects different content; any other name must also begin with exactly the
         messages the feed holds."""
         known = sorted(
-            self.by_name.get(PurePosixPath(name).name, {}).values(), key=lambda r: r["id"]
+            self.by_name.get(self.lookup_key(key, PurePosixPath(name).name), {}).values(),
+            key=lambda r: r["id"],
         )
         parent = PurePosixPath(name).parts[-2:-1]
         if not unique_name(name):
@@ -239,9 +412,9 @@ class Feeds:
 
     def resolve(self, key, name, messages=None) -> Identity:
         """messages: how to get the file's parsed records, when they are already at hand."""
-        row = self.by_key.get(key) or self.by_uri.get(name)
+        row = self.by_key.get(key) or self.by_uri.get(self.lookup_key(key, name))
         if not row and not accept_unmatched():
-            row = self.renamed(name, messages or (lambda: list(records(Path(name)))))
+            row = self.renamed(key, name, messages or (lambda: list(records(Path(name)))))
         if row:
             return Identity(row["id"], row["session"], key, True)
         session = "source:" + digest(key)
@@ -259,8 +432,11 @@ class Feeds:
                 del index[mark]
         for rows in self.by_name.values():
             rows.pop(identity.feed_id, None)
-        self.by_key[identity.source_key] = self.by_uri[name] = row
-        self.by_name.setdefault(PurePosixPath(name).name, {})[identity.feed_id] = row
+        self.by_key[identity.source_key] = row
+        self.by_uri[self.lookup_key(identity.source_key, name)] = row
+        self.by_name.setdefault(self.lookup_key(identity.source_key, PurePosixPath(name).name), {})[
+            identity.feed_id
+        ] = row
 
     def rekey(self, store, files):
         """Name by today's roots every feed found by its path alone. A fully fed
@@ -268,7 +444,7 @@ class Feeds:
         it kept would not find the feed after the next move."""
         changed = []
         for name, key in files.items():
-            row = self.by_uri.get(name)
+            row = self.by_uri.get(self.lookup_key(key, name))
             if row and row["key"] != key and key not in self.by_key:
                 changed.append((Identity(row["id"], row["session"], key, True), name))
         if changed:
@@ -337,3 +513,46 @@ def stamp_existing(store, namespace, roots) -> dict[str, int]:
             ).single()["n"]
         )
     return counts
+
+
+def relabel(store, namespace, old, new, apply=False) -> dict[str, int]:
+    """Rename one label in every source key of the namespace: ``claude:x`` becomes
+    ``rob-mbp.claude:x``. Ids, sessions and cursors stay, so no file is fed again.
+
+    Renaming is how a machine's bare labels become machine-qualified before it
+    pushes into a shared graph; the files keep their relative paths. Without
+    ``apply`` it only counts. Returns feeds, conflicts, relabelled.
+    """
+    for label in (old, new):
+        if not LABEL.fullmatch(label):
+            raise ValueError(f"Invalid feed label {label!r}")
+    if old == new:
+        raise ValueError("The old and new labels are the same")
+
+    def run(tx):
+        if apply:
+            store.lock(tx, namespace)
+        row = tx.run(
+            "MATCH (f:MemoryFeed {namespace:$ns}) WHERE f.source_key STARTS WITH $old "
+            "WITH collect(f) AS feeds "
+            "RETURN size(feeds) AS feeds, size([f IN feeds WHERE EXISTS { "
+            "MATCH (t:MemoryFeed {namespace:$ns}) "
+            "WHERE t.source_key = $new + substring(f.source_key, size($old)) }]) AS conflicts",
+            ns=namespace,
+            old=old + ":",
+            new=new + ":",
+        ).single()
+        counts = dict(feeds=row["feeds"], conflicts=row["conflicts"], relabelled=0)
+        # A key under the new label is already taken: two feeds would claim one file.
+        if apply and not counts["conflicts"]:
+            counts["relabelled"] = tx.run(
+                "MATCH (f:MemoryFeed {namespace:$ns}) WHERE f.source_key STARTS WITH $old "
+                "SET f.source_key = $new + substring(f.source_key, size($old)) "
+                "RETURN count(f) AS n",
+                ns=namespace,
+                old=old + ":",
+                new=new + ":",
+            ).single()["n"]
+        return counts
+
+    return store.transaction(run) if apply else store.read(run)

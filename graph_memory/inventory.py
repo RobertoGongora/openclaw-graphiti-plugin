@@ -84,7 +84,8 @@ def census(store, namespace, roots, stop=None):
             "finished_at": now().isoformat(),
             "source_format": FORMAT,
             "identity": feeds.blocked,
-            "basis": "Older feeds are stored under paths outside the mounted roots, so files cannot be matched to their cursors and no backlog is estimated. Stamp the feeds with the roots they were written under.",
+            "basis": "No backlog is estimated while feed identity is blocked. "
+            + feeds.blocked_action,
         }
     files = {}
     for root in validate_roots(roots):

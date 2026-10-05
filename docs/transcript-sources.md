@@ -28,16 +28,35 @@ supports a claim still depends on extraction quality and the fixed evals.
 
 Use `daemon --source-records --transcripts DIRECTORY` or
 `feed FILE --session-id ID --source-records`. This explicitly selects the versioned
-source parser, separate from the old text-only feed. Claude Code JSONL and Codex
-response-item JSONL are supported, including Codex custom tool calls/outputs.
-Memory MCP recall results also remain derived context, not fresh verification.
-The output of a shell, exec or python call is a tool result and can validate an
-assistant claim, because commands are how agents verify most things. The exception
-is a command whose text names memory: what it printed may be a stored claim, so it
-stays context.
+source parser, separate from the old text-only feed. Claude Code JSONL, Codex
+response-item JSONL, and Cursor agent-transcript JSONL are supported, including
+tool calls/outputs across all formats. Memory MCP recall results also remain
+derived context, not fresh verification. The output of a shell, exec or python
+call is a tool result and can validate an assistant claim, because commands are
+how agents verify most things. The exception is a command whose text names memory:
+what it printed may be a stored claim, so it stays context.
+
 Provider duplicate event mirrors, reasoning, and system/developer instructions
 are not claim sources. Delegated subagent instructions and automated Codex exec
-prompts are context, even when their provider role is `user`. Non-text attachments are gaps, not interpreted content.
+prompts are context, even when their provider role is `user`. Non-text attachments
+are gaps, not interpreted content.
+
+### Cursor agent-transcripts
+
+Cursor agent JSONL uses a different format: `{role, message:{content:[…]}}` without
+a top-level `type` field. The parser auto-detects this format and maps it to the
+standard source-records contract:
+
+- Text blocks (`{type:"text", text:...}`) become user assertions or assistant reports.
+- Tool use blocks (`{type:"tool_use", id, name, input}`) pair with results.
+- Tool result blocks (`{type:"tool_result", tool_use_id, content}`) link to their calls.
+
+Cursor records may lack timestamps. Per ADR 004, undated claims become `uncertain`
+facts with `valid_at=null`. The parser never invents timestamps.
+
+**Subagent handling.** Transcripts under `…/subagents/*.jsonl` are marked as
+delegated context. Their instructions are not treated as direct user assertions,
+avoiding double-ingest of parent session traffic.
 
 A session stays a single source identity with multiple bounded episodes. Each
 batch contains at most eight new text chunks (90,000 characters), four preceding
@@ -190,12 +209,30 @@ directories under one label. Do not
 mount model-worker-generated session directories, which would ingest extraction
 prompts and outputs recursively.
 
+### Optional Cursor sessions mount
+
+To ingest Cursor agent-transcripts, use the overlay file:
+
+```sh
+docker compose -f compose.transcripts.yaml -f compose.transcripts.cursor.yaml up -d
+```
+
+Set `CURSOR_SESSIONS_PATH` in your env file to the Cursor projects root, typically
+`~/.cursor/projects`. The mount appears at `/sessions/cursor` with label `cursor`.
+See `.env.example` for the variable definition.
+
+**Subagent JSONL policy.** Transcripts under `…/subagents/*.jsonl` are automatically
+detected and treated as delegated context. Their user-role instructions become
+`context` source type with a `delegated_instruction` gap, avoiding double-ingest
+when a parent session already captured the same exchange. This follows the same
+policy as Codex delegated/automated prompts.
+
 `tests/test_session_sources.py` covers source parsing, identity, historical
-artifacts, append/restart, tool-only rejection and audit replay. Frozen real-model
-canaries live in `evals/transcripts/cases.json`; run
-`MEMORY_LLM=codex python -m evals.transcripts.run`. They make no graph writes.
-A passing canary is not certification of full historical coverage or semantic
-accuracy. Preserve failed runs as well as successful evidence.
+artifacts, append/restart, tool-only rejection, audit replay, and the Cursor
+agent-transcript adapter. Frozen real-model canaries live in
+`evals/transcripts/cases.json`; run `MEMORY_LLM=codex python -m evals.transcripts.run`.
+They make no graph writes. A passing canary is not certification of full historical
+coverage or semantic accuracy. Preserve failed runs as well as successful evidence.
 
 After both imports reach the agreed fixed source coverage, benchmark the same
 questions and expected facts against both graphs. No memory-system superiority
