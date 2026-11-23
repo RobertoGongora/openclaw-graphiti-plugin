@@ -107,7 +107,7 @@ def test_mcp_render_returns_png_content_and_metadata_without_mutating_graph(grap
     server = Protocol(MemoryService(store), namespace=ns, read_only=True)
     message = rpc("tools/call", name="memory_render", arguments={"namespace": ns})
     status, response = server.dispatch(message, headers(message))
-    assert status == 200 and not response["result"]["isError"]
+    assert status == 200 and not response["result"]["isError"], response["result"]["content"]
     result = response["result"]
     picture = next(c for c in result["content"] if c["type"] == "image")
     assert picture["mimeType"] == "image/png"
@@ -152,6 +152,20 @@ def test_oversized_image_is_flagged_instead_of_inlined(tmp_path, monkeypatch):
     large = render.render_graph(None, Render(namespace="personal"))
     assert "image" not in large
     assert large["truncated"] and large["limits_reached"] == ["image_bytes"]
+
+
+def test_sfdp_without_its_layout_plugin_is_actionable(tmp_path, monkeypatch):
+    # What Graphviz 14 on Ubuntu 26.04 prints when only the graphviz package is installed.
+    render = fake_sfdp(
+        tmp_path,
+        monkeypatch,
+        "cat >/dev/null\n"
+        """echo 'There is no layout engine support for "sfdp"' >&2\n"""
+        "echo ' Use one of: dot' >&2\nexit 1\n",
+    )
+    with pytest.raises(ValueError, match="libgvplugin-neato-layout") as error:
+        render.render_graph(None, Render(namespace="personal"))
+    assert "simplify" not in str(error.value)
 
 
 def test_layout_timeout_kills_the_whole_process_group(tmp_path, monkeypatch):

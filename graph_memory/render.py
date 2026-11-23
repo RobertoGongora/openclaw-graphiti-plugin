@@ -302,11 +302,11 @@ def render_graph(store, request):
         [executable, "-Tpng"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
         start_new_session=True,
     )
     try:
-        image, _ = process.communicate(dot_source(graph).encode(), timeout=LAYOUT_TIMEOUT)
+        image, errors = process.communicate(dot_source(graph).encode(), timeout=LAYOUT_TIMEOUT)
     except subprocess.TimeoutExpired as exc:
         try:
             os.killpg(process.pid, signal.SIGKILL)
@@ -316,6 +316,12 @@ def render_graph(store, request):
         raise ValueError(
             "Graph layout exceeded 45 seconds; use a focused Cypher query or lower limits."
         ) from exc
+    if b'no layout engine support for "sfdp"' in errors:
+        # Graphviz 14 packages (Ubuntu 26.04) ship sfdp's layout as a separate plugin.
+        raise ValueError(
+            "Graphviz is installed without the sfdp layout plugin; install "
+            "libgvplugin-neato-layout8 (Debian/Ubuntu). It is included in the Docker image."
+        )
     if process.returncode or not image.startswith(b"\x89PNG\r\n\x1a\n"):
         raise ValueError(
             "Graphviz could not render this view; simplify the query or lower the limits."

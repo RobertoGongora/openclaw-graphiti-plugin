@@ -69,7 +69,8 @@ Graphviz's [sfdp](https://graphviz.org/docs/layouts/sfdp/) performs the layout a
 [PNG renderer](https://graphviz.org/docs/outputs/png/) creates the image. The Docker
 image includes Graphviz and DejaVu fonts. For a host Python installation, install
 Graphviz separately (`brew install graphviz` on macOS, or the `graphviz` package on
-Debian); missing Graphviz produces an actionable tool error. No Python dependencies
+Debian; from Graphviz 14, as on Ubuntu 26.04, also `libgvplugin-neato-layout8`, which
+holds sfdp's layout); missing Graphviz or that plugin produces an actionable tool error. No Python dependencies
 were added. Captions are quoted as plain DOT strings, not executable HTML or paths.
 
 The MCP result follows the [2026-07-28 image content contract](https://modelcontextprotocol.io/specification/2026-07-28/server/tools#image-content):
