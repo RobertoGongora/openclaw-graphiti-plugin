@@ -56,6 +56,12 @@ def exact(identifier, text):
     return re.search(r"(?<![\w.-])" + re.escape(identifier) + r"(?![\w-]|\.\w)", text)
 
 
+def mentions(term, text, identifiers):
+    """An identifier as in the source; an ordinary word in any case, since an
+    English sentence may begin with it: "Replication alerts ..."."""
+    return term in text if term in identifiers else term.lower() in text.lower()
+
+
 # Between clauses, not inside one: v3.14.2, "(now)" and "Proposed: enable" stay whole.
 CLAUSE = re.compile(r"[;!?]|\.(?=\s|$)")
 
@@ -129,7 +135,7 @@ def check_case(case, source, facts, found, entities=()):
     record(
         "English question finds the eventual answer first",
         any(
-            all(t in f["text"] for t in case.get("top_contains", []))
+            all(mentions(t, f["text"], case["identifiers"]) for t in case.get("top_contains", []))
             and case.get("top_target", "") in f["target"]
             for f in found[:rank]
         ),

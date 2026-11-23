@@ -278,7 +278,8 @@
     ],
     "question": "Which pg-prod-02 alerts were reviewed?",
     "top_contains": [
-      "replication"
+      "replication",
+      "pg-prod-02"
     ],
     "identifiers": [
       "pg-prod-02"
@@ -305,6 +306,19 @@
       {
         "name": "the failover drill said to be held",
         "pattern": "\\bfailover drill\\b(?:\\W+\\w+){0,6}?\\W+(?:was|has been)\\W+(?P<claim>held|run|performed|completed|carried out|done)\\b"
+      }
+    ],
+    "required": [
+      {
+        "name": "the replication alert review as done",
+        "relation": [
+          "occurred",
+          "worked_on"
+        ],
+        "status": [
+          "active"
+        ],
+        "pattern": "(?=[^.;]*\\breplication alerts?\\b)[^.;]*?\\b(?P<claim>review|check)\\w*"
       }
     ]
   }

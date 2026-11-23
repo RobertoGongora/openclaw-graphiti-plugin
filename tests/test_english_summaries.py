@@ -283,6 +283,56 @@ FROZEN_B1EF049 = {
     ],
 }
 
+# es-cancelled-plan at 51cbec3, repeat 1 (.local/english-51cbec3.json): the drill
+# ended, the review active and served first. 51cbec3's scorer failed it only
+# because the answer begins with "Replication", not "replication".
+FROZEN_51CBEC3 = {
+    "entities": [
+        {"key": "service:pg-prod-02", "name": "pg-prod-02", "kind": "service", "aliases": []},
+        {
+            "key": "event:pg-prod-02-failover-drill",
+            "name": "pg-prod-02 failover drill",
+            "kind": "event",
+            "aliases": [],
+        },
+        {
+            "key": "event:pg-prod-02-replication-alert-review-2026-10-08",
+            "name": "pg-prod-02 replication alert review",
+            "kind": "event",
+            "aliases": [],
+        },
+    ],
+    "facts": [
+        fact(
+            "service:pg-prod-02",
+            "occurred",
+            "event:pg-prod-02-failover-drill",
+            "The planned failover drill for pg-prod-02 was cancelled and was not performed.",
+            [
+                (
+                    "u1",
+                    "Planeamos un simulacro de failover de pg-prod-02 para el jueves 8 de octubre.",
+                ),
+                ("u2", "Se canceló el simulacro de failover de pg-prod-02; no se hizo."),
+            ],
+            "ended",
+            slot=None,
+            valid_at="2026-10-06T09:00:00Z",
+            confidence=0.99,
+        ),
+        fact(
+            "service:pg-prod-02",
+            "occurred",
+            "event:pg-prod-02-replication-alert-review-2026-10-08",
+            "Replication alerts for pg-prod-02 were reviewed on Thursday, 8 October 2026.",
+            [("u2", "Ese jueves revisamos las alertas de replicación de pg-prod-02.")],
+            slot=None,
+            valid_at="2026-10-08T16:00:00Z",
+            confidence=0.98,
+        ),
+    ],
+}
+
 
 def spanish(extraction):
     """What an extractor that copies the source language produces."""
@@ -362,11 +412,30 @@ IDS, FIX, MIX = "es-technical-ids", "es-later-correction", "es-en-mixed"
 OTHER, DRILL = "es-other-incident", "es-cancelled-plan"
 EXACT, RESTART = "identifiers kept exactly in summaries", "cluster restart stays negated"
 ANSWER = "English question finds the eventual answer first"
+REVIEWED = "claimed: the replication alert review as done"
+
+
+def generic_first(facts):
+    facts.append(
+        fact(
+            "service:pg-prod-02",
+            "related_to",
+            "event:pg-prod-02-alert-review",
+            "pg-prod-02 alerts were reviewed.",
+            [("u2", "revisamos las alertas")],
+            valid_at="2026-10-08T16:00:00Z",
+        )
+    )
 
 
 def test_frozen_b1ef049_output_fails_only_retrieval(graph):
     store, ns = graph
     assert failures(store, ns, IDS, FROZEN_B1EF049) == {ANSWER}
+
+
+def test_frozen_51cbec3_output_with_a_capitalised_answer_passes(graph):
+    store, ns = graph
+    assert failures(store, ns, DRILL, FROZEN_51CBEC3) == set()
 
 
 def test_frozen_b1ef049_output_with_an_active_resolution_passes(graph):
@@ -484,7 +553,13 @@ def test_frozen_b1ef049_output_with_an_active_resolution_passes(graph):
             summary(0, "was cancelled and did not take place", "was held"),
             {"not claimed: the failover drill said to be held"},
         ),
-        (DRILL, status(1, "ended"), {ANSWER}),
+        (DRILL, status(1, "ended"), {ANSWER, REVIEWED}),
+        # Twins of the frozen 51cbec3 answer: the wrong proposition, ID or case, or
+        # a generic answer served first, each still fail.
+        (DRILL, summary(1, "were reviewed", "were not reviewed"), {REVIEWED}),
+        (DRILL, summary(1, "the pg-prod-02 replication", "the pg-prod-03 replication"), {ANSWER}),
+        (DRILL, summary(1, "the pg-prod-02 replication", "the PG-PROD-02 replication"), {ANSWER}),
+        (DRILL, generic_first, {ANSWER}),
     ],
 )
 def test_each_wrong_output_fails_its_own_check(graph, name, change, expected):
