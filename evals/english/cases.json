@@ -1,0 +1,101 @@
+[
+  {
+    "id": "es-later-correction",
+    "description": "A proposal, then a decision, then a correction: only the corrected decision is the answer, and it is not yet deployed.",
+    "messages": [
+      {
+        "id": "u1",
+        "timestamp": "2026-10-01T09:00:00Z",
+        "content": "Propuesta para el proyecto Faro: usar RabbitMQ como broker de mensajes del servicio de pagos. Todavía no hay nada decidido."
+      },
+      {
+        "id": "u2",
+        "timestamp": "2026-10-02T10:00:00Z",
+        "content": "Decidimos usar Kafka como broker de mensajes del servicio de pagos de Faro."
+      },
+      {
+        "id": "u3",
+        "timestamp": "2026-10-03T11:00:00Z",
+        "content": "Corrección: al final no vamos a usar Kafka. La decisión final para Faro es NATS JetStream como broker de mensajes del servicio de pagos. Aún no está desplegado en producción."
+      }
+    ],
+    "question": "Which message queue did the payments team finally choose?",
+    "top_contains": [
+      "NATS"
+    ],
+    "identifiers": [
+      "Faro",
+      "NATS JetStream",
+      "Kafka"
+    ],
+    "not_current": [
+      {
+        "mentions": "kafka",
+        "unless": "\\b(not|no longer|instead|reversed|revers|dropped|rejected|replac|supersed|overturn|correct|abandon|cancel)"
+      },
+      {
+        "mentions": "rabbitmq",
+        "unless": "\\b(not|no longer|instead|proposal|proposed|propos|undecided|rejected|replac|supersed)"
+      }
+    ],
+    "not_executed": {
+      "mentions": "nats",
+      "words": "\\b(deployed|running|live|in production)\\b",
+      "unless": "\\b(not|yet|undeployed|pending)\\b"
+    }
+  },
+  {
+    "id": "es-technical-ids",
+    "description": "Identifiers, numbers and a negation survive in an English summary; quotes stay Spanish.",
+    "messages": [
+      {
+        "id": "u1",
+        "timestamp": "2026-10-05T14:30:00Z",
+        "content": "El incidente INC-4721 en pg-prod-02 se resolvió subiendo max_connections de 200 a 500 con el chart faro-api v3.14.2. No se reinició el clúster."
+      }
+    ],
+    "question": "How was incident INC-4721 resolved?",
+    "top_contains": [
+      "max_connections",
+      "500"
+    ],
+    "identifiers": [
+      "INC-4721",
+      "pg-prod-02",
+      "max_connections",
+      "200",
+      "500",
+      "faro-api",
+      "3.14.2"
+    ],
+    "negated": {
+      "mentions": "restart",
+      "requires": "\\b(not|no|without|never)\\b"
+    }
+  },
+  {
+    "id": "es-en-mixed",
+    "description": "Spanish with an English sentence: a proposed production rollout is not executed; the staging change is.",
+    "messages": [
+      {
+        "id": "u1",
+        "timestamp": "2026-10-08T08:00:00Z",
+        "content": "Para el rollout de Faro propuse activar el feature flag checkout_v2 en producción el 15 de noviembre, pero todavía no está aprobado. For now we only enabled it in staging."
+      }
+    ],
+    "question": "Is the checkout_v2 feature flag enabled in production?",
+    "top_contains": [
+      "checkout_v2"
+    ],
+    "identifiers": [
+      "checkout_v2",
+      "Faro",
+      "staging"
+    ],
+    "not_executed": {
+      "mentions": "production",
+      "words": "\\b(enabled|activated|turned on|live)\\b",
+      "unless": "\\b(not|propos|plan|pending|approv|only|staging)"
+    }
+  }
+]

@@ -211,11 +211,10 @@ def _tick(service, namespace, limit, breaker, ticket, probe):
             # Named statuses let the (namespace, status) index find the queue; "not
             # complete" made every poll read all episodes.
             "MATCH (e:MemoryEpisode {namespace:$ns}) WHERE e.status IN ['pending','failed'] "
-            "AND coalesce(e.quarantine_engine,'') <> $engine "
+            "AND e.quarantine_engine IS NULL "
             "AND coalesce(e.retry_after,0)<=$now AND coalesce(e.lease_until,0)<=$now "
             "RETURN e.id AS id ORDER BY e.ingested_at,e.id LIMIT $window",
             ns=namespace,
-            engine=service.store.engine,
             now=time.time(),
             window=max(limit, 16),
         ).data()
@@ -232,7 +231,9 @@ def _tick(service, namespace, limit, breaker, ticket, probe):
             lambda tx, eid=row["id"], lease=lease, token=token: tx.run(
                 "MATCH (e:MemoryEpisode {namespace:$ns,id:$id}) "
                 "WHERE e.status <> 'complete' AND coalesce(e.lease_until,0)<=$now "
-                "AND coalesce(e.quarantine_engine,'') <> $engine "
+                # A quarantine outlives engine changes: new code does not by itself
+                # send set-aside work back to the model. retry-quarantined releases it.
+                "AND e.quarantine_engine IS NULL "
                 "AND coalesce(e.retry_after,0)<=$now "
                 # The SET takes the node's write lock; the condition is evaluated
                 # again under it, so exactly one concurrent claimant succeeds.
@@ -241,7 +242,6 @@ def _tick(service, namespace, limit, breaker, ticket, probe):
                 "AND coalesce(e.retry_after,0)<=$now "
                 "SET e.lease_until=$lease,e.worker=$token RETURN e.id AS id",
                 ns=namespace,
-                engine=service.store.engine,
                 id=eid,
                 now=time.time(),
                 lease=lease,

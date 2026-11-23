@@ -1,6 +1,17 @@
 # Changelog
 ## [Unreleased]
 
+### Changed
+
+- Extraction writes every fact summary in English, whatever language the
+  session uses. Evidence quotes stay verbatim in the source language, and the
+  summary keeps IDs, names, numbers, negation, and proposal versus decision
+  versus execution. Only new extractions change; stored facts are not rewritten.
+- A quarantined episode stays quarantined across engine changes. Before, a new
+  engine identity released every one of them at once with a fresh retry budget
+  and they filled the intake queue gate. `retry-quarantined` still releases one
+  episode, and new episodes are claimed as before.
+
 ### Added
 
 - Opt-in local MCP `tools/call` JSONL (`MEMORY_MCP_CALL_LOG`, and

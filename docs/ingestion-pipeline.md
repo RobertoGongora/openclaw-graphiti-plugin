@@ -25,10 +25,10 @@ Everything else is derived from other properties at read time.
 
 | Derived state | How it is recognised |
 | --- | --- |
-| Due | Status `pending` or `failed`, retry time reached, no live lease, not quarantined for the running engine |
+| Due | Status `pending` or `failed`, retry time reached, no live lease, not quarantined |
 | Claimed | A lease that has not expired |
 | Waiting | Retry time still in the future |
-| Quarantined | `quarantine_engine` equals the running engine identity |
+| Quarantined | `quarantine_engine` is set, whatever engine set it |
 
 ```mermaid
 stateDiagram-v2
@@ -41,7 +41,7 @@ stateDiagram-v2
     Claimed --> Quarantined: budget exhausted, or a failure that needs review
     Claimed --> Due: daemon restart reclaims the lease
     Waiting --> Due: retry time reached
-    Quarantined --> Due: engine identity changes, or retry-quarantined
+    Quarantined --> Due: retry-quarantined, one episode at a time
     Complete --> [*]
 ```
 
@@ -69,7 +69,7 @@ report written after a long run of tool calls can cite them, and holds at most
 Source-records intake is bounded so that a large archive cannot flood the queue:
 
 - **Queue gate.** Intake counts episodes that are due now: status `pending` or
-  `failed`, retry time reached, not quarantined for the running engine. This is
+  `failed`, retry time reached, not quarantined. This is
   the same quarantine rule the workers use. When the count reaches
   `MEMORY_INTAKE_QUEUE` (default 32) the scan leaves the remaining source on disk.
 - **File budget.** One scan opens at most `MEMORY_INTAKE_FILES` files (default 4)
@@ -272,12 +272,15 @@ overwrite it, and an engine change makes it ineligible.
 ## Quarantine
 
 A quarantined episode stays `failed` and keeps its source, its rejected
-candidate and its feedback. Workers skip it while the engine identity is the one
-that quarantined it. `memory_status.processing.quarantined` counts these episodes.
+candidate and its feedback. Workers skip it under every engine identity, not
+only the one that quarantined it. `memory_status.processing.quarantined` counts
+these episodes, and they do not count toward the intake queue gate.
 
-Two things release it. A new engine identity makes it due again, because new
-extraction code may succeed where the old code failed. An operator can release
-one episode with `retry-quarantined`, which resets its attempts, validation
+A new engine identity does not release it. Requalifying every quarantined episode
+on each deploy would send hundreds of set-aside episodes back to the model at
+once, each with a fresh retry budget, and fill the intake gate so that new
+sessions wait behind them. Only an operator releases one episode, with
+`retry-quarantined`, which resets its attempts, validation
 failures and model failures. It also clears the cached extraction, because a
 saved extraction that was rejected would be rejected again. The cache is kept
 only when the episode was set aside for a model timeout or crash.
@@ -336,8 +339,8 @@ the Neo4j driver and Pydantic. Cached extractions, quarantines, rejection
 feedback and dreams are keyed by it.
 
 Operational code is left out on purpose. A change to the CLI, the MCP layer, the
-daemon or the status tool does not release every quarantined episode or discard
-every cached extraction.
+daemon or the status tool does not discard every cached extraction. No engine
+change releases a quarantined episode.
 
 ## Model invocation
 

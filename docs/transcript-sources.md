@@ -316,11 +316,11 @@ The full rules are in [ingestion pipeline](ingestion-pipeline.md). Source-role v
 and correction feedback instead of being classified as unknown failures.
 
 `memory_status.processing` reports `quarantined` and `cached_extractions`.
-Paused episodes remain failed/incomplete and count against coverage. They become
-eligible again after an engine change, or an operator can deliberately release
+Paused episodes remain failed/incomplete and count against coverage. An engine
+change does not make them eligible again; an operator can deliberately release
 one using `graph-memory --namespace transcripts retry-quarantined EPISODE_ID`,
 which also clears a saved extraction when the pause reason was a validation one.
-The existing backoff may still delay an engine-change retry. Historical failure
+The existing backoff may still delay that retry. Historical failure
 totals are not assumed to be validation failures: the new counter starts with
 this release. No source, fact, or rejection evidence is removed by quarantine.
 

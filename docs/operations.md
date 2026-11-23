@@ -173,8 +173,11 @@ deploy and losing the writes made since, or rolling forward with a fix.
   file for good. Renaming a label, or adding a root below an existing one,
   changes the key that files would get and makes known files look new. See
   [Feed identity](#feed-identity).
-- **Completed episodes.** A new engine identity releases quarantined episodes
-  and ignores cached extractions made by the old one. Returning to the old tag
+- **Completed episodes.** A new engine identity ignores cached extractions made
+  by the old one. It keeps quarantined episodes quarantined; a tag from before
+  that rule (before the English-summary release) releases every episode
+  quarantined under another engine, so stop the worker before such a rollback.
+  Returning to the old tag
   restores the old identity, but episodes that the new engine already completed
   stay completed with the facts it extracted.
 - **The stored Neo4j password.** The volume keeps the password it was first
@@ -550,8 +553,8 @@ The personal MCP container keeps 1 GB.
 gm exec worker graph-memory --namespace transcripts call memory_status '{"namespace":"transcripts"}'
 ```
 
-`processing.quarantined` is the number of episodes paused under the running
-engine. To list them with their reasons, run this in Neo4j Browser or
+`processing.quarantined` is the number of paused episodes, whichever engine
+paused them. To list them with their reasons, run this in Neo4j Browser or
 `cypher-shell`:
 
 ```cypher
@@ -563,7 +566,7 @@ ORDER BY e.ingested_at;
 
 | Reason | Meaning | Action |
 | --- | --- | --- |
-| `evidence_quote_mismatch`, `schema_validation`, other validation codes | Three runs failed validation, or a cached extraction no longer validates | Usually wait for an engine change that fixes the prompt or the validator. Retry one by hand to confirm |
+| `evidence_quote_mismatch`, `schema_validation`, other validation codes | Three runs failed validation, or a cached extraction no longer validates | After an engine change that fixes the prompt or the validator, retry one by hand to confirm, then decide on the rest |
 | `model_timeout`, `model_invocation_failed` | Three model failures followed this episode while the provider served others | Look at the episode's size and content. Retry once the cause is understood |
 | Any other code with eight `attempts` | Eight charged failures of any kind | Read the `diagnostic` of its last `processed` event before retrying |
 | `ambiguous_identity` | The extraction names an entity that matches several | Merge or disambiguate the entities, then retry |
@@ -579,8 +582,9 @@ This clears the quarantine mark and resets the attempts, the validation failures
 and the model failures. It keeps the rejection feedback. It clears the cached
 extraction, which would otherwise be rejected again, unless the episode was set
 aside for a model timeout or crash. It refuses an
-episode that holds a live lease. An engine change releases every quarantined episode without
-operator action.
+episode that holds a live lease. An engine change releases nothing: requalifying
+the backlog is a decision to make per episode, after checking that the new engine
+handles a sample.
 
 ## Backup
 
