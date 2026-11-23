@@ -239,12 +239,17 @@ class Revisions:
         revision = self.get(namespace, revision_id)
         if revision["legacy"]:
             raise ValueError(LEGACY)
-        # Every step of a revision still in progress passes here: what one engine and
-        # model extracted is never compared, checked or published as another's.
+        # Every step of a revision still in progress passes here: what one engine,
+        # model and writer prompt extracted is never compared, checked or published as
+        # another's. A revision from before writer prompts has none: the app's own.
         if revision["status"] != "promoted":
             if revision["engine"] != engine_fingerprint():
                 raise ValueError("Engine changed; create a new revision")
-            if (revision["model"], revision.get("effort")) != self._model():
+            if (
+                revision["model"],
+                revision.get("effort"),
+                revision.get("writer"),
+            ) != (*self._model(), self._writer()):
                 raise ValueError("Model settings changed; create a new revision")
         return revision
 
@@ -252,6 +257,9 @@ class Revisions:
         return getattr(self.service.llm, "model", "caller"), getattr(
             self.service.llm, "effort", None
         )
+
+    def _writer(self):
+        return getattr(self.service.llm, "writer", None)
 
     def create(self, namespace, episode_ids, reason=None):
         episode_ids = list(dict.fromkeys(episode_ids or []))
@@ -275,7 +283,7 @@ class Revisions:
             )
             tx.run(
                 "CREATE (r:MemoryRevision {id:$id,namespace:$ns,format:$format,status:'created',"
-                "base_revision:$revision,engine:$engine,model:$model,effort:$effort,"
+                "base_revision:$revision,engine:$engine,model:$model,effort:$effort,writer:$writer,"
                 "episode_ids:$episodes,affected_dreams:$dreams,reason:$reason,created_at:$at})",
                 id=revision_id,
                 ns=namespace,
@@ -284,6 +292,7 @@ class Revisions:
                 engine=engine_fingerprint(),
                 model=model,
                 effort=effort,
+                writer=self._writer(),
                 episodes=episode_ids,
                 dreams=dreams,
                 reason=reason,
@@ -344,7 +353,7 @@ class Revisions:
             raise ValueError("Revision replay requires a configured LLM")
         model, effort = self._model()
         info = {"provider": type(self.service.llm).__name__, "model": model, "effort": effort}
-        if writer := getattr(self.service.llm, "writer", None):
+        if writer := self._writer():
             info["writer"] = writer
         extraction, calls = self.service.propose(packet)
         return extraction, info, calls
@@ -817,6 +826,9 @@ class Revisions:
             "reasoning_effort"
         ) != getattr(self.service.llm, "effort", None):
             raise ValueError("Eval model and reasoning effort must match the revision worker")
+        # A report from before writer prompts has none: it tested the app's own.
+        if eval_report.get("writer") != self._writer():
+            raise ValueError("Eval writer prompt must match the revision worker")
         if not checks:
             raise ValueError("Nonempty project-specific expectations are required")
         self._checkable(checks)

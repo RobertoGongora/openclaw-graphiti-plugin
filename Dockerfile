@@ -4,13 +4,15 @@
 ARG NODE_IMAGE=node:22-bookworm-slim@sha256:48e4b67d85f87bd551df43704e24d252f56cc5f8e9718841aace50f19948f0f9
 ARG PYTHON_IMAGE=python:3.13-slim-bookworm@sha256:2325bb286ec344af3e5898cc224b5844e2707ac6e26b1632516fd3edc84a5e26
 ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.11.11@sha256:798712e57f879c5393777cbda2bb309b29fcdeb0532129d4b1c3125c5385975a
+# One pin for the Codex CLI that is installed, asserted and labelled.
+ARG CODEX_VERSION=0.171.0
 
 FROM ${UV_IMAGE} AS uv
 
 # npm is only the delivery vehicle: the package wraps one static musl binary per
 # architecture, so node never reaches the final image.
 FROM ${NODE_IMAGE} AS codex
-ARG CODEX_VERSION=0.154.0
+ARG CODEX_VERSION
 ARG TARGETARCH
 RUN set -eu; \
     case "${TARGETARCH}" in \
@@ -77,7 +79,7 @@ USER 10001
 
 FROM runtime AS production
 ARG GIT_SHA=unknown
-ARG CODEX_VERSION=0.154.0
+ARG CODEX_VERSION
 LABEL org.opencontainers.image.title="graph-memory" \
       org.opencontainers.image.description="Evidence-backed temporal memory over stateless MCP and direct Neo4j" \
       org.opencontainers.image.source="https://github.com/RobertoGongora/openclaw-graphiti-plugin" \

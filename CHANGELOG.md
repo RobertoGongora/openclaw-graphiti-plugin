@@ -23,6 +23,10 @@
   never extract one episode at once, and a claim re-checks the hold after taking
   the episode's lock. `retry-quarantined` still
   releases one episode, and new episodes are claimed as before.
+- The image installs codex-cli 0.171.0 (was 0.154.0), the version the selected
+  writer prompt was evaluated with. It runs all extraction, the default model
+  included. One `CODEX_VERSION` build argument sets the install, its version
+  check and the image label.
 
 ### Added
 
@@ -32,8 +36,11 @@
   instructions). Off by default; accepted only with Codex `gpt-6.1-terra` /
   `low`, any other provider, model or effort stops the worker at startup. Other
   source formats and providers keep their instructions. A committed episode
-  records `"writer": "selected-v1"` in its model info. See
-  [writer prompt rollout](docs/writer-prompt-rollout.md).
+  records `"writer": "selected-v1"` in its model info, and so do a revision and
+  a golden eval report: a revision is built, compared, validated and promoted
+  only under the writer prompt it was created with, and validated only with a
+  report made under it. A revision or report without one stands for the app's
+  own prompt. See [writer prompt rollout](docs/writer-prompt-rollout.md).
 - Opt-in local MCP `tools/call` JSONL (`MEMORY_MCP_CALL_LOG`, and
   `TRANSCRIPT_MCP_CALL_LOG` for the transcripts stack) for recall debugging. Off
   by default. Records the tool, arguments, client and transport, and a compact

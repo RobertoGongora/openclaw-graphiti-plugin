@@ -591,6 +591,90 @@ def test_every_step_refuses_another_engine_or_model(graph, monkeypatch):
     assert revisions.diff(ns, rid)["diff"]["unchanged_count"] == 1
 
 
+@pytest.mark.parametrize("built_with,used_with", [(None, "selected-v1"), ("selected-v1", None)])
+def test_a_revision_is_tied_to_the_writer_prompt_it_was_built_with(graph, built_with, used_with):
+    """MEMORY_WRITER_PROMPT changes what the model is asked, as a model change does:
+    a revision built with one prompt is never compared, validated or promoted by a
+    worker on the other, in either direction."""
+    store, ns = graph
+    receipt, _, original = ingest(store, ns, "source", TEXT, [PROJECT, MYSQL, PG], [fact(MYSQL)])
+    model = Model(lambda payload: original)
+    model.writer = built_with
+    revisions = Revisions(MemoryService(store, model))
+    rid = revisions.create(ns, [receipt["episode_id"]])["revision_id"]
+    revisions.build(ns, rid)
+    built = revisions.get(ns, rid)
+    assert built.get("writer") == built_with
+    info = json.loads(
+        store.read(
+            lambda tx: tx.run(
+                "MATCH (c:MemoryRevisionCandidate {revision_id:$id}) RETURN c.model_info AS info",
+                id=rid,
+            ).single()
+        )["info"]
+    )
+    assert info.get("writer") == built_with
+    tested = {**report(), "writer": built_with}
+    assert revisions.validate(ns, rid, tested, CHECKS)["passed"]
+    model.writer = used_with
+    for step in (
+        lambda: revisions.build(ns, rid),
+        lambda: revisions.diff(ns, rid),
+        lambda: revisions.validate(ns, rid, {**report(), "writer": used_with}, CHECKS),
+        lambda: revisions.promote(ns, rid),
+    ):
+        with pytest.raises(ValueError, match="Model settings changed"):
+            step()
+    assert revisions.get(ns, rid)["status"] == "validated"
+    model.writer = built_with
+    assert revisions.promote(ns, rid)["status"] == "promoted"
+
+
+def test_a_revision_or_eval_report_without_a_writer_is_the_apps_own_prompt(graph):
+    """Revisions and reports from before MEMORY_WRITER_PROMPT carry no writer: they
+    stand for the app's instructions, so they keep working unchanged and never pass
+    for the selected prompt."""
+    store, ns = graph
+    receipt, _, original = ingest(store, ns, "source", TEXT, [PROJECT, MYSQL, PG], [fact(MYSQL)])
+    model = Model(lambda payload: original)
+    revisions = Revisions(MemoryService(store, model))
+    rid = revisions.create(ns, [receipt["episode_id"]])["revision_id"]
+    store.transaction(
+        lambda tx: tx.run("MATCH (r:MemoryRevision {id:$id}) REMOVE r.writer", id=rid).consume()
+    )
+    revisions.build(ns, rid)
+    historical = report()
+    assert "writer" not in historical
+    model.writer = "selected-v1"
+    with pytest.raises(ValueError, match="Model settings changed"):
+        revisions.diff(ns, rid)
+    model.writer = None
+    selected = {**historical, "writer": "selected-v1"}
+    with pytest.raises(ValueError, match="writer prompt"):
+        revisions.validate(ns, rid, selected, CHECKS)
+    assert revisions.validate(ns, rid, historical, CHECKS)["passed"]
+    assert revisions.promote(ns, rid)["status"] == "promoted"
+
+    # A worker on the selected prompt needs a report made with it.
+    model.writer = "selected-v1"
+    again = revisions.create(ns, [receipt["episode_id"]])["revision_id"]
+    revisions.build(ns, again)
+    with pytest.raises(ValueError, match="writer prompt"):
+        revisions.validate(ns, again, historical, CHECKS)
+    assert revisions.validate(ns, again, selected, CHECKS)["passed"]
+
+
+def test_the_golden_eval_report_names_the_writer_prompt_only_when_one_is_set(monkeypatch):
+    import evals.run
+
+    monkeypatch.setattr(evals.run, "load_cases", lambda: [])
+    model = Model(lambda payload: None)
+    service = MemoryService(None, model)
+    assert "writer" not in evals.run.evaluate(service)
+    model.writer = "selected-v1"
+    assert evals.run.evaluate(service)["writer"] == "selected-v1"
+
+
 def test_checks_may_only_use_tools_that_read_the_preview(graph):
     store, ns = graph
     receipt, _, original = ingest(store, ns, "source", TEXT, [PROJECT, MYSQL, PG], [fact(MYSQL)])

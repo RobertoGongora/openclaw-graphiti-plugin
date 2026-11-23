@@ -39,8 +39,10 @@ evidence in Neo4j.
    change still shows the old facts. Inside the same transaction the stored checks
    run again on the graph being published, and the affected dreams are found again.
    Promotion is blocked by:
-   - an engine, model, effort or suite different from the one the revision was
-     created with (diff and validate refuse these too);
+   - an engine, model, effort, writer prompt (`MEMORY_WRITER_PROMPT`; none for a
+     revision created before it existed) or suite different from the one the
+     revision was created with (diff and validate refuse these too, and validate
+     also needs a golden report made under the same writer prompt);
    - a change to the affected facts since validation;
    - a stored check that no longer passes, for example because another episode
      has since introduced a conflict: validate again;
