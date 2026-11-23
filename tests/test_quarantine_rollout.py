@@ -309,3 +309,58 @@ def test_checkpoint_waiting_on_a_hold_writer_does_not_save_onto_the_held_episode
     checkpoint.join(30)
     assert done.is_set()
     assert store.episode(ns, eid).get("cached_extraction") is None
+
+
+def test_a_stale_release_waiting_behind_a_new_claim_keeps_the_new_lease(graph):
+    import threading
+
+    store, ns = graph
+    eid = stage(store, ns)
+    assert store.claim(ns, eid, time.time() - 1, "old")  # Expired: free to claim again.
+    successor = GraphStore(
+        os.environ["MEMORY_TEST_NEO4J_URI"], password=os.environ.get("MEMORY_TEST_NEO4J_PASSWORD")
+    )
+    wrote, finish = threading.Event(), threading.Event()
+    transaction = successor.transaction
+
+    def paused(fn, *args):
+        def run(tx, *args):
+            result = fn(tx, *args)
+            wrote.set()  # The claim holds the episode lock, uncommitted.
+            assert finish.wait(10)
+            return result
+
+        return transaction(run, *args)
+
+    successor.transaction = paused
+    lease = time.time() + 600
+    result = {}
+    claim = threading.Thread(
+        target=lambda: result.update(new=successor.claim(ns, eid, lease, "new"))
+    )
+    release = threading.Thread(target=lambda: store.release(ns, eid, "old"))
+    try:
+        claim.start()
+        assert wrote.wait(10)
+        release.start()
+        for _ in range(200):
+            if store.read(
+                lambda tx: tx.run(
+                    "SHOW TRANSACTIONS YIELD currentQuery,status "
+                    "WHERE currentQuery CONTAINS 'SET e.lease_until=0' "
+                    "AND status STARTS WITH 'Blocked' RETURN count(*) AS n"
+                ).single()["n"]
+            ):
+                break
+            time.sleep(0.025)
+        else:
+            pytest.fail("the stale release never waited on the episode lock")
+    finally:
+        finish.set()
+        claim.join(30)
+        release.join(30)
+        successor.close()
+    assert result["new"]
+    episode = store.episode(ns, eid)
+    assert (episode["worker"], episode["lease_until"]) == ("new", lease)
+    assert not store.claim(ns, eid, time.time() + 600, "third")

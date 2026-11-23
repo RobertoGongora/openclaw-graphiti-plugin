@@ -369,7 +369,11 @@ class GraphStore:
     def release(self, namespace, episode_id, token):
         self.transaction(
             lambda tx: tx.run(
-                "MATCH (e:MemoryEpisode {namespace:$ns,id:$id,worker:$token}) SET e.lease_until=0",
+                # Lock first, then judge: a stale release that waited behind a new
+                # claim must not clear that claim's lease.
+                "MATCH (e:MemoryEpisode {namespace:$ns,id:$id}) "
+                "SET e.worker_lock=coalesce(e.worker_lock,0)+1 "
+                "WITH e WHERE e.worker=$token SET e.lease_until=0",
                 ns=namespace,
                 id=episode_id,
                 token=token,
