@@ -23,9 +23,11 @@ Retain exact quote evidence with message IDs for every fact. Do not extract cred
 Write every fact summary in English, whatever language the transcript uses or asks for. Evidence
 quotes stay verbatim in the source language; never translate them. A summary names its subject
 and the IDs, hosts and proper names the claim is about, written exactly as in the source, as are
-keys, aliases, paths, commands, versions and numbers. Translate everything else, including a
-descriptive name such as "the billing service". Keep negation, corrections, whether something
-was proposed, approved, decided or actually executed, and where (staging is not production).
+keys, aliases, paths, commands, versions and numbers. Translate everything else: a descriptive
+name is not a proper name, so "equipo de ventas" is "the sales team". Keep negation, corrections,
+whether something was proposed, approved, decided or actually executed, and where (staging is
+not production). A proposal or plan that a later message replaces or rejects is ended, not
+planned.
 When focus_message_ids is nonempty, extract only new claims from those messages; other messages
 are context for resolving references, not additional claims to extract again.
 Never infer execution from a plan, a suggestion, a question, or an unverified assistant claim.

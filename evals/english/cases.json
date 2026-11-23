@@ -144,7 +144,7 @@
       },
       {
         "name": "production activation only proposed",
-        "pattern": "(?=[^.;]*\\bproduction\\b)[^.;]*\\b(?P<claim>propos|plan)\\w*"
+        "pattern": "(?=[^.;]*\\bproduction\\b)[^.;]*?\\b(?P<claim>propos|plan)\\w*"
       }
     ]
   },
@@ -217,6 +217,9 @@
         "name": "the migration already happened",
         "pattern": "\\b(?P<claim>migrated|completed)\\b"
       }
+    ],
+    "shared": [
+      "favor"
     ]
   }
 ]

@@ -12,9 +12,11 @@
 - A quarantined episode stays quarantined across engine changes. Before, a new
   engine identity released every one of them at once with a fresh retry budget
   and they filled the intake queue gate. A synchronous `ingest`/`import
-  --extract` of the same content, `memory_extract` and `memory_commit` no longer
-  complete a held episode, `memory_pending` leaves held episodes out, and a claim
-  re-checks the hold after taking the episode's lock. `retry-quarantined` still
+  --extract` of the same content, `memory_extract`, `memory_prepare` and
+  `memory_commit` no longer run or complete a held episode, `memory_pending`
+  leaves held episodes out, a synchronous run takes the worker's lease so the two
+  never extract one episode at once, and a claim re-checks the hold after taking
+  the episode's lock. `retry-quarantined` still
   releases one episode, and new episodes are claimed as before.
 
 ### Added

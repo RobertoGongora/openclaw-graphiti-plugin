@@ -43,9 +43,11 @@ def words(text):
 
 
 def negated(text, start):
-    """A negator among the three words before start: "was not restarted", "without
-    restarting". A "no" elsewhere, as in "restarted with no downtime", is not one."""
-    before = re.findall(r"[a-z]+(?:'[a-z]+)?", text[:start].lower())[-3:]
+    """A negator among the three words before start, in the same clause: "was not
+    restarted", "without restarting". A "no" elsewhere, as in "restarted with no
+    downtime" or "had no downtime. It restarted", is not one."""
+    clause = re.split(r"[.;:!?,]", text[:start])[-1]
+    before = re.findall(r"[a-z]+(?:'[a-z]+)?", clause.lower())[-3:]
     return any(w in NEGATORS or w.endswith("n't") for w in before)
 
 

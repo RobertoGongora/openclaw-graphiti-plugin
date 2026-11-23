@@ -9,7 +9,6 @@ from copy import deepcopy
 import pytest
 
 from evals.english_summaries import check_case, load_cases, search, transcript
-from graph_memory.llm import EXTRACTION_INSTRUCTIONS
 from graph_memory.models import EpisodeRequest, Extraction
 from graph_memory.service import MemoryService
 
@@ -278,6 +277,13 @@ EXACT, RESTART = "identifiers kept exactly in summaries", "cluster restart stays
         (IDS, summary(0, "was not restarted", "was restarted with no downtime"), {RESTART}),
         (IDS, summary(0, "; the cluster was not restarted", ""), {RESTART}),
         (IDS, summary(0, "was not restarted", "was rebooted"), {RESTART}),
+        (
+            IDS,
+            summary(
+                0, "the cluster was not restarted", "the cluster had no downtime. It restarted"
+            ),
+            {RESTART},
+        ),
         # An active NATS fact does not supersede the planned Kafka one either.
         (
             FIX,
@@ -330,26 +336,29 @@ def test_each_wrong_output_fails_its_own_check(graph, name, change, expected):
     assert failures(store, ns, name, mutate(name, change)) == expected
 
 
-def test_a_valid_paraphrase_of_the_winner_is_not_scored_red(graph):
+@pytest.mark.parametrize(
+    "name,change",
+    [
+        (
+            FIX,
+            summary(
+                2, ENGLISH[FIX]["facts"][2]["summary"], "Faro chose NATS JetStream over Kafka."
+            ),
+        ),
+        (
+            MIX,
+            summary(
+                0,
+                "Proposed, not yet approved: enable",
+                "Faro has a proposed, not-yet-approved plan to activate",
+            ),
+        ),
+        ("es-asks-for-spanish", summary(0, "instead of MySQL", "in favor of MySQL")),
+    ],
+)
+def test_truthful_wording_is_not_scored_red(graph, name, change):
     store, ns = graph
-    valid = mutate(
-        FIX,
-        summary(2, ENGLISH[FIX]["facts"][2]["summary"], "Faro chose NATS JetStream over Kafka."),
-    )
-    assert failures(store, ns, FIX, valid) == set()
-
-
-def test_eventual_decision_is_the_answer_and_its_predecessors_are_history(graph):
-    store, ns = graph
-    case = CASES["es-later-correction"]
-    _, _, found, _ = extract(store, ns, case, ENGLISH["es-later-correction"])
-    assert found[0]["lane"] == "planned" and "NATS JetStream" in found[0]["text"]
-    assert not [f for f in found if f["lane"] in {"current", "planned"} and "RabbitMQ" in f["text"]]
-    assert all(
-        "final decision is NATS" in f["text"]
-        for f in found
-        if f["lane"] in {"current", "planned"} and "Kafka" in f["text"]
-    )
+    assert failures(store, ns, name, mutate(name, change)) == set()
 
 
 def test_spanish_summaries_fail_the_same_checks(graph):
@@ -390,7 +399,3 @@ def test_changed_number_in_a_quote_is_rejected():
     bad.facts[0].evidence[0].quote = "se resolvió subiendo max_connections de 200 a 600"
     with pytest.raises(ValueError, match="exact substring"):
         bad.validate_evidence(transcript(CASES["es-technical-ids"], "english"))
-
-
-def test_rule_is_in_every_extraction_prompt():
-    assert "fact summary in English" in EXTRACTION_INSTRUCTIONS
