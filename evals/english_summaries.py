@@ -136,7 +136,10 @@ def run_case(service, case):
             "passed": all(c["passed"] for c in checks),
             "checks": checks,
             "facts": [
-                {k: f.get(k) for k in ("relation", "target", "status", "summary", "evidence")}
+                {
+                    k: f.get(k)
+                    for k in ("subject", "relation", "target", "status", "summary", "evidence")
+                }
                 for f in facts
             ],
         }
