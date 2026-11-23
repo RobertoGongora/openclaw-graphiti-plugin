@@ -221,5 +221,91 @@
     "shared": [
       "favor"
     ]
+  },
+  {
+    "id": "es-other-incident",
+    "description": "Another resolved incident: the resolution is served though the incident is over, and the incident is not served as still open.",
+    "messages": [
+      {
+        "id": "u1",
+        "timestamp": "2026-10-07T08:10:00Z",
+        "content": "El incidente SEC-0193 en api-gw-eu quedó resuelto al rotar el certificado TLS de ingress-nginx 1.11.3. Desde entonces no hay errores 502."
+      }
+    ],
+    "question": "How was incident SEC-0193 resolved?",
+    "top_contains": [
+      "TLS",
+      "cert"
+    ],
+    "identifiers": [
+      "SEC-0193",
+      "api-gw-eu",
+      "TLS",
+      "ingress-nginx",
+      "1.11.3",
+      "502"
+    ],
+    "forbidden": [
+      {
+        "name": "SEC-0193 still open",
+        "relation": [
+          "has_issue"
+        ],
+        "status": [
+          "active"
+        ],
+        "target": "0193"
+      }
+    ]
+  },
+  {
+    "id": "es-cancelled-plan",
+    "description": "A planned event that was cancelled is not served as done or still planned; what was done instead is served.",
+    "messages": [
+      {
+        "id": "u1",
+        "timestamp": "2026-10-06T09:00:00Z",
+        "content": "Planeamos un simulacro de failover de pg-prod-02 para el jueves 8 de octubre."
+      },
+      {
+        "id": "u2",
+        "timestamp": "2026-10-08T16:00:00Z",
+        "content": "Se canceló el simulacro de failover de pg-prod-02; no se hizo. Ese jueves revisamos las alertas de replicación de pg-prod-02."
+      }
+    ],
+    "shared": [
+      "failover"
+    ],
+    "question": "Which pg-prod-02 alerts were reviewed?",
+    "top_contains": [
+      "replication"
+    ],
+    "identifiers": [
+      "pg-prod-02"
+    ],
+    "forbidden": [
+      {
+        "name": "the cancelled failover drill as done",
+        "relation": [
+          "occurred",
+          "worked_on"
+        ],
+        "status": [
+          "active"
+        ],
+        "target": "failover"
+      },
+      {
+        "name": "the cancelled failover drill as still planned",
+        "status": [
+          "planned"
+        ],
+        "target": "failover"
+      },
+      {
+        "name": "the failover drill said to be held",
+        "pattern": "\\bfailover drill\\b(?:\\W+\\w+){0,6}?\\W+(?:was|has been)\\W+(?P<claim>held|run|performed|completed|carried out|done)\\b"
+      }
+    ]
   }
 ]

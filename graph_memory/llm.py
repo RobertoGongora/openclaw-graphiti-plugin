@@ -27,7 +27,9 @@ keys, aliases, paths, commands, versions and numbers. Translate everything else:
 name is not a proper name, so "equipo de ventas" is "the sales team". Keep negation, corrections,
 whether something was proposed, approved, decided or actually executed, and where (staging is
 not production). A proposal or plan that a later message replaces or rejects is ended, not
-planned.
+planned. An occurred, resolved, learned or worked_on fact the source says happened is active at
+the time it happened, though it is over; it is ended only when that event was planned and then
+cancelled or did not happen. A problem that is over ends its has_issue fact, not its resolution.
 When focus_message_ids is nonempty, extract only new claims from those messages; other messages
 are context for resolving references, not additional claims to extract again.
 Never infer execution from a plan, a suggestion, a question, or an unverified assistant claim.

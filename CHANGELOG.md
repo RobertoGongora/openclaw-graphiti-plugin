@@ -9,6 +9,11 @@
   versus execution, approval and staging versus production. Only new
   extractions change; stored facts are not rewritten. `evals/english_summaries.py`
   measures it on synthetic sessions with fixed per-case checks.
+- Extraction marks an event that happened (`occurred`, `resolved`, `learned`,
+  `worked_on`) active though it is over, and ended only when it was planned and
+  then cancelled or did not happen; a problem that is over ends its `has_issue`.
+  An ended resolution was history, so "How was incident X resolved?" found
+  nothing.
 - A quarantined episode stays quarantined across engine changes. Before, a new
   engine identity released every one of them at once with a fresh retry budget
   and they filled the intake queue gate. A synchronous `ingest`/`import
@@ -32,6 +37,9 @@
 
 ### Fixed
 
+- `memory_render` with Graphviz 14 (Ubuntu 26.04) but without
+  `libgvplugin-neato-layout8` now names the missing sfdp layout plugin instead of
+  advising a simpler query; CI installs the plugin.
 - The MCP container no longer runs out of memory as client sessions pile up. A
   `docker exec ... serve` session relays over `MEMORY_SESSION_SOCKET` to the
   running server instead of loading its own engine: about 9 MB per session

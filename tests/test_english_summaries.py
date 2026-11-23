@@ -194,6 +194,93 @@ ENGLISH = {
             ),
         ],
     },
+    "es-other-incident": {
+        "entities": [
+            {"key": "service:api-gw-eu", "name": "api-gw-eu", "kind": "service"},
+            {"key": "issue:sec-0193", "name": "SEC-0193", "kind": "issue"},
+        ],
+        "facts": [
+            fact(
+                "service:api-gw-eu",
+                "resolved",
+                "issue:sec-0193",
+                "Incident SEC-0193 on api-gw-eu was resolved by rotating the TLS certificate of "
+                "ingress-nginx 1.11.3; there have been no 502 errors since.",
+                [
+                    ("u1", "quedó resuelto al rotar el certificado TLS de ingress-nginx 1.11.3"),
+                    ("u1", "Desde entonces no hay errores 502."),
+                ],
+                valid_at="2026-10-07T08:10:00Z",
+            ),
+            # The incident is over: its has_issue state ends, not its resolution.
+            fact(
+                "service:api-gw-eu",
+                "has_issue",
+                "issue:sec-0193",
+                "Incident SEC-0193 on api-gw-eu is over.",
+                [("u1", "El incidente SEC-0193 en api-gw-eu quedó resuelto")],
+                "ended",
+                valid_at="2026-10-07T08:10:00Z",
+            ),
+        ],
+    },
+    "es-cancelled-plan": {
+        "entities": [
+            {"key": "service:pg-prod-02", "name": "pg-prod-02", "kind": "service"},
+            {"key": "event:pg-prod-02-failover-drill", "name": "Failover drill", "kind": "event"},
+            {"key": "event:pg-prod-02-alert-review", "name": "Alert review", "kind": "event"},
+        ],
+        "facts": [
+            fact(
+                "service:pg-prod-02",
+                "occurred",
+                "event:pg-prod-02-failover-drill",
+                "The pg-prod-02 failover drill planned for Thursday, October 8 was cancelled and "
+                "did not take place.",
+                [("u2", "Se canceló el simulacro de failover de pg-prod-02; no se hizo.")],
+                "ended",
+                valid_at="2026-10-08T16:00:00Z",
+            ),
+            fact(
+                "service:pg-prod-02",
+                "occurred",
+                "event:pg-prod-02-alert-review",
+                "On Thursday, October 8, the pg-prod-02 replication alerts were reviewed.",
+                [("u2", "Ese jueves revisamos las alertas de replicación de pg-prod-02.")],
+                valid_at="2026-10-08T16:00:00Z",
+            ),
+        ],
+    },
+}
+
+# What gpt-5.6-terra committed for es-technical-ids at b1ef049, repeat 1
+# (.local/english-b1ef049.json): right summary and quote, but the resolution is
+# ended, so it is history and the English question finds nothing.
+FROZEN_B1EF049 = {
+    "entities": [
+        {"key": "service:pg-prod-02", "name": "pg-prod-02", "kind": "service", "aliases": []},
+        {"key": "issue:inc-4721", "name": "INC-4721", "kind": "issue", "aliases": []},
+    ],
+    "facts": [
+        fact(
+            "service:pg-prod-02",
+            "resolved",
+            "issue:inc-4721",
+            "INC-4721 on pg-prod-02 was resolved by increasing max_connections from 200 to 500 "
+            "using the faro-api chart v3.14.2; the cluster was not restarted.",
+            [
+                (
+                    "u1",
+                    "El incidente INC-4721 en pg-prod-02 se resolvió subiendo max_connections de "
+                    "200 a 500 con el chart faro-api v3.14.2. No se reinició el clúster.",
+                )
+            ],
+            "ended",
+            slot=None,
+            valid_at="2026-10-05T14:30:00Z",
+            confidence=0.98,
+        )
+    ],
 }
 
 
@@ -264,8 +351,34 @@ def kafka_last(facts):
     facts[1]["valid_at"] = "2026-10-04T09:00:00Z"
 
 
+def status(index, value):
+    def change(facts):
+        facts[index]["status"] = value
+
+    return change
+
+
 IDS, FIX, MIX = "es-technical-ids", "es-later-correction", "es-en-mixed"
+OTHER, DRILL = "es-other-incident", "es-cancelled-plan"
 EXACT, RESTART = "identifiers kept exactly in summaries", "cluster restart stays negated"
+ANSWER = "English question finds the eventual answer first"
+
+
+def test_frozen_b1ef049_output_fails_only_retrieval(graph):
+    store, ns = graph
+    assert failures(store, ns, IDS, FROZEN_B1EF049) == {ANSWER}
+
+
+def test_frozen_b1ef049_output_with_an_active_resolution_passes(graph):
+    """The same output as the corrected rule asks for it: the resolution happened,
+    so it is active; an ended has_issue for the incident stays out of the answer."""
+    store, ns = graph
+    extraction = deepcopy(FROZEN_B1EF049)
+    extraction["facts"][0]["status"] = "active"
+    over = deepcopy(extraction["facts"][0])
+    over.update(relation="has_issue", status="ended", summary="INC-4721 on pg-prod-02 is over.")
+    extraction["facts"].append(over)
+    assert failures(store, ns, IDS, extraction) == set()
 
 
 @pytest.mark.parametrize(
@@ -356,6 +469,22 @@ EXACT, RESTART = "identifiers kept exactly in summaries", "cluster restart stays
             summary(1, "Atlas plans to move", "Atlas moved"),
             {"not claimed: the migration already happened"},
         ),
+        # A resolution marked ended is history: the incident is over, but the
+        # resolution happened, and the question about it then finds nothing.
+        (OTHER, status(0, "ended"), {ANSWER}),
+        (OTHER, status(1, "active"), {"not claimed: SEC-0193 still open"}),
+        (DRILL, status(0, "active"), {"not claimed: the cancelled failover drill as done"}),
+        (
+            DRILL,
+            status(0, "planned"),
+            {"not claimed: the cancelled failover drill as still planned"},
+        ),
+        (
+            DRILL,
+            summary(0, "was cancelled and did not take place", "was held"),
+            {"not claimed: the failover drill said to be held"},
+        ),
+        (DRILL, status(1, "ended"), {ANSWER}),
     ],
 )
 def test_each_wrong_output_fails_its_own_check(graph, name, change, expected):
@@ -391,6 +520,7 @@ def test_each_wrong_output_fails_its_own_check(graph, name, change, expected):
                 "activation has not been approved.",
             ),
         ),
+        (DRILL, summary(0, "was cancelled and did not take place", "was not held: cancelled")),
     ],
 )
 def test_truthful_wording_is_not_scored_red(graph, name, change):
