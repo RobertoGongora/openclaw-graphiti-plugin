@@ -272,11 +272,22 @@ class GraphStore:
         return self.read(
             lambda tx: tx.run(
                 "MATCH (e:MemoryEpisode {namespace:$ns}) WHERE e.status IN ['pending','failed'] "
+                "AND e.quarantine_engine IS NULL "
                 "RETURN e.id AS episode_id,e.source_id AS source_id,e.status AS status,e.error AS error "
                 "ORDER BY e.ingested_at,e.id LIMIT $limit",
                 ns=namespace,
                 limit=limit,
             ).data()
+        )
+
+    def held(self, namespace, episode_id):
+        return self.read(
+            lambda tx: tx.run(
+                "MATCH (e:MemoryEpisode {id:$id,namespace:$ns}) "
+                "RETURN e.status <> 'complete' AND e.quarantine_engine IS NOT NULL AS held",
+                id=episode_id,
+                ns=namespace,
+            ).single()["held"]
         )
 
     def failed(self, namespace, episode_id, error, retry_feedback=None):
@@ -488,7 +499,10 @@ class GraphStore:
 
             touch("MemoryEpisode", [episode_id])
             row = tx.run(
-                "MATCH (e:MemoryEpisode {id:$id,namespace:$ns}) RETURN properties(e) AS e",
+                # The episode's own lock, as a claim takes it: a hold written by
+                # another transaction is either seen here or waits for this commit.
+                "MATCH (e:MemoryEpisode {id:$id,namespace:$ns}) "
+                "SET e.worker_lock=coalesce(e.worker_lock,0)+1 RETURN properties(e) AS e",
                 id=episode_id,
                 ns=namespace,
             ).single()
@@ -504,6 +518,10 @@ class GraphStore:
                         "Episode already committed with different extraction; retract incorrect facts explicitly"
                     )
                 return {"episode_id": episode_id, "status": "complete", "replayed": True}
+            if episode.get("quarantine_engine") is not None:
+                raise ValueError(
+                    "Episode is quarantined; release it with retry-quarantined before committing"
+                )
             extraction.validate_evidence(
                 transcript, support=self.support_verifier, allow_support_model=False
             )

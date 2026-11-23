@@ -13,6 +13,13 @@ from .retry import feedback, restored_feedback
 from .settings import lease_seconds
 from .version import engine_fingerprint
 
+# Set aside by the worker: only retry-quarantined, per episode, sends it back to a model.
+HELD = {
+    "status": "held",
+    "available_for_recall": False,
+    "guidance": "Quarantined episode; release it with retry-quarantined EPISODE_ID.",
+}
+
 
 class MemoryService:
     def __init__(self, store, llm=None):
@@ -27,6 +34,10 @@ class MemoryService:
         receipt = self.store.stage(request.transcript)
         if receipt["status"] == "complete":
             return receipt
+        if receipt["status"] != "pending" and self.store.held(
+            request.transcript.namespace, receipt["episode_id"]
+        ):
+            return {**receipt, **HELD, "processing": "held"}
         if request.extract:
             return self.extract(
                 m.EpisodeRequest(
@@ -171,6 +182,8 @@ class MemoryService:
             episode = self.store.episode(request.namespace, request.episode_id)
             if episode["status"] == "complete":
                 return {"episode_id": request.episode_id, "status": "complete", "replayed": True}
+            if episode.get("quarantine_engine") is not None:
+                return {"episode_id": request.episode_id, **HELD}
             model_info = {
                 "provider": type(self.llm).__name__,
                 "model": getattr(self.llm, "model", None),
@@ -544,7 +557,7 @@ class MemoryService:
             "memory_pending": (
                 m.Pending,
                 lambda r: {"episodes": self.store.pending(r.namespace, r.limit)},
-                "List incomplete/failed extraction receipts for retry; they are not current graph knowledge.",
+                "List incomplete/failed extraction receipts for retry; they are not current graph knowledge. Quarantined episodes are left out; memory_status counts them.",
             ),
             "memory_retract": (
                 m.Retract,

@@ -279,7 +279,12 @@ these episodes, and they do not count toward the intake queue gate.
 A new engine identity does not release it. Requalifying every quarantined episode
 on each deploy would send hundreds of set-aside episodes back to the model at
 once, each with a fresh retry budget, and fill the intake gate so that new
-sessions wait behind them. Only an operator releases one episode, with
+sessions wait behind them. No other path sends it to a model either: a
+synchronous `ingest --extract` or `import --extract` of the same content and
+`memory_extract` return it as `held`, `memory_commit` refuses it, and
+`memory_pending` leaves it out. A claim re-checks the hold after taking the
+episode's lock, so a hold written while a worker waits for that lock wins.
+Only an operator releases one episode, with
 `retry-quarantined`, which resets its attempts, validation
 failures and model failures. It also clears the cached extraction, because a
 saved extraction that was rejected would be rejected again. The cache is kept

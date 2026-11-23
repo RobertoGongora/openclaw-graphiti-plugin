@@ -239,7 +239,7 @@ def _tick(service, namespace, limit, breaker, ticket, probe):
                 # again under it, so exactly one concurrent claimant succeeds.
                 "SET e.worker_lock=coalesce(e.worker_lock,0)+1 "
                 "WITH e WHERE e.status <> 'complete' AND coalesce(e.lease_until,0)<=$now "
-                "AND coalesce(e.retry_after,0)<=$now "
+                "AND e.quarantine_engine IS NULL AND coalesce(e.retry_after,0)<=$now "
                 "SET e.lease_until=$lease,e.worker=$token RETURN e.id AS id",
                 ns=namespace,
                 id=eid,

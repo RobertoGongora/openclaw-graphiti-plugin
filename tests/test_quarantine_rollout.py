@@ -103,3 +103,76 @@ def candidate_transcript(ns, source, text):
         session_id=source,
         messages=[{"id": "m1", "role": "user", "content": text}],
     )
+
+
+def held(store, ns, eid):
+    store.transaction(
+        lambda tx: tx.run(
+            "MATCH (e:MemoryEpisode {id:$id}) SET e.status='failed',e.retry_after=0,"
+            "e.quarantine_engine=$engine,e.quarantine_reason='evidence_quote_mismatch'",
+            id=eid,
+            engine=store.engine,
+        ).consume()
+    )
+
+
+def test_sync_ingest_extract_and_commit_leave_a_held_episode_alone(graph):
+    from graph_memory.models import Commit, EpisodeRequest, Ingest, Pending
+
+    store, ns = graph
+    source = candidate_transcript(ns, "held", "Atlas uses MySQL.")
+    eid = store.stage(source)["episode_id"]
+    held(store, ns, eid)
+    fresh = store.stage(candidate_transcript(ns, "fresh", "Atlas uses MySQL."))["episode_id"]
+    model = Model()
+    service = MemoryService(store, model)
+
+    # import --extract and ingest --extract stage the same content again, then extract.
+    receipt = service.ingest(Ingest(transcript=source, extract=True))
+    assert (receipt["episode_id"], receipt["status"]) == (eid, "held")
+    assert service.ingest(Ingest(transcript=source))["processing"] == "held"
+    assert service.call("memory_extract", {"namespace": ns, "episode_id": eid})["status"] == "held"
+    with pytest.raises(ValueError, match="quarantined"):
+        service.call(
+            "memory_commit",
+            Commit(namespace=ns, episode_id=eid, extraction=candidate()).model_dump(mode="json"),
+        )
+    assert model.calls == 0
+    episode = store.episode(ns, eid)
+    assert (episode["status"], episode["quarantine_engine"]) == ("failed", store.engine)
+    pending = service.call("memory_pending", Pending(namespace=ns).model_dump())["episodes"]
+    assert [p["episode_id"] for p in pending] == [fresh]
+
+    # The explicit per-episode release still works through the same path.
+    assert store.retry_quarantined(ns, eid)["queued"]
+    assert service.ingest(Ingest(transcript=source, extract=True))["status"] == "complete"
+    assert service.extract(EpisodeRequest(namespace=ns, episode_id=fresh))["status"] == "complete"
+
+
+def test_hold_written_while_a_claim_waits_on_the_node_lock_wins(graph):
+    import threading
+
+    store, ns = graph
+    eid = stage(store, ns)
+    model = Model()
+    service = MemoryService(store, model)
+    result = {}
+    # A separate session: store.transaction would serialise the two in-process.
+    with store.driver.session(database=store.database) as session:
+        tx = session.begin_transaction()
+        tx.run(
+            "MATCH (e:MemoryEpisode {id:$id}) SET e.quarantine_engine=$engine,"
+            "e.quarantine_reason='operator_hold',e.retry_after=0",
+            id=eid,
+            engine=store.engine,
+        ).consume()
+        worker = threading.Thread(target=lambda: result.update(worker_tick(service, ns)))
+        worker.start()
+        # The worker read the committed, unheld state and now waits for the lock.
+        worker.join(2)
+        assert worker.is_alive()
+        tx.commit()
+    worker.join(60)
+    assert result["receipts"] == []
+    assert model.calls == 0
+    assert store.episode(ns, eid)["quarantine_reason"] == "operator_hold"
