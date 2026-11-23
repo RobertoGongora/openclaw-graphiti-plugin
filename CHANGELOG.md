@@ -6,11 +6,16 @@
 - Extraction writes every fact summary in English, whatever language the
   session uses. Evidence quotes stay verbatim in the source language, and the
   summary keeps IDs, names, numbers, negation, and proposal versus decision
-  versus execution. Only new extractions change; stored facts are not rewritten.
+  versus execution, approval and staging versus production. Only new
+  extractions change; stored facts are not rewritten. `evals/english_summaries.py`
+  measures it on synthetic sessions with fixed per-case checks.
 - A quarantined episode stays quarantined across engine changes. Before, a new
   engine identity released every one of them at once with a fresh retry budget
-  and they filled the intake queue gate. `retry-quarantined` still releases one
-  episode, and new episodes are claimed as before.
+  and they filled the intake queue gate. A synchronous `ingest`/`import
+  --extract` of the same content, `memory_extract` and `memory_commit` no longer
+  complete a held episode, `memory_pending` leaves held episodes out, and a claim
+  re-checks the hold after taking the episode's lock. `retry-quarantined` still
+  releases one episode, and new episodes are claimed as before.
 
 ### Added
 
