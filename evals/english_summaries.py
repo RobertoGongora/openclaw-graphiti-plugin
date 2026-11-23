@@ -56,13 +56,19 @@ def exact(identifier, text):
     return re.search(r"(?<![\w.-])" + re.escape(identifier) + r"(?![\w-]|\.\w)", text)
 
 
+# Between clauses, not inside one: v3.14.2, "(now)" and "Proposed: enable" stay whole.
+CLAUSE = re.compile(r"[;!?]|\.(?=\s|$)")
+
+
 def affirmed(pattern, text):
-    """Matches of pattern whose claim (the named group, or the whole match) is not negated."""
+    """Matches of pattern, one clause at a time, whose claim (the named group, or
+    the whole match) is not negated."""
     out = []
-    for match in re.finditer(pattern, text, re.I):
-        start = match.start("claim") if "claim" in match.groupdict() else match.start()
-        if not negated(text, start):
-            out.append(match.group(0))
+    for clause in CLAUSE.split(text):
+        for match in re.finditer(pattern, clause, re.I):
+            start = match.start("claim") if "claim" in match.groupdict() else match.start()
+            if not negated(clause, start):
+                out.append(match.group(0))
     return out
 
 

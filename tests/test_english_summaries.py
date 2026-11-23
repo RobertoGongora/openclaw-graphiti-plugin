@@ -329,6 +329,16 @@ EXACT, RESTART = "identifiers kept exactly in summaries", "cluster restart stays
             summary(1, "is enabled only in staging", "is enabled in staging and production"),
             {"not claimed: enabled in production"},
         ),
+        # A second sentence, with punctuation inside its clause.
+        (
+            MIX,
+            summary(
+                1,
+                "is enabled only in staging.",
+                "is enabled in staging. It is enabled (now) in production.",
+            ),
+            {"not claimed: enabled in production"},
+        ),
         (
             MIX,
             summary(

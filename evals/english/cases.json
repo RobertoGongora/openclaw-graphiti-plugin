@@ -127,11 +127,11 @@
       },
       {
         "name": "enabled in production",
-        "pattern": "\\b(?P<claim>enabled|activated|turned on|switched on|live)\\b(?:\\s+\\w+){0,3}?\\s+production\\b"
+        "pattern": "\\b(?P<claim>enabled|activated|turned on|switched on|live)\\b(?:\\W+\\w+){0,3}?\\W+production\\b"
       },
       {
         "name": "production has it enabled",
-        "pattern": "\\bproduction\\b(?:\\s+\\w+){0,2}?\\s+(?:is|was|has been)\\s+(?P<claim>enabled|activated|live)\\b"
+        "pattern": "\\bproduction\\b(?:\\W+\\w+){0,2}?\\W+(?:is|was|has been)\\W+(?P<claim>enabled|activated|live)\\b"
       }
     ],
     "required": [
