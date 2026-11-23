@@ -57,9 +57,9 @@ def exact(identifier, text):
 
 
 def mentions(term, text, identifiers):
-    """An identifier as in the source; an ordinary word in any case, since an
-    English sentence may begin with it: "Replication alerts ..."."""
-    return term in text if term in identifiers else term.lower() in text.lower()
+    """An identifier exactly, as a whole token; an ordinary word in any case, since
+    an English sentence may begin with it: "Replication alerts ..."."""
+    return exact(term, text) if term in identifiers else term.lower() in text.lower()
 
 
 # Between clauses, not inside one: v3.14.2, "(now)" and "Proposed: enable" stay whole.
@@ -132,13 +132,18 @@ def check_case(case, source, facts, found, entities=()):
             variants,
         )
     rank = case.get("answer_rank", 1)
-    record(
-        "English question finds the eventual answer first",
-        any(
+
+    def answers(f):
+        # All of it in this one result: another fact's ID or wording does not count.
+        return (
             all(mentions(t, f["text"], case["identifiers"]) for t in case.get("top_contains", []))
             and case.get("top_target", "") in f["target"]
-            for f in found[:rank]
-        ),
+            and ("answer" not in case or affirmed(case["answer"], f["text"]))
+        )
+
+    record(
+        "English question finds the eventual answer first",
+        any(answers(f) for f in found[:rank]),
         [(f["lane"], f["target"], f["text"]) for f in found[:3]],
     )
     # Judged on what retrieval serves: a superseded choice may be extracted as

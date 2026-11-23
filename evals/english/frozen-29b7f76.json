@@ -1,0 +1,336 @@
+{
+  "source": ".local/english-29b7f76.json sha256 270ce6a23362d20baacaed178ac0221c7d56e92e4649b195ad29a1c43bb4ccdc, commit 29b7f7601fde9e727e3591a71ab4255d0b9cabbb, repeat 1, committed extractions",
+  "outputs": {
+    "es-technical-ids": {
+      "entities": [
+        {
+          "key": "service:pg-prod-02",
+          "name": "pg-prod-02",
+          "kind": "service",
+          "aliases": []
+        },
+        {
+          "key": "issue:inc-4721",
+          "name": "INC-4721",
+          "kind": "issue",
+          "aliases": []
+        },
+        {
+          "key": "event:inc-4721-max-connections-change",
+          "name": "INC-4721 max_connections change",
+          "kind": "event",
+          "aliases": []
+        },
+        {
+          "key": "topic:max_connections",
+          "name": "max_connections",
+          "kind": "topic",
+          "aliases": []
+        },
+        {
+          "key": "service:faro-api",
+          "name": "faro-api",
+          "kind": "service",
+          "aliases": [
+            "chart faro-api v3.14.2"
+          ]
+        }
+      ],
+      "facts": [
+        {
+          "subject": "service:pg-prod-02",
+          "relation": "has_issue",
+          "target": "issue:inc-4721",
+          "status": "ended",
+          "summary": "INC-4721 on pg-prod-02 was reported as resolved; the incident is no longer open.",
+          "slot": null,
+          "valid_at": "2026-10-05T14:30:00Z",
+          "confidence": 0.98,
+          "evidence": [
+            {
+              "message_id": "u1",
+              "quote": "El incidente INC-4721 en pg-prod-02 se resolvió"
+            }
+          ],
+          "validation_evidence": []
+        },
+        {
+          "subject": "service:pg-prod-02",
+          "relation": "resolved",
+          "target": "issue:inc-4721",
+          "status": "uncertain",
+          "summary": "pg-prod-02 reportedly resolved INC-4721, but the resolution occurrence time was not specified.",
+          "slot": null,
+          "valid_at": null,
+          "confidence": 0.94,
+          "evidence": [
+            {
+              "message_id": "u1",
+              "quote": "El incidente INC-4721 en pg-prod-02 se resolvió"
+            }
+          ],
+          "validation_evidence": []
+        },
+        {
+          "subject": "service:pg-prod-02",
+          "relation": "occurred",
+          "target": "event:inc-4721-max-connections-change",
+          "status": "uncertain",
+          "summary": "For INC-4721, pg-prod-02 reportedly had max_connections increased from 200 to 500 using chart faro-api v3.14.2; the cluster was not restarted. The change occurrence time was not specified.",
+          "slot": null,
+          "valid_at": null,
+          "confidence": 0.96,
+          "evidence": [
+            {
+              "message_id": "u1",
+              "quote": "subiendo max_connections de 200 a 500 con el chart faro-api v3.14.2. No se reinició el clúster."
+            }
+          ],
+          "validation_evidence": []
+        },
+        {
+          "subject": "event:inc-4721-max-connections-change",
+          "relation": "about",
+          "target": "topic:max_connections",
+          "status": "uncertain",
+          "summary": "The INC-4721 max_connections change concerned max_connections from 200 to 500.",
+          "slot": null,
+          "valid_at": null,
+          "confidence": 0.96,
+          "evidence": [
+            {
+              "message_id": "u1",
+              "quote": "subiendo max_connections de 200 a 500"
+            }
+          ],
+          "validation_evidence": []
+        },
+        {
+          "subject": "service:pg-prod-02",
+          "relation": "related_to",
+          "target": "service:faro-api",
+          "status": "uncertain",
+          "summary": "pg-prod-02's INC-4721 configuration change reportedly used chart faro-api v3.14.2.",
+          "slot": null,
+          "valid_at": null,
+          "confidence": 0.93,
+          "evidence": [
+            {
+              "message_id": "u1",
+              "quote": "con el chart faro-api v3.14.2"
+            }
+          ],
+          "validation_evidence": []
+        }
+      ]
+    },
+    "es-asks-for-spanish": {
+      "entities": [
+        {
+          "key": "project:faro",
+          "name": "Faro",
+          "kind": "project",
+          "aliases": []
+        },
+        {
+          "key": "service:billing",
+          "name": "servicio de facturación",
+          "kind": "service",
+          "aliases": []
+        },
+        {
+          "key": "database:postgresql-16",
+          "name": "PostgreSQL 16",
+          "kind": "database",
+          "aliases": []
+        },
+        {
+          "key": "decision:faro-billing-postgresql-16",
+          "name": "Faro billing PostgreSQL 16 decision",
+          "kind": "decision",
+          "aliases": []
+        },
+        {
+          "key": "event:billing-k8s-prod-eu1-deployment",
+          "name": "billing deployment to k8s-prod-eu1",
+          "kind": "event",
+          "aliases": []
+        },
+        {
+          "key": "topic:billing-migration",
+          "name": "billing migration",
+          "kind": "topic",
+          "aliases": []
+        }
+      ],
+      "facts": [
+        {
+          "subject": "project:faro",
+          "relation": "decided",
+          "target": "decision:faro-billing-postgresql-16",
+          "status": "active",
+          "summary": "Faro decided that the servicio de facturación will use PostgreSQL 16 instead of MySQL; the migration has not started yet.",
+          "slot": null,
+          "valid_at": "2026-10-10T09:00:00Z",
+          "confidence": 0.98,
+          "evidence": [
+            {
+              "message_id": "u1",
+              "quote": "Para el proyecto Faro decidimos que el servicio de facturación usará PostgreSQL 16 en lugar de MySQL; la migración todavía no ha empezado."
+            }
+          ],
+          "validation_evidence": []
+        },
+        {
+          "subject": "service:billing",
+          "relation": "uses_database",
+          "target": "database:postgresql-16",
+          "status": "planned",
+          "summary": "The servicio de facturación is planned to use PostgreSQL 16 rather than MySQL.",
+          "slot": null,
+          "valid_at": "2026-10-10T09:00:00Z",
+          "confidence": 0.98,
+          "evidence": [
+            {
+              "message_id": "u1",
+              "quote": "el servicio de facturación usará PostgreSQL 16 en lugar de MySQL"
+            }
+          ],
+          "validation_evidence": []
+        },
+        {
+          "subject": "decision:faro-billing-postgresql-16",
+          "relation": "about",
+          "target": "topic:billing-migration",
+          "status": "planned",
+          "summary": "The Faro billing migration to PostgreSQL 16 has not started yet.",
+          "slot": null,
+          "valid_at": "2026-10-10T09:00:00Z",
+          "confidence": 0.97,
+          "evidence": [
+            {
+              "message_id": "u1",
+              "quote": "la migración todavía no ha empezado."
+            }
+          ],
+          "validation_evidence": []
+        },
+        {
+          "subject": "service:billing",
+          "relation": "occurred",
+          "target": "event:billing-k8s-prod-eu1-deployment",
+          "status": "ended",
+          "summary": "The deployment of the servicio de facturación to the k8s-prod-eu1 cluster was cancelled until January.",
+          "slot": null,
+          "valid_at": "2026-10-10T09:05:00Z",
+          "confidence": 0.97,
+          "evidence": [
+            {
+              "message_id": "u2",
+              "quote": "el despliegue del servicio de facturación en el clúster k8s-prod-eu1 quedó cancelado hasta enero."
+            }
+          ],
+          "validation_evidence": []
+        }
+      ]
+    },
+    "es-other-incident": {
+      "entities": [
+        {
+          "key": "service:api-gw-eu",
+          "name": "api-gw-eu",
+          "kind": "service",
+          "aliases": []
+        },
+        {
+          "key": "issue:sec-0193",
+          "name": "SEC-0193",
+          "kind": "issue",
+          "aliases": []
+        },
+        {
+          "key": "event:sec-0193-tls-certificate-rotation",
+          "name": "SEC-0193 TLS certificate rotation",
+          "kind": "event",
+          "aliases": []
+        },
+        {
+          "key": "service:ingress-nginx",
+          "name": "ingress-nginx",
+          "kind": "service",
+          "aliases": []
+        }
+      ],
+      "facts": [
+        {
+          "subject": "service:api-gw-eu",
+          "relation": "has_issue",
+          "target": "issue:sec-0193",
+          "status": "ended",
+          "summary": "api-gw-eu had incident SEC-0193, which was resolved after the TLS certificate rotation.",
+          "slot": null,
+          "valid_at": "2026-10-07T08:10:00Z",
+          "confidence": 0.94,
+          "evidence": [
+            {
+              "message_id": "u1",
+              "quote": "El incidente SEC-0193 en api-gw-eu quedó resuelto al rotar el certificado TLS de ingress-nginx 1.11.3."
+            }
+          ],
+          "validation_evidence": []
+        },
+        {
+          "subject": "service:api-gw-eu",
+          "relation": "resolved",
+          "target": "issue:sec-0193",
+          "status": "active",
+          "summary": "api-gw-eu resolved SEC-0193 by rotating the TLS certificate of ingress-nginx 1.11.3.",
+          "slot": null,
+          "valid_at": "2026-10-07T08:10:00Z",
+          "confidence": 0.94,
+          "evidence": [
+            {
+              "message_id": "u1",
+              "quote": "El incidente SEC-0193 en api-gw-eu quedó resuelto al rotar el certificado TLS de ingress-nginx 1.11.3."
+            }
+          ],
+          "validation_evidence": []
+        },
+        {
+          "subject": "service:api-gw-eu",
+          "relation": "occurred",
+          "target": "event:sec-0193-tls-certificate-rotation",
+          "status": "uncertain",
+          "summary": "For SEC-0193, api-gw-eu's TLS certificate was rotated on ingress-nginx 1.11.3; the event time is not stated.",
+          "slot": null,
+          "valid_at": null,
+          "confidence": 0.88,
+          "evidence": [
+            {
+              "message_id": "u1",
+              "quote": "El incidente SEC-0193 en api-gw-eu quedó resuelto al rotar el certificado TLS de ingress-nginx 1.11.3."
+            }
+          ],
+          "validation_evidence": []
+        },
+        {
+          "subject": "service:api-gw-eu",
+          "relation": "related_to",
+          "target": "service:ingress-nginx",
+          "status": "active",
+          "summary": "api-gw-eu's SEC-0193 resolution involved the TLS certificate of ingress-nginx 1.11.3.",
+          "slot": null,
+          "valid_at": "2026-10-07T08:10:00Z",
+          "confidence": 0.9,
+          "evidence": [
+            {
+              "message_id": "u1",
+              "quote": "El incidente SEC-0193 en api-gw-eu quedó resuelto al rotar el certificado TLS de ingress-nginx 1.11.3."
+            }
+          ],
+          "validation_evidence": []
+        }
+      ]
+    }
+  }
+}

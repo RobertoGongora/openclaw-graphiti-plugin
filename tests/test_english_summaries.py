@@ -4,10 +4,12 @@ The model here is a fixture: it returns what the instructions ask for, so these
 tests show what the engine keeps and serves, not what a model writes. The model's
 own behaviour is measured by evals/english_summaries.py."""
 
+import json
 from copy import deepcopy
 
 import pytest
 
+from evals.english_summaries import CASES as CASES_FILE
 from evals.english_summaries import check_case, load_cases, search, transcript
 from graph_memory.models import EpisodeRequest, Extraction
 from graph_memory.service import MemoryService
@@ -438,6 +440,50 @@ def test_frozen_51cbec3_output_with_a_capitalised_answer_passes(graph):
     assert failures(store, ns, DRILL, FROZEN_51CBEC3) == set()
 
 
+def reviewed(text):
+    extraction = deepcopy(FROZEN_51CBEC3)
+    extraction["facts"][1]["summary"] = text
+    return extraction
+
+
+ON = " on Thursday, 8 October 2026."
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("Replication alerts for pg-prod-020 were reviewed" + ON, {ANSWER}),
+        ("Replication alerts for pg-prod-02 were to be reviewed" + ON, {ANSWER}),
+        ("No replication alerts were reviewed for pg-prod-02" + ON, {ANSWER}),
+        ("Replication alerts for pg-prod-02 were not reviewed" + ON, {ANSWER, REVIEWED}),
+        # The ID is only in another fact, the drill's.
+        ("Replication alerts were reviewed" + ON, {ANSWER}),
+        ("The team reviewed the pg-prod-02 replication alerts" + ON, set()),
+    ],
+)
+def test_the_first_answer_itself_names_the_host_and_the_done_review(graph, text, expected):
+    store, ns = graph
+    assert failures(store, ns, DRILL, reviewed(text)) == expected
+
+
+def test_a_wrong_first_answer_is_not_rescued_by_a_right_second(graph):
+    store, ns = graph
+    extraction = deepcopy(FROZEN_51CBEC3)
+    intent = deepcopy(extraction["facts"][1])
+    intent.update(
+        relation="related_to",
+        summary="Replication alerts for pg-prod-02 were to be reviewed.",
+    )
+    extraction["facts"].append(intent)
+    source, committed, found, _ = extract(store, ns, CASES[DRILL], extraction)
+    assert [f["text"] for f in found[:2]] == [
+        intent["summary"],
+        FROZEN_51CBEC3["facts"][1]["summary"],
+    ]
+    checks = check_case(CASES[DRILL], source, committed["facts"], found, committed["entities"])
+    assert {c["check"] for c in checks if not c["passed"]} == {ANSWER}
+
+
 def test_frozen_b1ef049_output_with_an_active_resolution_passes(graph):
     """The same output as the corrected rule asks for it: the resolution happened,
     so it is active; an ended has_issue for the incident stays out of the answer."""
@@ -556,7 +602,7 @@ def test_frozen_b1ef049_output_with_an_active_resolution_passes(graph):
         (DRILL, status(1, "ended"), {ANSWER, REVIEWED}),
         # Twins of the frozen 51cbec3 answer: the wrong proposition, ID or case, or
         # a generic answer served first, each still fail.
-        (DRILL, summary(1, "were reviewed", "were not reviewed"), {REVIEWED}),
+        (DRILL, summary(1, "were reviewed", "were not reviewed"), {ANSWER, REVIEWED}),
         (DRILL, summary(1, "the pg-prod-02 replication", "the pg-prod-03 replication"), {ANSWER}),
         (DRILL, summary(1, "the pg-prod-02 replication", "the PG-PROD-02 replication"), {ANSWER}),
         (DRILL, generic_first, {ANSWER}),
@@ -641,3 +687,22 @@ def test_changed_number_in_a_quote_is_rejected():
     bad.facts[0].evidence[0].quote = "se resolvió subiendo max_connections de 200 a 600"
     with pytest.raises(ValueError, match="exact substring"):
         bad.validate_evidence(transcript(CASES["es-technical-ids"], "english"))
+
+
+FROZEN_29B7F76 = json.loads((CASES_FILE.parent / "frozen-29b7f76.json").read_text())["outputs"]
+
+
+@pytest.mark.parametrize(
+    "name,expected",
+    [
+        # The generic "reportedly resolved INC-4721" first; how it was resolved second.
+        (IDS, {ANSWER}),
+        # "servicio de facturación" kept in three summaries.
+        ("es-asks-for-spanish", {"no Spanish word of the source in a summary"}),
+        # "no 502 errors since" left out of every summary.
+        (OTHER, {EXACT}),
+    ],
+)
+def test_frozen_29b7f76_failures_stay_red(graph, name, expected):
+    store, ns = graph
+    assert failures(store, ns, name, FROZEN_29B7F76[name]) == expected

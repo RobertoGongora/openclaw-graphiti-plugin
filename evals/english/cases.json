@@ -281,6 +281,7 @@
       "replication",
       "pg-prod-02"
     ],
+    "answer": "(?P<claim>\\breplication alerts(?:\\W+(?:for|on|of)\\W+pg-prod-02)?\\W+(?:were|have been)\\W+reviewed|\\breviewed\\W+(?:the\\W+)?(?:pg-prod-02\\W+)?replication alerts)\\b",
     "identifiers": [
       "pg-prod-02"
     ],
