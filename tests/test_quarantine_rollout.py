@@ -1,6 +1,7 @@
 """An engine upgrade must not send quarantined work back to the model by itself."""
 
 import os
+import time
 
 import pytest
 
@@ -176,3 +177,95 @@ def test_hold_written_while_a_claim_waits_on_the_node_lock_wins(graph):
     assert result["receipts"] == []
     assert model.calls == 0
     assert store.episode(ns, eid)["quarantine_reason"] == "operator_hold"
+
+
+def test_sync_run_leases_the_episode_so_a_worker_cannot_hold_it_midway(graph):
+    import threading
+
+    from graph_memory.models import EpisodeRequest
+
+    store, ns = graph
+    eid = stage(store, ns)
+    bad = MemoryService(store, Model("invented quote"))
+    for _ in range(2):  # One more charged failure would hold it.
+        due(store, ns, eid)
+        worker_tick(bad, ns)
+    due(store, ns, eid)
+    good = Model()
+    sync = MemoryService(store, good)
+    prepare, inside, go = sync.prepare, threading.Event(), threading.Event()
+
+    def paused(request):
+        inside.set()
+        assert go.wait(10)
+        return prepare(request)
+
+    sync.prepare = paused
+    result = {}
+    run = threading.Thread(
+        target=lambda: result.update(sync.extract(EpisodeRequest(namespace=ns, episode_id=eid)))
+    )
+    run.start()
+    assert inside.wait(10)
+    try:
+        assert worker_tick(bad, ns)["receipts"] == []
+    finally:
+        go.set()
+    run.join(30)
+    assert result["status"] == "complete" and good.calls == 1
+    assert store.episode(ns, eid).get("quarantine_engine") is None
+
+
+def test_an_episode_a_worker_leased_is_not_extracted_synchronously(graph):
+    from graph_memory.models import Ingest
+
+    store, ns = graph
+    source = candidate_transcript(ns, "leased", "Atlas uses MySQL.")
+    eid = store.stage(source)["episode_id"]
+    assert store.claim(ns, eid, time.time() + 600, "worker-token")
+    model = Model()
+    receipt = MemoryService(store, model).ingest(Ingest(transcript=source, extract=True))
+    assert (receipt["status"], model.calls) == ("leased", 0)
+    assert store.episode(ns, eid)["worker"] == "worker-token"
+
+
+def test_hold_written_during_a_sync_model_call_blocks_checkpoint_and_commit(graph):
+    from graph_memory.models import EpisodeRequest
+
+    store, ns = graph
+    eid = stage(store, ns)
+
+    class Racing(Model):
+        def generate(self, *args):
+            result = super().generate(*args)
+            held(store, ns, eid)  # Set by someone else while the call was in flight.
+            return result
+
+    model = Racing()
+    with pytest.raises(ValueError, match="quarantined"):
+        MemoryService(store, model).extract(EpisodeRequest(namespace=ns, episode_id=eid))
+    episode = store.episode(ns, eid)
+    assert model.calls == 1  # The call already in flight, and no other.
+    assert episode["status"] != "complete" and episode.get("cached_extraction") is None
+    assert episode["quarantine_engine"] == store.engine
+
+
+def test_held_prepare_and_commit_make_no_model_call(graph):
+    from tests.test_claim_support import SupportModel, pair
+
+    store, ns = graph
+    source, extraction = pair()
+    source.namespace = ns
+    eid = store.stage(source)["episode_id"]
+    held(store, ns, eid)
+    model = SupportModel()
+    service = MemoryService(store, model)
+    packet = service.call("memory_prepare", {"namespace": ns, "episode_id": eid})
+    assert (packet["status"], packet["next_tool"]) == ("held", None)
+    assert "transcript" not in packet
+    with pytest.raises(ValueError, match="quarantined"):
+        service.call(
+            "memory_commit",
+            {"namespace": ns, "episode_id": eid, "extraction": extraction.model_dump(mode="json")},
+        )
+    assert model.payloads == []

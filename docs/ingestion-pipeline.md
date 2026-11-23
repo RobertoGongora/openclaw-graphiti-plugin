@@ -281,9 +281,14 @@ on each deploy would send hundreds of set-aside episodes back to the model at
 once, each with a fresh retry budget, and fill the intake gate so that new
 sessions wait behind them. No other path sends it to a model either: a
 synchronous `ingest --extract` or `import --extract` of the same content and
-`memory_extract` return it as `held`, `memory_commit` refuses it, and
-`memory_pending` leaves it out. A claim re-checks the hold after taking the
-episode's lock, so a hold written while a worker waits for that lock wins.
+`memory_extract` return it as `held`, `memory_prepare` offers no next tool,
+`memory_commit` refuses it before any validation call, and `memory_pending`
+leaves it out. A synchronous run takes the same lease a worker does, without
+waiting for the retry time, so neither starts while the other holds it (the
+loser gets `leased`). A claim re-checks the hold after taking the episode's
+lock, so a hold written while it waits for that lock wins. A hold written by
+anything else during a model call lets that one call finish, but its checkpoint
+and commit are refused.
 Only an operator releases one episode, with
 `retry-quarantined`, which resets its attempts, validation
 failures and model failures. It also clears the cached extraction, because a

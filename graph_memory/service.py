@@ -19,6 +19,11 @@ HELD = {
     "available_for_recall": False,
     "guidance": "Quarantined episode; release it with retry-quarantined EPISODE_ID.",
 }
+LEASED = {
+    "status": "leased",
+    "available_for_recall": False,
+    "guidance": "Another process holds this episode's lease; it is being extracted.",
+}
 
 
 class MemoryService:
@@ -70,6 +75,8 @@ class MemoryService:
 
     def prepare(self, request: m.EpisodeRequest):
         episode = self.store.episode(request.namespace, request.episode_id)
+        if episode["status"] != "complete" and episode.get("quarantine_engine") is not None:
+            return {"episode_id": request.episode_id, **HELD, "next_tool": None}
         transcript = m.Transcript.model_validate_json(episode["payload"])
         entities = self.store.extraction_context(request.namespace, transcript)
         return {
@@ -166,8 +173,30 @@ class MemoryService:
                 }
         raise AssertionError("unreachable")
 
-    def extract(self, request: m.EpisodeRequest):
+    def extract(self, request: m.EpisodeRequest, token=None):
+        """token: the lease a worker already holds. Without one, this run takes its
+        own lease first, so a held or leased episode never reaches a model here."""
         self.store.assert_writable(request.namespace)
+        if token is None:
+            token = str(uuid.uuid4())
+            lease = time.time() + lease_seconds(self.llm)
+            if not self.store.claim(request.namespace, request.episode_id, lease, token, due=False):
+                episode = self.store.episode(request.namespace, request.episode_id)
+                if episode["status"] == "complete":
+                    return {
+                        "episode_id": request.episode_id,
+                        "status": "complete",
+                        "replayed": True,
+                    }
+                held = episode.get("quarantine_engine") is not None
+                return {"episode_id": request.episode_id, **(HELD if held else LEASED)}
+            try:
+                return self._extract(request, token)
+            finally:
+                self.store.release(request.namespace, request.episode_id, token)
+        return self._extract(request, token)
+
+    def _extract(self, request, token):
         started = time.monotonic()
         progress = {"stage": "prepare", "attempt": -1, "extraction": None}
         timings, mark = {}, [started]
@@ -248,7 +277,7 @@ class MemoryService:
             extraction, calls = self.propose(packet, progress, lap)
             progress["stage"] = "checkpoint"
             self.store.cache_extraction(
-                request.namespace, request.episode_id, extraction, model_info
+                request.namespace, request.episode_id, extraction, model_info, token
             )
             lap("checkpoint")
             progress["stage"] = "commit"

@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import threading
+import time
 import unicodedata
 from datetime import datetime
 
@@ -13,6 +14,8 @@ from .models import Extraction, Transcript, now
 from .recall_provenance import latest_report_time
 from .temporal import project
 from .version import engine_fingerprint
+
+HELD_COMMIT = "Episode is quarantined; release it with retry-quarantined before committing"
 
 
 def digest(value) -> str:
@@ -315,17 +318,58 @@ class GraphStore:
             ).consume()
         )
 
-    def cache_extraction(self, namespace, episode_id, extraction, model_info):
-        """Persist validated model work independently of the canonical graph commit."""
+    def cache_extraction(self, namespace, episode_id, extraction, model_info, token=None):
+        """Persist validated model work independently of the canonical graph commit.
+        Not for a held episode, nor for one whose lease token has changed."""
         self.transaction(
             lambda tx: tx.run(
                 "MATCH (e:MemoryEpisode {id:$id,namespace:$ns}) WHERE e.status <> 'complete' "
+                "AND e.quarantine_engine IS NULL AND ($token IS NULL OR e.worker=$token) "
                 "SET e.cached_extraction=$candidate,e.cached_engine=$engine,e.cached_model=$model",
                 id=episode_id,
                 ns=namespace,
+                token=token,
                 candidate=extraction.model_dump_json(),
                 engine=self.engine,
                 model=json.dumps(model_info),
+            ).consume()
+        )
+
+    def claim(self, namespace, episode_id, lease, token, due=True):
+        """Lease one episode to token: the only way model work on it starts. due
+        also requires its retry time, which an explicit synchronous run skips."""
+        conditions = (
+            "e.status <> 'complete' AND coalesce(e.lease_until,0)<=$now "
+            "AND e.quarantine_engine IS NULL AND (NOT $due OR coalesce(e.retry_after,0)<=$now) "
+        )
+        return (
+            self.transaction(
+                lambda tx: tx.run(
+                    f"MATCH (e:MemoryEpisode {{namespace:$ns,id:$id}}) WHERE {conditions}"
+                    # The SET takes the node's write lock; the condition is evaluated
+                    # again under it, so exactly one concurrent claimant succeeds and a
+                    # hold written while this waited wins.
+                    "SET e.worker_lock=coalesce(e.worker_lock,0)+1 "
+                    f"WITH e WHERE {conditions}"
+                    "SET e.lease_until=$lease,e.worker=$token RETURN e.id AS id",
+                    ns=namespace,
+                    id=episode_id,
+                    now=time.time(),
+                    lease=lease,
+                    token=token,
+                    due=due,
+                ).single()
+            )
+            is not None
+        )
+
+    def release(self, namespace, episode_id, token):
+        self.transaction(
+            lambda tx: tx.run(
+                "MATCH (e:MemoryEpisode {namespace:$ns,id:$id,worker:$token}) SET e.lease_until=0",
+                ns=namespace,
+                id=episode_id,
+                token=token,
             ).consume()
         )
 
@@ -473,6 +517,8 @@ class GraphStore:
         committed_at = now().isoformat()
         if transaction is None:
             episode = self.episode(namespace, episode_id)
+            if episode.get("quarantine_engine") is not None:
+                raise ValueError(HELD_COMMIT)  # Before validation: no support-model call.
             if episode["status"] != "complete":
                 extraction.validate_evidence(
                     Transcript.model_validate_json(episode["payload"]),
@@ -519,9 +565,7 @@ class GraphStore:
                     )
                 return {"episode_id": episode_id, "status": "complete", "replayed": True}
             if episode.get("quarantine_engine") is not None:
-                raise ValueError(
-                    "Episode is quarantined; release it with retry-quarantined before committing"
-                )
+                raise ValueError(HELD_COMMIT)
             extraction.validate_evidence(
                 transcript, support=self.support_verifier, allow_support_model=False
             )
