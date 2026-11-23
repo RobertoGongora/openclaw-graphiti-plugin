@@ -325,6 +325,23 @@ EXACT, RESTART = "identifiers kept exactly in summaries", "cluster restart stays
         ),
         (MIX, summary(0, "(CHK-V2)", "(chk-v2)"), {"alias CHK-V2 kept exactly"}),
         (
+            MIX,
+            summary(1, "is enabled only in staging", "is enabled in staging and production"),
+            {"not claimed: enabled in production"},
+        ),
+        (
+            MIX,
+            summary(
+                1,
+                "feature flag is enabled only in staging",
+                "feature flag in production is enabled",
+            ),
+            {
+                "not claimed: production has it enabled",
+                "claimed: enabled in staging as actual state",
+            },
+        ),
+        (
             "en-control",
             summary(1, "Atlas plans to move", "Atlas moved"),
             {"not claimed: the migration already happened"},
@@ -354,6 +371,16 @@ def test_each_wrong_output_fails_its_own_check(graph, name, change, expected):
             ),
         ),
         ("es-asks-for-spanish", summary(0, "instead of MySQL", "in favor of MySQL")),
+        # The 20e574f wording: the next clause's "production" is not this one's.
+        (
+            MIX,
+            summary(
+                1,
+                "For Faro, the checkout_v2 feature flag is enabled only in staging.",
+                "Faro has feature flag checkout_v2 enabled only in staging; production "
+                "activation has not been approved.",
+            ),
+        ),
     ],
 )
 def test_truthful_wording_is_not_scored_red(graph, name, change):
