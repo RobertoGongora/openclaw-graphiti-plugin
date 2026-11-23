@@ -323,7 +323,10 @@ class GraphStore:
         Not for a held episode, nor for one whose lease token has changed."""
         self.transaction(
             lambda tx: tx.run(
-                "MATCH (e:MemoryEpisode {id:$id,namespace:$ns}) WHERE e.status <> 'complete' "
+                # Lock first, then judge: a hold committed while this waited is seen.
+                "MATCH (e:MemoryEpisode {id:$id,namespace:$ns}) "
+                "SET e.worker_lock=coalesce(e.worker_lock,0)+1 "
+                "WITH e WHERE e.status <> 'complete' "
                 "AND e.quarantine_engine IS NULL AND ($token IS NULL OR e.worker=$token) "
                 "SET e.cached_extraction=$candidate,e.cached_engine=$engine,e.cached_model=$model",
                 id=episode_id,

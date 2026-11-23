@@ -269,3 +269,43 @@ def test_held_prepare_and_commit_make_no_model_call(graph):
             {"namespace": ns, "episode_id": eid, "extraction": extraction.model_dump(mode="json")},
         )
     assert model.payloads == []
+
+
+def test_checkpoint_waiting_on_a_hold_writer_does_not_save_onto_the_held_episode(graph):
+    import threading
+
+    store, ns = graph
+    eid = stage(store, ns)
+    assert store.claim(ns, eid, time.time() + 600, "token")
+    done = threading.Event()
+    with store.driver.session(database=store.database) as session:
+        writer = session.begin_transaction()
+        writer.run(
+            "MATCH (e:MemoryEpisode {id:$id}) SET e.quarantine_engine=$engine", id=eid, engine="x"
+        ).consume()
+        checkpoint = threading.Thread(
+            target=lambda: (
+                store.cache_extraction(ns, eid, candidate(), {"provider": "Model"}, "token"),
+                done.set(),
+            )
+        )
+        checkpoint.start()
+        try:
+            for _ in range(200):  # The checkpoint read the unheld state and waits for the lock.
+                if store.read(
+                    lambda tx: tx.run(
+                        "SHOW TRANSACTIONS YIELD currentQuery,status "
+                        "WHERE currentQuery CONTAINS 'cached_extraction' "
+                        "AND status STARTS WITH 'Blocked' RETURN count(*) AS n"
+                    ).single()["n"]
+                ):
+                    break
+                time.sleep(0.025)
+            else:
+                pytest.fail("the checkpoint never waited on the episode lock")
+            assert not done.is_set()
+        finally:
+            writer.commit()
+    checkpoint.join(30)
+    assert done.is_set()
+    assert store.episode(ns, eid).get("cached_extraction") is None
