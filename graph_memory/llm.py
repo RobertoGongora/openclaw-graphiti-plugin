@@ -1,5 +1,6 @@
 """Model adapters. Codex CLI is optional; the MCP caller can extract without it."""
 
+import hashlib
 import json
 import os
 import re
@@ -114,12 +115,38 @@ excerpt is partial evidence, not a complete file version. Preserve unresolved am
 """
 
 
-def extraction_instructions(transcript):
+# Writer guidance chosen by a frozen eval and switched on per worker with
+# MEMORY_WRITER_PROMPT: session-records-v1 only, appended after two newlines to the
+# instructions above, and only for the model it was tested with. The digest is of
+# the complete text the model receives, so a later change to either part stops the
+# worker at startup instead of sending an untested prompt.
+WRITER_PROMPTS = {
+    "selected-v1": {
+        "file": "prompts/session-records-writer-v1.txt",
+        "sha256": "f154a2e3910b880e8ad0f0921af6efb97e5894ab9f10e70342e1d6881a023d9c",
+        "tested_with": ("codex", "gpt-6.1-terra", "low"),
+    }
+}
+
+
+def extraction_instructions(transcript, writer=None):
     from .extraction_policy import source_instructions
 
     if transcript.source_format in {"session-records-v1", "direct-mcp-v1"}:
-        return source_instructions(EXTRACTION_INSTRUCTIONS)
+        instructions = source_instructions(EXTRACTION_INSTRUCTIONS)
+        if writer and transcript.source_format == "session-records-v1":
+            return writer_instructions(instructions, writer)
+        return instructions
     return EXTRACTION_INSTRUCTIONS
+
+
+def writer_instructions(instructions, writer):
+    selected = WRITER_PROMPTS[writer]
+    guidance = (Path(__file__).parent / selected["file"]).read_bytes().decode()
+    text = instructions + "\n\n" + guidance
+    if hashlib.sha256(text.encode()).hexdigest() != selected["sha256"]:
+        raise ValueError(f"MEMORY_WRITER_PROMPT={writer} is no longer the tested prompt text")
+    return text
 
 
 DREAM_INSTRUCTIONS = """Reflect on this graph snapshot and the supplied past session transcripts.
@@ -283,10 +310,14 @@ PASSED_ENVIRONMENT = (
 
 
 class CodexLLM:
-    def __init__(self, model="gpt-5.6-terra", effort="low", timeout=None, max_attempts=2):
+    def __init__(
+        self, model="gpt-5.6-terra", effort="low", timeout=None, max_attempts=2, writer=None
+    ):
         if max_attempts not in (1, 2):
             raise ValueError("max_attempts must be 1 or 2")
         self.model, self.effort = model, effort
+        # session-records-v1 extraction instructions; None keeps the app's own.
+        self.writer = writer
         self.timeout = timeout or settings.llm_timeout()
         self.max_attempts = max_attempts
 
@@ -404,12 +435,31 @@ class CompatibleLLM:
 
 def configured_llm():
     provider = os.environ.get("MEMORY_LLM", "caller")
+    writer = os.environ.get("MEMORY_WRITER_PROMPT") or None
+    if writer is not None:
+        selected = WRITER_PROMPTS.get(writer)
+        if selected is None:
+            raise ValueError(f"MEMORY_WRITER_PROMPT must be one of {sorted(WRITER_PROMPTS)}")
+        model, effort, tested = (
+            os.environ.get("MEMORY_MODEL", "gpt-5.6-terra"),
+            os.environ.get("MEMORY_REASONING_EFFORT", "low"),
+            selected["tested_with"],
+        )
+        if (provider, model, effort) != tested:
+            raise ValueError(
+                f"MEMORY_WRITER_PROMPT={writer} was tested only with MEMORY_LLM={tested[0]} "
+                f"MEMORY_MODEL={tested[1]} MEMORY_REASONING_EFFORT={tested[2]}"
+            )
+        from .extraction_policy import source_instructions
+
+        writer_instructions(source_instructions(EXTRACTION_INSTRUCTIONS), writer)
     if provider == "caller":
         return None
     if provider == "codex":
         return CodexLLM(
             os.environ.get("MEMORY_MODEL", "gpt-5.6-terra"),
             os.environ.get("MEMORY_REASONING_EFFORT", "low"),
+            writer=writer,
         )
     if provider == "compatible":
         return CompatibleLLM(

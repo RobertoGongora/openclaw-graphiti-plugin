@@ -26,6 +26,14 @@
 
 ### Added
 
+- `MEMORY_WRITER_PROMPT=selected-v1` (`TRANSCRIPT_WRITER_PROMPT` for the
+  transcripts stack) appends the writer guidance selected by a frozen eval to
+  session-records-v1 extraction, byte for byte (sha256 `f154a2e3…` of the whole
+  instructions). Off by default; accepted only with Codex `gpt-6.1-terra` /
+  `low`, any other provider, model or effort stops the worker at startup. Other
+  source formats and providers keep their instructions. A committed episode
+  records `"writer": "selected-v1"` in its model info. See
+  [writer prompt rollout](docs/writer-prompt-rollout.md).
 - Opt-in local MCP `tools/call` JSONL (`MEMORY_MCP_CALL_LOG`, and
   `TRANSCRIPT_MCP_CALL_LOG` for the transcripts stack) for recall debugging. Off
   by default. Records the tool, arguments, client and transport, and a compact

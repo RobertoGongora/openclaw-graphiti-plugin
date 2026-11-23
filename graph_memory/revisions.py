@@ -344,6 +344,8 @@ class Revisions:
             raise ValueError("Revision replay requires a configured LLM")
         model, effort = self._model()
         info = {"provider": type(self.service.llm).__name__, "model": model, "effort": effort}
+        if writer := getattr(self.service.llm, "writer", None):
+            info["writer"] = writer
         extraction, calls = self.service.propose(packet)
         return extraction, info, calls
 

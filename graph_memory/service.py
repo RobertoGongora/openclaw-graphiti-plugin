@@ -85,7 +85,7 @@ class MemoryService:
             "transcript": json.loads(episode["payload"]),
             "existing_entities": entities,
             "existing_relationships": self.store.relationship_context(request.namespace, entities),
-            "instructions": extraction_instructions(transcript),
+            "instructions": extraction_instructions(transcript, getattr(self.llm, "writer", None)),
             "schema": m.Extraction.model_json_schema(),
             "next_tool": "memory_commit",
             "previous_rejection": restored_feedback(
@@ -217,6 +217,8 @@ class MemoryService:
                 "provider": type(self.llm).__name__,
                 "model": getattr(self.llm, "model", None),
                 "effort": getattr(self.llm, "effort", None),
+                # Only when set: without it the record and cache key are as before.
+                **({"writer": w} if (w := getattr(self.llm, "writer", None)) else {}),
             }
             if (
                 episode.get("cached_engine") == self.store.engine

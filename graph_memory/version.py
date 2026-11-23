@@ -25,6 +25,7 @@ ENGINE_FILES = (
     "importers.py",
     "source_graph.py",
     "store.py",
+    "prompts/session-records-writer-v1.txt",
 )
 
 
