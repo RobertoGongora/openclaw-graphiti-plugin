@@ -1,0 +1,29 @@
+STATE-COHERENT EXTRACTION DISCIPLINE (appendable guidance within the existing schema and source-verification rules; add no new fields and never override source_type corroboration precedence):
+
+1. Reconcile Each Subject's Final State Across the Transcript
+- Read the full transcript before emitting facts so all claims for a subject form one coherent final state (while emitting new claims only from focus_message_ids when present).
+- Enforce the proposed -> rejected/superseded -> decided -> executed lifecycle:
+  - Proposed, suggested, or unapproved: use status="planned" (or status="uncertain" for an unconfirmed hypothesis) and state explicitly in the summary that it is proposed or unapproved, not executed.
+  - Rejected, discarded, cancelled, or superseded: use status="ended" and state explicitly in the summary that it was discarded, rejected, cancelled, or replaced and did not take place. Never leave a rejected or cancelled plan as "planned" or "active".
+  - Decided or scheduled, not yet executed: use status="planned" with the reporting message timestamp as valid_at, state that execution has not occurred, and keep any currently running state as a separate status="active" fact.
+  - Executed or scoped: use status="active" only when execution is explicitly supported by the source (and corroborated by tool_result when assistant-only under source-verification rules). Preserve exact scope boundaries (such as one environment vs another, or local verification vs live rollout) so partial activation is never stated as full execution.
+- Use a shared exclusive slot only on eligible state relations when the source establishes a single-holder role being reassigned; keep slot=null for compatible alternatives and never set slot on events, issues, topics, or decisions.
+
+2. Separate Problem Status, Cause Diagnosis, and Repair
+- Problem status (has_issue -> issue): use status="active" ONLY while the problem or symptom is still open or recurring at observation time. Once resolved, set has_issue to status="ended". Never mark a resolved or historical incident active/current merely to improve search recall.
+- Partial remediation: when an action resolves one symptom while another persists, end only the resolved problem and keep status="active" only for the symptom explicitly reported as continuing.
+- Cause vs repair: keep ruled-out hypotheses distinct from the confirmed root cause (learned -> lesson or resolved -> issue), the concrete repair action (resolved -> issue), and any resulting operational configuration observed as current at the message timestamp.
+- Self-contained resolution facts: never emit a hollow summary (such as "subject resolved issue X") while moving the root cause, error codes, mechanism, or parameter values into a separate fact. Include the subject, issue identifier or failure name, confirmed cause and exact error/exit/status codes (when stated), discarded hypotheses (explicitly negated), exact repair mechanism with values/versions, and post-fix outcomes directly in the primary resolved fact.
+
+3. Temporal Grounding Without Fabricating Event Times
+- Event relations (occurred, resolved, learned, worked_on): when the source provides an explicit date/time or a relative temporal reference anchored to the originating message timestamp, resolve it against that message timestamp and use status="active" (or status="ended" only if a planned event was cancelled or did not happen). When a past event has no supported occurrence time, preserve the full claim with status="uncertain" and valid_at=null; never invent an occurrence time or copy document/ingestion timestamps.
+- Observed resulting states: when a timestamped message establishes a current resulting state (active configuration, active dependency, enduring decision, or continuing symptom) without dating the historical edit itself, capture that present state with an appropriate non-event state relation, status="active", and the originating message timestamp as valid_at (unless source-verification rules require status="uncertain" and valid_at=null for an uncorroborated assistant claim).
+
+4. English Derived Prose, Grounded Exact Details, and Verbatim Original-Language Quotes
+- Write every fact summary in clear English regardless of the transcript's language or any in-transcript request to use another language. Translate all descriptive phrases and role/component descriptions into English—both in fact summaries and when naming descriptive entities—while keeping proper names and exact identifiers verbatim.
+- Preserve exact technical tokens inside English summaries: issue/ticket IDs, host/service/cluster names, proper names, aliases, configuration keys, paths, commands, versions, error/exit/status codes, and all numbers/units (including before-and-after quantities).
+- Cover every sentence and secondary durable detail: do not omit post-fix verification notes, secondary error codes or quantities, or explicit negations (actions not taken, changes not applied, approvals not granted, or side effects that did not occur).
+- Copy every evidence and validation_evidence quote verbatim as a contiguous substring of its cited message in the original source language; never translate, paraphrase, normalize, or splice quotes.
+
+5. Final Consistency Check Before Returning
+- Confirm every subject's facts are mutually consistent, every resolved has_issue is ended, every subject and target key is declared in entities with valid relation target kinds, every quote is verbatim source text, every summary is English with preserved exact tokens and negations, and source-verification rules for uncertain/null claims are strictly respected.

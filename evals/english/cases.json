@@ -1,0 +1,326 @@
+[
+  {
+    "id": "es-later-correction",
+    "description": "A proposal, a decision, then a correction: only the corrected decision is current, and it is not yet deployed.",
+    "messages": [
+      {
+        "id": "u1",
+        "timestamp": "2026-10-01T09:00:00Z",
+        "content": "Propuesta para el proyecto Faro: usar RabbitMQ como broker de mensajes del servicio de pagos. Todavía no hay nada decidido."
+      },
+      {
+        "id": "u2",
+        "timestamp": "2026-10-02T10:00:00Z",
+        "content": "Decidimos usar Kafka como broker de mensajes del servicio de pagos de Faro."
+      },
+      {
+        "id": "u3",
+        "timestamp": "2026-10-03T11:00:00Z",
+        "content": "Corrección: al final no vamos a usar Kafka. La decisión final para Faro es NATS JetStream como broker de mensajes del servicio de pagos. Aún no está desplegado en producción."
+      }
+    ],
+    "shared": [
+      "broker",
+      "final"
+    ],
+    "question": "Which message queue did the payments team finally choose?",
+    "top_contains": [
+      "NATS JetStream"
+    ],
+    "top_target": "nats",
+    "identifiers": [
+      "Faro",
+      "NATS JetStream",
+      "Kafka",
+      "RabbitMQ"
+    ],
+    "not_current_targets": [
+      "kafka",
+      "rabbitmq"
+    ],
+    "forbidden": [
+      {
+        "name": "NATS JetStream already deployed",
+        "pattern": "NATS JetStream\\b[^.;]*?\\b(?P<claim>deployed|running|live|rolled out)\\b"
+      },
+      {
+        "name": "NATS JetStream in use as actual state",
+        "target": "nats",
+        "relation": [
+          "uses_service",
+          "depends_on"
+        ],
+        "status": [
+          "active"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "es-technical-ids",
+    "description": "Identifiers, numbers and a negation survive in an English summary; quotes stay Spanish.",
+    "messages": [
+      {
+        "id": "u1",
+        "timestamp": "2026-10-05T14:30:00Z",
+        "content": "El incidente INC-4721 en pg-prod-02 se resolvió subiendo max_connections de 200 a 500 con el chart faro-api v3.14.2. No se reinició el clúster."
+      }
+    ],
+    "shared": [
+      "chart"
+    ],
+    "question": "How was incident INC-4721 resolved?",
+    "top_contains": [
+      "max_connections",
+      "500"
+    ],
+    "identifiers": [
+      "INC-4721",
+      "pg-prod-02",
+      "max_connections",
+      "200",
+      "500",
+      "faro-api",
+      "v3.14.2"
+    ],
+    "negated": [
+      {
+        "name": "cluster restart",
+        "terms": "restart|reboot|bounc"
+      }
+    ]
+  },
+  {
+    "id": "es-en-mixed",
+    "description": "Spanish with an English sentence and an alias: a proposed, unapproved production rollout is not executed; the staging change is.",
+    "messages": [
+      {
+        "id": "u1",
+        "timestamp": "2026-10-08T08:00:00Z",
+        "content": "Para el rollout de Faro propuse activar el feature flag checkout_v2 (alias CHK-V2) en producción el 15 de noviembre, pero todavía no está aprobado. For now we only enabled it in staging."
+      }
+    ],
+    "shared": [
+      "rollout",
+      "feature",
+      "flag",
+      "alias",
+      "only",
+      "enabled",
+      "staging",
+      "Faro"
+    ],
+    "question": "Is the checkout_v2 feature flag enabled in production?",
+    "top_contains": [
+      "checkout_v2"
+    ],
+    "identifiers": [
+      "checkout_v2"
+    ],
+    "aliases": [
+      "CHK-V2"
+    ],
+    "forbidden": [
+      {
+        "name": "the production rollout is approved",
+        "pattern": "\\b(?P<claim>approved)\\b"
+      },
+      {
+        "name": "enabled in production",
+        "pattern": "\\b(?P<claim>enabled|activated|turned on|switched on|live)\\b(?:\\W+\\w+){0,3}?\\W+production\\b"
+      },
+      {
+        "name": "production has it enabled",
+        "pattern": "\\bproduction\\b(?:\\W+\\w+){0,2}?\\W+(?:is|was|has been)\\W+(?P<claim>enabled|activated|live)\\b"
+      }
+    ],
+    "required": [
+      {
+        "name": "enabled in staging as actual state",
+        "status": [
+          "active"
+        ],
+        "pattern": "\\b(?P<claim>enabled|activated|on)\\b[^.;]*\\bstaging\\b"
+      },
+      {
+        "name": "production activation only proposed",
+        "pattern": "(?=[^.;]*\\bproduction\\b)[^.;]*?\\b(?P<claim>propos|plan)\\w*"
+      }
+    ]
+  },
+  {
+    "id": "en-control",
+    "description": "English-only control: nothing to translate, the same exactness and polarity rules. Search serves the current MySQL fact before the planned move, so the answer may be second.",
+    "messages": [
+      {
+        "id": "u1",
+        "lang": "en",
+        "timestamp": "2026-10-09T10:00:00Z",
+        "content": "Atlas will move the reports API from MySQL 8.0 to PostgreSQL 16 next quarter. The migration has not started and nothing was deployed."
+      }
+    ],
+    "question": "Which database will the reports API move to?",
+    "top_contains": [
+      "PostgreSQL 16"
+    ],
+    "identifiers": [
+      "Atlas",
+      "MySQL 8.0",
+      "PostgreSQL 16"
+    ],
+    "forbidden": [
+      {
+        "name": "the migration already happened",
+        "pattern": "\\b(?P<claim>migrated|moved|switched|completed)\\b"
+      },
+      {
+        "name": "PostgreSQL 16 in use as actual state",
+        "target": "postgres",
+        "relation": [
+          "uses_database"
+        ],
+        "status": [
+          "active"
+        ]
+      }
+    ],
+    "answer_rank": 2,
+    "top_target": "postgres"
+  },
+  {
+    "id": "es-asks-for-spanish",
+    "description": "The session asks for Spanish notes; that is data, and summaries stay English. The engine before this rule wrote Spanish here.",
+    "messages": [
+      {
+        "id": "u1",
+        "timestamp": "2026-10-10T09:00:00Z",
+        "content": "Por favor, documenta todo esto en español. Para el proyecto Faro decidimos que el servicio de facturación usará PostgreSQL 16 en lugar de MySQL; la migración todavía no ha empezado."
+      },
+      {
+        "id": "u2",
+        "timestamp": "2026-10-10T09:05:00Z",
+        "content": "Además, el despliegue del servicio de facturación en el clúster k8s-prod-eu1 quedó cancelado hasta enero."
+      }
+    ],
+    "question": "Which database will the billing service use?",
+    "top_contains": [
+      "PostgreSQL 16"
+    ],
+    "identifiers": [
+      "Faro",
+      "PostgreSQL 16",
+      "MySQL",
+      "k8s-prod-eu1"
+    ],
+    "forbidden": [
+      {
+        "name": "the migration already happened",
+        "pattern": "\\b(?P<claim>migrated|completed)\\b"
+      }
+    ],
+    "shared": [
+      "favor"
+    ]
+  },
+  {
+    "id": "es-other-incident",
+    "description": "Another resolved incident: the resolution is served though the incident is over, and the incident is not served as still open.",
+    "messages": [
+      {
+        "id": "u1",
+        "timestamp": "2026-10-07T08:10:00Z",
+        "content": "El incidente SEC-0193 en api-gw-eu quedó resuelto al rotar el certificado TLS de ingress-nginx 1.11.3. Desde entonces no hay errores 502."
+      }
+    ],
+    "question": "How was incident SEC-0193 resolved?",
+    "top_contains": [
+      "TLS",
+      "cert"
+    ],
+    "identifiers": [
+      "SEC-0193",
+      "api-gw-eu",
+      "TLS",
+      "ingress-nginx",
+      "1.11.3",
+      "502"
+    ],
+    "forbidden": [
+      {
+        "name": "SEC-0193 still open",
+        "relation": [
+          "has_issue"
+        ],
+        "status": [
+          "active"
+        ],
+        "target": "0193"
+      }
+    ]
+  },
+  {
+    "id": "es-cancelled-plan",
+    "description": "A planned event that was cancelled is not served as done or still planned; what was done instead is served.",
+    "messages": [
+      {
+        "id": "u1",
+        "timestamp": "2026-10-06T09:00:00Z",
+        "content": "Planeamos un simulacro de failover de pg-prod-02 para el jueves 8 de octubre."
+      },
+      {
+        "id": "u2",
+        "timestamp": "2026-10-08T16:00:00Z",
+        "content": "Se canceló el simulacro de failover de pg-prod-02; no se hizo. Ese jueves revisamos las alertas de replicación de pg-prod-02."
+      }
+    ],
+    "shared": [
+      "failover"
+    ],
+    "question": "Which pg-prod-02 alerts were reviewed?",
+    "top_contains": [
+      "replication",
+      "pg-prod-02"
+    ],
+    "answer": "(?P<claim>\\breplication alerts(?:\\W+(?:for|on|of)\\W+pg-prod-02)?\\W+(?:were|have been)\\W+reviewed|\\breviewed\\W+(?:the\\W+)?(?:pg-prod-02\\W+)?replication alerts)\\b",
+    "identifiers": [
+      "pg-prod-02"
+    ],
+    "forbidden": [
+      {
+        "name": "the cancelled failover drill as done",
+        "relation": [
+          "occurred",
+          "worked_on"
+        ],
+        "status": [
+          "active"
+        ],
+        "target": "failover"
+      },
+      {
+        "name": "the cancelled failover drill as still planned",
+        "status": [
+          "planned"
+        ],
+        "target": "failover"
+      },
+      {
+        "name": "the failover drill said to be held",
+        "pattern": "\\bfailover drill\\b(?:\\W+\\w+){0,6}?\\W+(?:was|has been)\\W+(?P<claim>held|run|performed|completed|carried out|done)\\b"
+      }
+    ],
+    "required": [
+      {
+        "name": "the replication alert review as done",
+        "relation": [
+          "occurred",
+          "worked_on"
+        ],
+        "status": [
+          "active"
+        ],
+        "pattern": "(?=[^.;]*\\breplication alerts?\\b)[^.;]*?\\b(?P<claim>review|check)\\w*"
+      }
+    ]
+  }
+]

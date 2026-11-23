@@ -211,11 +211,10 @@ def _tick(service, namespace, limit, breaker, ticket, probe):
             # Named statuses let the (namespace, status) index find the queue; "not
             # complete" made every poll read all episodes.
             "MATCH (e:MemoryEpisode {namespace:$ns}) WHERE e.status IN ['pending','failed'] "
-            "AND coalesce(e.quarantine_engine,'') <> $engine "
+            "AND e.quarantine_engine IS NULL "
             "AND coalesce(e.retry_after,0)<=$now AND coalesce(e.lease_until,0)<=$now "
             "RETURN e.id AS id ORDER BY e.ingested_at,e.id LIMIT $window",
             ns=namespace,
-            engine=service.store.engine,
             now=time.time(),
             window=max(limit, 16),
         ).data()
@@ -228,26 +227,7 @@ def _tick(service, namespace, limit, breaker, ticket, probe):
         lease = time.time() + lease_seconds(service.llm)
         token = str(uuid.uuid4())
         claiming = time.monotonic()
-        claimed = service.store.transaction(
-            lambda tx, eid=row["id"], lease=lease, token=token: tx.run(
-                "MATCH (e:MemoryEpisode {namespace:$ns,id:$id}) "
-                "WHERE e.status <> 'complete' AND coalesce(e.lease_until,0)<=$now "
-                "AND coalesce(e.quarantine_engine,'') <> $engine "
-                "AND coalesce(e.retry_after,0)<=$now "
-                # The SET takes the node's write lock; the condition is evaluated
-                # again under it, so exactly one concurrent claimant succeeds.
-                "SET e.worker_lock=coalesce(e.worker_lock,0)+1 "
-                "WITH e WHERE e.status <> 'complete' AND coalesce(e.lease_until,0)<=$now "
-                "AND coalesce(e.retry_after,0)<=$now "
-                "SET e.lease_until=$lease,e.worker=$token RETURN e.id AS id",
-                ns=namespace,
-                engine=service.store.engine,
-                id=eid,
-                now=time.time(),
-                lease=lease,
-                token=token,
-            ).single()
-        )
+        claimed = service.store.claim(namespace, row["id"], lease, token)
         if not claimed:
             continue
         claim_seconds = round(time.monotonic() - claiming, 3)
@@ -255,7 +235,9 @@ def _tick(service, namespace, limit, breaker, ticket, probe):
         try:
             receipts.append(
                 {
-                    **service.extract(EpisodeRequest(namespace=namespace, episode_id=row["id"])),
+                    **service.extract(
+                        EpisodeRequest(namespace=namespace, episode_id=row["id"]), token=token
+                    ),
                     "claim_seconds": claim_seconds,
                 }
             )
@@ -367,14 +349,7 @@ def _tick(service, namespace, limit, breaker, ticket, probe):
             if outage:
                 break
         finally:
-            service.store.transaction(
-                lambda tx, eid=row["id"], token=token: tx.run(
-                    "MATCH (e:MemoryEpisode {namespace:$ns,id:$id,worker:$token}) SET e.lease_until=0",
-                    ns=namespace,
-                    id=eid,
-                    token=token,
-                ).consume()
-            )
+            service.store.release(namespace, row["id"], token)
     return {"receipts": receipts}
 
 

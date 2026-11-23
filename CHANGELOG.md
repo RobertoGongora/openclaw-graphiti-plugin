@@ -1,8 +1,46 @@
 # Changelog
 ## [Unreleased]
 
+### Changed
+
+- Extraction writes every fact summary in English, whatever language the
+  session uses. Evidence quotes stay verbatim in the source language, and the
+  summary keeps IDs, names, numbers, negation, and proposal versus decision
+  versus execution, approval and staging versus production. Only new
+  extractions change; stored facts are not rewritten. `evals/english_summaries.py`
+  measures it on synthetic sessions with fixed per-case checks.
+- Extraction marks an event that happened (`occurred`, `resolved`, `learned`,
+  `worked_on`) active though it is over, and ended only when it was planned and
+  then cancelled or did not happen; a problem that is over ends its `has_issue`.
+  An ended resolution was history, so "How was incident X resolved?" found
+  nothing.
+- A quarantined episode stays quarantined across engine changes. Before, a new
+  engine identity released every one of them at once with a fresh retry budget
+  and they filled the intake queue gate. A synchronous `ingest`/`import
+  --extract` of the same content, `memory_extract`, `memory_prepare` and
+  `memory_commit` no longer run or complete a held episode, `memory_pending`
+  leaves held episodes out, a synchronous run takes the worker's lease so the two
+  never extract one episode at once, and a claim re-checks the hold after taking
+  the episode's lock. `retry-quarantined` still
+  releases one episode, and new episodes are claimed as before.
+- The image installs codex-cli 0.171.0 (was 0.154.0), the version the selected
+  writer prompt was evaluated with. It runs all extraction, the default model
+  included. One `CODEX_VERSION` build argument sets the install, its version
+  check and the image label.
+
 ### Added
 
+- `MEMORY_WRITER_PROMPT=selected-v1` (`TRANSCRIPT_WRITER_PROMPT` for the
+  transcripts stack) appends the writer guidance selected by a frozen eval to
+  session-records-v1 extraction, byte for byte (sha256 `f154a2e3…` of the whole
+  instructions). Off by default; accepted only with Codex `gpt-6.1-terra` /
+  `low`, any other provider, model or effort stops the worker at startup. Other
+  source formats and providers keep their instructions. A committed episode
+  records `"writer": "selected-v1"` in its model info, and so do a revision and
+  a golden eval report: a revision is built, compared, validated and promoted
+  only under the writer prompt it was created with, and validated only with a
+  report made under it. A revision or report without one stands for the app's
+  own prompt. See [writer prompt rollout](docs/writer-prompt-rollout.md).
 - Opt-in local MCP `tools/call` JSONL (`MEMORY_MCP_CALL_LOG`, and
   `TRANSCRIPT_MCP_CALL_LOG` for the transcripts stack) for recall debugging. Off
   by default. Records the tool, arguments, client and transport, and a compact
@@ -14,6 +52,9 @@
 
 ### Fixed
 
+- `memory_render` with Graphviz 14 (Ubuntu 26.04) but without
+  `libgvplugin-neato-layout8` now names the missing sfdp layout plugin instead of
+  advising a simpler query; CI installs the plugin.
 - The MCP container no longer runs out of memory as client sessions pile up. A
   `docker exec ... serve` session relays over `MEMORY_SESSION_SOCKET` to the
   running server instead of loading its own engine: about 9 MB per session

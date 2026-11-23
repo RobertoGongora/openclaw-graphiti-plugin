@@ -115,7 +115,7 @@ def test_three_validation_failures_quarantine_without_losing_sources(graph):
     # A previous engine's budget must not quarantine a revised extractor.
     store.transaction(
         lambda tx: tx.run(
-            "MATCH (e:MemoryEpisode {id:$id}) SET e.quarantine_engine='old',e.validation_engine='old'",
+            "MATCH (e:MemoryEpisode {id:$id}) SET e.validation_engine='old'",
             id=eid,
         ).consume()
     )

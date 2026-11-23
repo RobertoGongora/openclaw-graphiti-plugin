@@ -247,6 +247,7 @@ automatically. See [revision workflow](docs/revisions.md).
 | `MEMORY_LLM` | `caller`, `codex`, or `compatible` |
 | `MEMORY_MODEL` | `gpt-5.6-terra` for Codex |
 | `MEMORY_REASONING_EFFORT` | `low` for Codex; configurable |
+| `MEMORY_WRITER_PROMPT` | Unset (the app's own instructions). `selected-v1` appends the selected writer guidance to session-records-v1 extraction; the worker refuses to start unless `MEMORY_LLM=codex`, `MEMORY_MODEL=gpt-6.1-terra`, `MEMORY_REASONING_EFFORT=low`. See [rollout](docs/writer-prompt-rollout.md) |
 | `MEMORY_HTTP_HOSTS`, `MEMORY_HTTP_ORIGINS` | Comma lists of extra Host names and browser Origins accepted besides loopback |
 | `MEMORY_LLM_TIMEOUT` | `420` seconds per model call (10 to 600) |
 | `MEMORY_INTAKE_QUEUE` | `32` due episodes at which transcript intake stops staging |

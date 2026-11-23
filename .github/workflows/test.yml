@@ -49,8 +49,9 @@ jobs:
         with:
           version: '0.11.11'
           python-version: ${{ matrix.python }}
-      # The render tests lay out graphs with Graphviz.
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends graphviz
+      # The render tests lay out graphs with Graphviz. Since Graphviz 14 (Ubuntu 26.04,
+      # now ubuntu-latest) sfdp's layout is a separate plugin package.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends graphviz libgvplugin-neato-layout8
       - run: uv sync --locked
       # Measured 87% with the database tests running; the floor leaves room for noise.
       - run: uv run pytest -q --cov --cov-report=term --cov-fail-under=80

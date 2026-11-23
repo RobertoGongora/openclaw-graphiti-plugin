@@ -185,6 +185,7 @@ def evaluate(service, runs=1):
         "suite": suite,
         "model": getattr(service.llm, "model", "unknown"),
         "reasoning_effort": getattr(service.llm, "effort", None),
+        **({"writer": w} if (w := getattr(service.llm, "writer", None)) else {}),
         "runs": runs,
         "passed": bool(results)
         and all(r["passed"] for r in results)

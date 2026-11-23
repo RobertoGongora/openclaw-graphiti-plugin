@@ -13,6 +13,18 @@ from .retry import feedback, restored_feedback
 from .settings import lease_seconds
 from .version import engine_fingerprint
 
+# Set aside by the worker: only retry-quarantined, per episode, sends it back to a model.
+HELD = {
+    "status": "held",
+    "available_for_recall": False,
+    "guidance": "Quarantined episode; release it with retry-quarantined EPISODE_ID.",
+}
+LEASED = {
+    "status": "leased",
+    "available_for_recall": False,
+    "guidance": "Another process holds this episode's lease; it is being extracted.",
+}
+
 
 class MemoryService:
     def __init__(self, store, llm=None):
@@ -27,6 +39,10 @@ class MemoryService:
         receipt = self.store.stage(request.transcript)
         if receipt["status"] == "complete":
             return receipt
+        if receipt["status"] != "pending" and self.store.held(
+            request.transcript.namespace, receipt["episode_id"]
+        ):
+            return {**receipt, **HELD, "processing": "held"}
         if request.extract:
             return self.extract(
                 m.EpisodeRequest(
@@ -59,6 +75,8 @@ class MemoryService:
 
     def prepare(self, request: m.EpisodeRequest):
         episode = self.store.episode(request.namespace, request.episode_id)
+        if episode["status"] != "complete" and episode.get("quarantine_engine") is not None:
+            return {"episode_id": request.episode_id, **HELD, "next_tool": None}
         transcript = m.Transcript.model_validate_json(episode["payload"])
         entities = self.store.extraction_context(request.namespace, transcript)
         return {
@@ -67,7 +85,7 @@ class MemoryService:
             "transcript": json.loads(episode["payload"]),
             "existing_entities": entities,
             "existing_relationships": self.store.relationship_context(request.namespace, entities),
-            "instructions": extraction_instructions(transcript),
+            "instructions": extraction_instructions(transcript, getattr(self.llm, "writer", None)),
             "schema": m.Extraction.model_json_schema(),
             "next_tool": "memory_commit",
             "previous_rejection": restored_feedback(
@@ -155,8 +173,30 @@ class MemoryService:
                 }
         raise AssertionError("unreachable")
 
-    def extract(self, request: m.EpisodeRequest):
+    def extract(self, request: m.EpisodeRequest, token=None):
+        """token: the lease a worker already holds. Without one, this run takes its
+        own lease first, so a held or leased episode never reaches a model here."""
         self.store.assert_writable(request.namespace)
+        if token is None:
+            token = str(uuid.uuid4())
+            lease = time.time() + lease_seconds(self.llm)
+            if not self.store.claim(request.namespace, request.episode_id, lease, token, due=False):
+                episode = self.store.episode(request.namespace, request.episode_id)
+                if episode["status"] == "complete":
+                    return {
+                        "episode_id": request.episode_id,
+                        "status": "complete",
+                        "replayed": True,
+                    }
+                held = episode.get("quarantine_engine") is not None
+                return {"episode_id": request.episode_id, **(HELD if held else LEASED)}
+            try:
+                return self._extract(request, token)
+            finally:
+                self.store.release(request.namespace, request.episode_id, token)
+        return self._extract(request, token)
+
+    def _extract(self, request, token):
         started = time.monotonic()
         progress = {"stage": "prepare", "attempt": -1, "extraction": None}
         timings, mark = {}, [started]
@@ -171,10 +211,14 @@ class MemoryService:
             episode = self.store.episode(request.namespace, request.episode_id)
             if episode["status"] == "complete":
                 return {"episode_id": request.episode_id, "status": "complete", "replayed": True}
+            if episode.get("quarantine_engine") is not None:
+                return {"episode_id": request.episode_id, **HELD}
             model_info = {
                 "provider": type(self.llm).__name__,
                 "model": getattr(self.llm, "model", None),
                 "effort": getattr(self.llm, "effort", None),
+                # Only when set: without it the record and cache key are as before.
+                **({"writer": w} if (w := getattr(self.llm, "writer", None)) else {}),
             }
             if (
                 episode.get("cached_engine") == self.store.engine
@@ -235,7 +279,7 @@ class MemoryService:
             extraction, calls = self.propose(packet, progress, lap)
             progress["stage"] = "checkpoint"
             self.store.cache_extraction(
-                request.namespace, request.episode_id, extraction, model_info
+                request.namespace, request.episode_id, extraction, model_info, token
             )
             lap("checkpoint")
             progress["stage"] = "commit"
@@ -544,7 +588,7 @@ class MemoryService:
             "memory_pending": (
                 m.Pending,
                 lambda r: {"episodes": self.store.pending(r.namespace, r.limit)},
-                "List incomplete/failed extraction receipts for retry; they are not current graph knowledge.",
+                "List incomplete/failed extraction receipts for retry; they are not current graph knowledge. Quarantined episodes are left out; memory_status counts them.",
             ),
             "memory_retract": (
                 m.Retract,

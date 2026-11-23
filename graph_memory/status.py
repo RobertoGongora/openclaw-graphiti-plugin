@@ -9,7 +9,7 @@ from .models import now
 
 # Processing is a lease, not an episode status. Match worker_tick's eligibility rules.
 ACTIVE = "e.status <> 'complete' AND coalesce(e.lease_until,0)>$now"
-ELIGIBLE = "coalesce(e.quarantine_engine,'') <> $engine"
+ELIGIBLE = "e.quarantine_engine IS NULL"
 QUEUED = (
     (
         "e.status <> 'complete' AND coalesce(e.lease_until,0)<=$now AND coalesce(e.retry_after,0)<=$now"
@@ -50,7 +50,7 @@ def status(store, request):
                 f"sum(CASE WHEN {ACTIVE} THEN 1 ELSE 0 END) AS active, "
                 f"sum(CASE WHEN {QUEUED} THEN 1 ELSE 0 END) AS queued, "
                 f"sum(CASE WHEN {DELAYED} THEN 1 ELSE 0 END) AS retry_delayed, "
-                "sum(CASE WHEN e.status <> 'complete' AND e.quarantine_engine=$engine THEN 1 ELSE 0 END) AS quarantined, "
+                "sum(CASE WHEN e.status <> 'complete' AND e.quarantine_engine IS NOT NULL THEN 1 ELSE 0 END) AS quarantined, "
                 "sum(CASE WHEN e.status <> 'complete' AND e.cached_engine=$engine AND e.cached_extraction IS NOT NULL THEN 1 ELSE 0 END) AS cached_extractions, "
                 "sum(CASE WHEN e.status <> 'complete' AND e.lease_until>0 "
                 "AND e.lease_until<=$now THEN 1 ELSE 0 END) AS expired_leases",
