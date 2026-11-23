@@ -40,7 +40,7 @@ same() { [ "$(as "$READER" "sha256sum < '$1'")" = "$(sha256sum < "$2")" ]; }
 # uploader-owned inbox, and after this line never changes an owner or a mode.
 install -d -m 0755 "$ROOT/home" "$ROOT/feeds"
 install -d -o "$UPLOADER" -g "$UPLOADER" -m 0700 "$ROOT/home/uploader" "$ROOT/feeds/claude" \
-  "$ROOT/feeds/plain-a" "$ROOT/feeds/no-acl"
+  "$ROOT/feeds/plain-a" "$ROOT/feeds/no-acl" "$ROOT/feeds/legacy"
 SRC=$ROOT/home/uploader/projects
 INBOX=$ROOT/feeds/claude
 S1=-home-dev-faro/0f6c1d2e-canary-session-one.jsonl
@@ -55,6 +55,8 @@ for path in "$INBOX" "$ROOT/feeds"; do
 done
 
 echo "== grant: the uploader sets an ACL on its own inbox only"
+# Only a new, empty inbox: an ACL set later does not reach what is already there (N3, N4).
+ok "the inbox is empty when its ACL is set" sh -c "[ -z \"\$(ls -A '$INBOX')\" ]"
 ok "uploader sets the inbox ACL without root" as "$UPLOADER" "setfacl -m '$ACL' '$INBOX'"
 echo "== create: first rsync"
 ok "uploader rsyncs 0600 sources" as "$UPLOADER" "$RSYNC '$SRC/' '$INBOX/'"
@@ -114,6 +116,18 @@ as "$UPLOADER" "setfacl -m '$ACL' '$ROOT/feeds/plain-a' && rsync -a '$SRC/' '$RO
 denied "N1 plain rsync -a of 0600 files leaves the reader out" as "$READER" "cat '$ROOT/feeds/plain-a/$S2'"
 as "$UPLOADER" "$RSYNC '$SRC/' '$ROOT/feeds/no-acl/'"
 denied "N2 without the inbox ACL the reader is out" as "$READER" "cat '$ROOT/feeds/no-acl/$S2'"
+# A prepopulated inbox: sessions arrived before the ACL, then the same pattern is applied.
+LEGACY=$ROOT/feeds/legacy
+as "$UPLOADER" "rsync -a '$SRC/' '$LEGACY/' && setfacl -m '$ACL' '$LEGACY'"
+S4=-home-dev-faro/9b8c7d6e-canary-session-four.jsonl
+S5=-home-dev-orion/5e4f3a2b-canary-session-five.jsonl
+as "$UPLOADER" "umask 077; printf '%s\n' '{\"canary\":6}' > '$SRC/$S4' && mkdir -m 0700 '$SRC/-home-dev-orion' \
+  && printf '%s\n' '{\"canary\":7}' > '$SRC/$S5' && $RSYNC '$SRC/' '$LEGACY/'"
+denied "N3 a new session in a project directory from before the ACL leaves the reader out" \
+  as "$READER" "cat '$LEGACY/$S4'"
+ok "N3 while a project directory created after the ACL is readable" as "$READER" "cat '$LEGACY/$S5'"
+ok "N4 rsync --chmod gives the owning group read on a legacy inode (why only a new inbox)" \
+  sh -c "getfacl -cp '$LEGACY/$S2' | grep -qx 'group::r--'"
 
 if [ "$failures" -eq 0 ]; then
   echo "CANARY PASS $checks checks reader=$READER uploader=$UPLOADER other=$OTHER"
